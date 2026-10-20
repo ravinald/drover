@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<meta http-equiv="refresh" content="60" />
+<title>fixture: drover status</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0;
+  --green: #1a7f37; --yellow: #9a6700; --orange: #bc4c00; --red: #cf222e; --link: #0969da;
+  --stripe: #f6f8fa; --hover: #eaeef2;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #3d444d;
+    --green: #3fb950; --yellow: #d29922; --orange: #f0883e; --red: #f85149; --link: #4493f8;
+    --stripe: #151b23; --hover: #262c36;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0 auto; max-width: 60rem; padding: 1rem; background: var(--bg); color: var(--fg);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--link); }
+h1 { font-size: 1.5rem; margin: 0 0 1rem; }
+h2 { font-size: 1.2rem; margin: 1.5rem 0 0.5rem; border-bottom: 1px solid var(--line); }
+h3 { font-size: 1.05rem; margin: 1rem 0 0.25rem; }
+h4 { font-size: 0.95rem; margin: 0.75rem 0 0.25rem; }
+code { font-size: 0.9em; }
+.id { font-weight: 700; font-family: ui-monospace, monospace; }
+.meta { color: var(--muted); font-size: 0.9em; }
+.empty { color: var(--muted); }
+footer { margin-top: 2rem; color: var(--muted); font-size: 0.85em; }
+.state { font-weight: 600; padding: 0 0.3em; border: 1px solid currentColor; border-radius: 0.3em; white-space: nowrap; }
+.drover-done, .drover-ready { color: var(--green); }
+.drover-running, .drover-pausing { color: var(--yellow); }
+.drover-paused { color: var(--muted); }
+.drover-blocked, .drover-scaffold, .drover-unaudited { color: var(--orange); }
+.drover-parked, .drover-broken, .drover-needs-operator { color: var(--red); }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 0.3rem 0.5rem 0.3rem 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+th { font-weight: 600; }
+.scroll { overflow: auto; max-height: 80vh; margin-bottom: 0.5rem; }
+.items td { white-space: nowrap; }
+.items td.title, .items td.reason { white-space: normal; overflow-wrap: anywhere; min-width: 12rem; }
+.items thead th { position: sticky; top: 0; background: var(--bg); white-space: nowrap; }
+.items tbody tr:nth-child(even) { background: var(--stripe); }
+.items tbody tr:hover { background: var(--hover); }
+.items tr:target { outline: 2px solid var(--link); outline-offset: -2px; }
+.key td { padding: 0.2rem 0.5rem 0.2rem 0; }
+.key td:first-child { white-space: nowrap; }
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.spark { display: block; fill: none; stroke: var(--link); stroke-width: 1.5; }
+.spark circle { fill: var(--link); stroke: none; }
+</style>
+</head>
+<body>
+<h1>fixture</h1>
+<p class="meta"><a href="#key">What the colors mean</a></p>
+
+<h2>Needs you</h2>
+<div class="scroll"><table class="items">
+<thead><tr><th>State</th><th>Item</th><th>Reason</th><th>Since</th><th>Command</th></tr></thead>
+<tbody>
+<tr><td><span class="state drover-unaudited">unaudited</span></td><td><a class="id" href="#item-b1">B1</a></td><td class="reason">merged, and nobody has audited it</td><td class="num">275d ago</td><td><code>drover audit B1 verified --code-by agent &#34;&lt;what you re-checked&gt;&#34;</code></td></tr>
+<tr><td><span class="state drover-parked">parked</span></td><td><a class="id" href="#item-b2">B2</a></td><td class="reason">no_commits: runner_exit</td><td class="num">1d ago</td><td><code>drover drive B2</code></td></tr>
+<tr><td><span class="state drover-scaffold">scaffold</span></td><td><a class="id" href="#item-b5">B5</a></td><td class="reason">requirements unwritten</td><td class="num">-</td><td><code>write B5&#39;s requirements, then drover accept B5</code></td></tr>
+<tr><td><span class="state drover-needs-operator">needs-operator</span></td><td><a class="id" href="#item-b12">B12</a></td><td class="reason">trunk_red: vuln</td><td class="num">9h ago</td><td><code>fix the trunk, then drover drive B12</code></td></tr>
+<tr><td><span class="state">follow-up</span></td><td>-</td><td class="reason">the follow-up list could not be read: the forge was not asked (--no-tracker, or a drive&#39;s render)</td><td class="num">-</td><td><code>drover follow-ups</code></td></tr>
+</tbody>
+</table></div>
+
+<h2>Running drive</h2>
+<p><span class="id">D2</span> · day run <span class="meta">started 1h ago · 1 at a time</span></p>
+<div class="scroll"><table class="items">
+<thead><tr><th>Item</th><th>Title</th><th>Stage</th><th>Elapsed</th><th>ETA</th></tr></thead>
+<tbody>
+<tr><td><span class="state drover-running">running</span> <a class="id" href="#item-b8">B8</a></td><td class="title">Running now</td><td>implement</td><td class="num">4m</td><td class="num">11:11 PDT (in 11m)</td></tr>
+</tbody>
+</table></div>
+<p class="meta">queued: <a href="#item-b9">B9</a></p>
+
+<h2>Open</h2>
+<h3>Drive D2 · day run</h3>
+<h4><span class="state drover-running">running</span></h4>
+<div class="scroll"><table class="items">
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<tbody>
+<tr id="item-b8"><td><span class="state drover-running">running</span> <span class="id">B8</span></td><td class="title">Running now</td><td>-</td><td>implement</td><td>-</td><td>-</td><td class="num">-</td><td class="num">11:11 PDT (in 11m)</td></tr>
+</tbody>
+</table></div>
+<h3>Drive D1 · night run</h3>
+<h4><span class="state drover-parked">parked</span></h4>
+<div class="scroll"><table class="items">
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<tbody>
+<tr id="item-b2"><td><span class="state drover-parked">parked</span> <span class="id">B2</span></td><td class="title">Parked on no commits</td><td>-</td><td class="reason">no_commits: runner_exit</td><td>-</td><td><a href="#item-b3">B3</a></td><td class="num">-</td><td class="num">-</td></tr>
+</tbody>
+</table></div>
+<h3>No drive</h3>
+<h4><span class="state drover-needs-operator">needs-operator</span></h4>
+<div class="scroll"><table class="items">
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<tbody>
+<tr id="item-b12"><td><span class="state drover-needs-operator">needs-operator</span> <span class="id">B12</span></td><td class="title">Trunk went red</td><td>-</td><td class="reason">trunk_red: vuln</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+</tbody>
+</table></div>
+<h4><span class="state drover-broken">broken</span></h4>
+<div class="scroll"><table class="items">
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<tbody>
+<tr id="item-b11"><td><span class="state drover-broken">broken</span> <span class="id">B11</span></td><td class="title">(unreadable)</td><td>-</td><td class="reason"><root>/work/B11-broken.md: no frontmatter (expected a &#39;---&#39; fence on line 1)</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+</tbody>
+</table></div>
+<h4><span class="state drover-running">implemented</span></h4>
+<div class="scroll"><table class="items">
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<tbody>
+<tr id="item-b10"><td><span class="state drover-running">implemented</span> <span class="id">B10</span></td><td class="title">Ran clean</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+</tbody>
+</table></div>
+<h4><span class="state drover-ready">ready</span></h4>
+<div class="scroll"><table class="items">
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<tbody>
+<tr id="item-b7"><td><span class="state drover-ready">ready</span> <span class="id">B7</span></td><td class="title">&lt;script&gt;alert(1)&lt;/script&gt; &amp; co</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b9"><td><span class="state drover-ready">ready</span> <span class="id">B9</span></td><td class="title">Queued next</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">11:26 PDT (in 26m)</td></tr>
+<tr id="item-b13"><td><span class="state drover-ready">ready</span> <span class="id">B13</span></td><td class="title">The place&#39;s sign reads a &lt; b</td><td>-</td><td>-</td><td>-</td><td><a href="#item-b14">B14</a></td><td class="num">-</td><td class="num">-</td></tr>
+</tbody>
+</table></div>
+<h4><span class="state drover-blocked">blocked</span></h4>
+<div class="scroll"><table class="items">
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<tbody>
+<tr id="item-b3"><td><span class="state drover-blocked">blocked</span> <span class="id">B3</span></td><td class="title">Blocked by the park</td><td>-</td><td>-</td><td><a href="#item-b2">B2</a></td><td><a href="#item-b4">B4</a></td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b4"><td><span class="state drover-blocked">blocked</span> <span class="id">B4</span></td><td class="title">Blocked behind that</td><td>-</td><td>-</td><td><a href="#item-b3">B3</a></td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b14"><td><span class="state drover-blocked">blocked</span> <a class="id" href="https://forge.example/acme/widgets/issues/42">B14</a></td><td class="title">Published as an issue</td><td>-</td><td>-</td><td><a href="#item-b13">B13</a></td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+</tbody>
+</table></div>
+<h4><span class="state drover-scaffold">scaffold</span></h4>
+<div class="scroll"><table class="items">
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<tbody>
+<tr id="item-b5"><td><span class="state drover-scaffold">scaffold</span> <span class="id">B5</span></td><td class="title">Scaffold</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+</tbody>
+</table></div>
+
+<h2>Done</h2>
+<div class="scroll"><table class="items">
+<thead><tr><th>Item</th><th>Title</th><th>Level</th><th>PR</th><th>Merged</th></tr></thead>
+<tbody>
+<tr id="item-b6"><td><span class="id">B6</span></td><td class="title">Merged with a level</td><td><span class="state drover-done">reviewed</span></td><td class="num"><a href="https://forge.example/acme/widgets/pull/236">#236</a></td><td class="num">2026-10-16</td></tr>
+<tr id="item-b1"><td><span class="id">B1</span></td><td class="title">Merged first</td><td><span class="state drover-unaudited">unaudited</span></td><td class="num">-</td><td class="num">2026-01-15</td></tr>
+</tbody>
+</table></div>
+
+<h2>Trends</h2>
+<p class="meta">2026-10-04 to 2026-10-17, 14 days. n is how many items each figure is read from; n/a is a period with nothing to read.</p>
+<table>
+<tr><th>Metric</th><th>Window</th><th>n</th><th>By day</th></tr>
+<tr><td>Finished</td><td class="num">1</td><td class="num">1</td><td><svg class="spark" viewBox="0 0 120 24" width="120" height="24" role="img" aria-label="finished value by day"><polyline points="100.2,22.0 109.1,2.0 118.0,22.0" /></svg></td></tr>
+<tr><td>Cycle time, median</td><td class="num">59m 0s</td><td class="num">1</td><td><svg class="spark" viewBox="0 0 120 24" width="120" height="24" role="img" aria-label="cycle_time median by day"><circle cx="109.1" cy="2.0" r="1.5" /></svg></td></tr>
+<tr><td>Cycle time, p90</td><td class="num">59m 0s</td><td class="num">1</td><td><svg class="spark" viewBox="0 0 120 24" width="120" height="24" role="img" aria-label="cycle_time p90 by day"><circle cx="109.1" cy="2.0" r="1.5" /></svg></td></tr>
+<tr><td>Review passes per item</td><td class="num">n/a</td><td class="num"></td><td><svg class="spark" viewBox="0 0 120 24" width="120" height="24" role="img" aria-label="review_passes value by day"></svg></td></tr>
+<tr><td>Changes-requested rate</td><td class="num">0%</td><td class="num">1</td><td><svg class="spark" viewBox="0 0 120 24" width="120" height="24" role="img" aria-label="changes_rate value by day"><circle cx="109.1" cy="22.0" r="1.5" /></svg></td></tr>
+<tr><td>Parks <span class="meta">no_commits 1</span> <span class="meta">trunk_red 1</span></td><td class="num">2</td><td class="num">2</td><td><svg class="spark" viewBox="0 0 120 24" width="120" height="24" role="img" aria-label="parks value by day"><polyline points="100.2,22.0 109.1,2.0 118.0,2.0" /></svg></td></tr>
+<tr><td>Review passed to merge, median</td><td class="num">n/a</td><td class="num"></td><td><svg class="spark" viewBox="0 0 120 24" width="120" height="24" role="img" aria-label="review_to_merge median by day"></svg></td></tr>
+<tr><td>Verify, median</td><td class="num">n/a</td><td class="num"></td><td><svg class="spark" viewBox="0 0 120 24" width="120" height="24" role="img" aria-label="verify median by day"></svg></td></tr>
+</table>
+
+<h2 id="key">Key</h2>
+<p class="meta">Red waits on a person, yellow is moving, gray is held by a paused drive, orange cannot move yet or is unproven, green is settled.</p>
+<table class="key">
+<tr><td><span class="state drover-needs-operator">needs-operator</span></td><td>Waiting on you. Needs you names the command.</td></tr>
+<tr><td><span class="state drover-parked">parked</span></td><td>A drive stopped the item. Stage or park says why.</td></tr>
+<tr><td><span class="state drover-broken">broken</span></td><td>The item's body does not parse.</td></tr>
+<tr><td><span class="state drover-running">running</span></td><td>A session is working on it now.</td></tr>
+<tr><td><span class="state drover-pausing">pausing</span></td><td>Its drive is paused and it is finishing the stage it is in. It holds once that stage ends.</td></tr>
+<tr><td><span class="state drover-paused">paused</span></td><td>Held by a paused drive before its next stage. Nothing runs until <code>drover drive --resume</code>.</td></tr>
+<tr><td><span class="state drover-running">implemented</span></td><td>Implemented, waiting on its review and pull request.</td></tr>
+<tr><td><span class="state drover-ready">ready</span></td><td>Every dependency has merged and nothing has run.</td></tr>
+<tr><td><span class="state drover-blocked">blocked</span></td><td>A dependency has not merged.</td></tr>
+<tr><td><span class="state drover-scaffold">scaffold</span></td><td>Requirements not written. Write them, then <code>drover accept</code>.</td></tr>
+<tr><td><span class="state drover-done">claimed</span> <span class="state drover-done">reviewed</span> <span class="state drover-done">verified</span></td><td>Merged, at the audit level recorded: the author's word, a read of the diff, every requirement traced.</td></tr>
+<tr><td><span class="state drover-unaudited">unaudited</span></td><td>Merged, and nobody has audited it.</td></tr>
+<tr><td><span class="state">follow-up</span></td><td>An open follow-up nothing is scheduled to carry.</td></tr>
+</table>
+
+<footer>Rendered 2026-10-17 11:00 PDT (America/Los_Angeles) · fixture · drover v9.9.9-test</footer>
+</body>
+</html>

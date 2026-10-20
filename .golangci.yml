@@ -1,0 +1,28 @@
+version: "2"
+
+run:
+  timeout: 2m
+
+linters:
+  default: standard
+  enable:
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+  settings:
+    errcheck:
+      # errcheck's own defaults exempt fmt.Printf for a reason that applies
+      # equally here: a report already being written to a terminal has nothing
+      # left to do about a failed write, and threading the error through every
+      # print in a table renderer buys a return value no caller can act on.
+      # Writes to a file or a network stream are a different case and stay
+      # checked, because those are not these functions.
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

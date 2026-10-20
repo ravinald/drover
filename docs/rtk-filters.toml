@@ -1,0 +1,252 @@
+# rtk filters for a project driven by drover.
+#
+# Copy to <your project>/.rtk/filters.toml — NOT into drover's own repo. rtk
+# applies project-local filters by working directory, and drover runs in the
+# project it drives, never in its own tree.
+#
+# Then run `rtk trust` in that project. Re-run it after every edit: rtk checks
+# these by SHA-256 and a stale hash disables the filter with no warning.
+# `rtk verify` runs the [[tests.*]] blocks below.
+#
+# Most of these allowlist the signal rather than denylisting noise: check's
+# findings and skills' drift lines are named vocabulary a drover test pins,
+# while the preamble around them gets reworded between releases.
+#
+# drover-status is the exception, and the reason is worth reading before copying
+# that shape onto a fifth filter. An allowlist is right where the noise is the
+# majority and the signal is a closed set. status is the other way around: the
+# only noise is a merged row, and everything else is an answer, so listing the
+# answers meant every answer nobody listed was dropped in silence.
+#
+# They shape output meant for a reader. `--json` output must not pass through
+# them: match_command has no way to exclude a flag, so `rtk drover status --json`
+# would filter the JSON down to nothing parseable. Run those unwrapped, which is
+# what happens by default — drover is not in rtk's built-in set, so the hook
+# never rewrites a bare `drover ...` and these fire only under an explicit
+# `rtk drover ...`.
+schema_version = 1
+
+[filters.drover-status]
+description = "drover status: every line except the merged rows"
+match_command = "^drover +status\\b"
+strip_ansi = true
+# One pattern rather than a list of the lines worth keeping. A merged row is the
+# only noise status emits and every other line is an answer, so an allowlist was
+# the wrong shape: the earlier one kept the rows and silently dropped the counts
+# on a project whose ids are all namespaced, the "here" line, and "no backlog:
+# <path> does not exist", which rendered a misconfigured path as an empty one.
+#
+# Reads as: a line whose first character is not "[", or whose second is not "x".
+# Blank lines match neither and go, which is most of what is left to save now
+# that status hides merged rows without being asked.
+keep_lines_matching = ["^([^\\[]|\\[[^x])"]
+
+[[tests.drover-status]]
+name = "merged rows drop, outstanding rows and counts survive"
+input = """
+webapp status  (ledger: .drover/ledger.jsonl)
+
+[x]  1     W1    Schema Setup & Database Migrations                done · requirements?
+[x]  2     W2    Core API, Auth & Graph Traversal Engine           done · requirements?
+[>]  17    W8    Access mode backend                               READY
+[ ]  18    W8    Public catalog reads                              blocked by 17
+
+-- intake --
+[?]  B12   bug   Something unwritten                               scaffold · needs requirements
+
+55 of 55 planned complete  ·  45 of 50 intake done
+"""
+expected = """
+webapp status  (ledger: .drover/ledger.jsonl)
+[>]  17    W8    Access mode backend                               READY
+[ ]  18    W8    Public catalog reads                              blocked by 17
+-- intake --
+[?]  B12   bug   Something unwritten                               scaffold · needs requirements
+55 of 55 planned complete  ·  45 of 50 intake done
+"""
+
+# The counts clause a project's ids decide. countParts emits "planned complete"
+# only when a planned id exists, so a backlog that is all namespaces prints a
+# footer with no such clause, and the pattern that matched on those two words
+# dropped the whole line.
+[[tests.drover-status]]
+name = "the counts survive on a project whose ids are all namespaced"
+input = """
+drover status  (ledger: .drover/ledger.jsonl)
+
+[?]   E22   enhancement two install surfaces are written against a private mo… drafted · 4 reqs · drover accept E22
+
+54 of 57 intake done  ·  54 done rows hidden
+1 to draft  ·  2 to accept
+
+▸ here: branch main  (no item owns it)
+"""
+expected = """
+drover status  (ledger: .drover/ledger.jsonl)
+[?]   E22   enhancement two install surfaces are written against a private mo… drafted · 4 reqs · drover accept E22
+54 of 57 intake done  ·  54 done rows hidden
+1 to draft  ·  2 to accept
+▸ here: branch main  (no item owns it)
+"""
+
+# An empty table has four different answers and they need different fixes. This
+# is the one that costs the most to lose: the path is wrong, and a filter that
+# drops the line leaves a header over nothing, which reads as a backlog nobody
+# has filed against.
+[[tests.drover-status]]
+name = "a backlog path that does not exist is not rendered as an empty backlog"
+input = """
+herdsay status  (ledger: ledger.jsonl)
+
+no backlog: work does not exist (drover check)
+
+▸ here: branch main  (no item owns it)
+"""
+expected = """
+herdsay status  (ledger: ledger.jsonl)
+no backlog: work does not exist (drover check)
+▸ here: branch main  (no item owns it)
+"""
+
+[filters.drover-check]
+description = "drover check: findings and the verdict, never the preamble"
+match_command = "^drover +check\\b"
+strip_ansi = true
+# Every kind check emits. A kind missing here is dropped, not merely
+# undocumented, so drover's own TestFindingKindsMatchEveryCopy compares this
+# alternation to the Kind literals in internal/cmd/check.go.
+keep_lines_matching = [
+    "^(NO BACKLOG|NO SHELF|SHELF IS BACKLOG|NO VERIFY|UNDECLARED KEY|NO REQUIREMENTS|UNREADABLE|BAD VALUE|BAD RUNNER|BAD LEDGER|ORPHAN ROW|SHELF CLASH|MISSING DEP|BAD DEPS|MISSING REPORT|BAD REGISTER|NO LABEL|NO REGISTER|DUPLICATE ISSUE|ORPHANED FOLLOW-UP|NO CLOSES KEY|UNLINKED|NO DISPOSITION|UNMIRRORED|MIRROR DRIFT|MIRROR STALE|MIRROR SHELVED|STALE CONFIG|BAD TEMPLATE|STALE BLOCK|STALE POLICY|BAD ADDENDUM|NO POINTER|BAD MARKERS|PROTECTED UNMATCHED|SEQUENCE CLASH)",
+    # The wrapped second line of a finding carries the fix, and dropping it
+    # leaves a diagnosis with no next step. The indent is the finding column
+    # plus one; drover pins it so this cannot drift out from under the pattern.
+    "^ {20}\\S",
+    "^ok — ",
+    # The floor marker: it is what says the follow-up list was not read, so a run
+    # that counted no orphaned rows is not a run that found none. Dropping this line
+    # renders a degraded read as a clean bill.
+    "^note: ",
+    # The other floor marker, and a wider one: the config did not load, so no
+    # body, ledger row or path was read at all. Without it the findings above
+    # read as the whole report rather than as the only thing check got to.
+    "^stopped: ",
+    # No pattern for "drover: N findings". rtk filters stdout and the count is
+    # on stderr, which passes through unfiltered and reaches the reader anyway.
+]
+on_empty = "drover check: clean"
+
+[[tests.drover-check]]
+name = "findings survive with their detail line"
+input = """
+config: /home/x/.config/drover/config.toml < /repo/.drover.toml
+NO VERIFY           [verify] default is empty
+                    name the command that must pass before an item merges
+ORPHAN ROW          ledger records "B03", which has no body
+MISSING REPORT      1 names .drover/reports/01-schema.md, which no longer exists
+"""
+expected = """
+NO VERIFY           [verify] default is empty
+                    name the command that must pass before an item merges
+ORPHAN ROW          ledger records "B03", which has no body
+MISSING REPORT      1 names .drover/reports/01-schema.md, which no longer exists
+"""
+
+[[tests.drover-check]]
+name = "a degraded read is not a clean bill"
+input = """
+note: the follow-up list was not read, so no orphaned rows were counted: gh is not on PATH
+ok — 3 bodies parse, 2 ledger rows, no orphans or stale paths
+"""
+expected = """
+note: the follow-up list was not read, so no orphaned rows were counted: gh is not on PATH
+ok — 3 bodies parse, 2 ledger rows, no orphans or stale paths
+"""
+
+[[tests.drover-check]]
+name = "a report that stopped says so"
+input = """
+config: /home/x/.config/drover/config.toml < /repo/.drover.toml
+STALE CONFIG        .drover.toml declares schema_version 1 and this build understands 2
+                    run `drover config --diff`, which reads the file without validating it and names every key the gap left behind
+stopped: .drover.toml is not at this build's schema_version, so no body, ledger row or path was read: bodies and ledger_rows are unread rather than zero
+"""
+expected = """
+STALE CONFIG        .drover.toml declares schema_version 1 and this build understands 2
+                    run `drover config --diff`, which reads the file without validating it and names every key the gap left behind
+stopped: .drover.toml is not at this build's schema_version, so no body, ledger row or path was read: bodies and ledger_rows are unread rather than zero
+"""
+
+[[tests.drover-check]]
+name = "ORPHANED FOLLOW-UP keeps its headline, not just the wrapped fix"
+input = """
+ORPHANED FOLLOW-UP  2 open follow-ups are orphaned: every owner has merged, so no run is scheduled to reach them
+                    an item declaring one of those owner ids on its deps: line inherits them; drover follow-ups lists the rows
+"""
+expected = """
+ORPHANED FOLLOW-UP  2 open follow-ups are orphaned: every owner has merged, so no run is scheduled to reach them
+                    an item declaring one of those owner ids on its deps: line inherits them; drover follow-ups lists the rows
+"""
+
+[filters.drover-skills]
+description = "drover skills: drift in both directions, not the vendored majority"
+match_command = "^drover +skills\\b"
+strip_ansi = true
+# stdout only. `skills --from` writes its progress ("vendored N guides from
+# ...", "not found in the source: ...") and `--prune` its count to stderr, which
+# rtk does not filter, so a pattern for either would match nothing here.
+keep_lines_matching = [
+    "MISSING",
+    "UNREFERENCED",
+    "referenced but not vendored",
+    "vendored but unreferenced",
+    "backlog and vendored guides agree",
+]
+on_empty = "drover skills: no drift"
+
+[[tests.drover-skills]]
+name = "vendored-and-referenced rows drop, drift survives"
+input = """
+guide                             refs  state
+frontend-design                     52  vendored
+golang-security                     39  vendored
+dataviz                              4  MISSING — an unattended run cannot read it
+golang-benchmark                     0  UNREFERENCED
+
+1 referenced but not vendored: dataviz
+33 vendored but unreferenced: golang-benchmark golang-cli
+"""
+expected = """
+dataviz                              4  MISSING — an unattended run cannot read it
+golang-benchmark                     0  UNREFERENCED
+1 referenced but not vendored: dataviz
+33 vendored but unreferenced: golang-benchmark golang-cli
+"""
+
+
+[filters.drover-agents]
+description = "drover agents: the outcome, not the 160 lines of generated markdown"
+match_command = "^drover +agents\\b"
+strip_ansi = true
+keep_lines_matching = [
+    "^(wrote|appended|regenerated) ",
+    "^drover: ",
+]
+on_empty = "drover agents: rendered to stdout"
+
+[[tests.drover-agents]]
+name = "the write confirmation survives, the block does not"
+input = """
+regenerated the drover block in AGENTS.md
+"""
+expected = """
+regenerated the drover block in AGENTS.md
+"""
+
+[[tests.drover-agents]]
+name = "a marker refusal survives"
+input = """
+drover: AGENTS.md has <!-- END drover --> before <!-- BEGIN drover --> — fix the markers by hand
+"""
+expected = """
+drover: AGENTS.md has <!-- END drover --> before <!-- BEGIN drover --> — fix the markers by hand
+"""

@@ -1,0 +1,495 @@
+package cmd
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/ravinald/drover/internal/backlog"
+	"github.com/ravinald/drover/internal/config"
+	"github.com/ravinald/drover/internal/ledger"
+	"github.com/ravinald/drover/internal/prompts"
+	"github.com/spf13/cobra"
+)
+
+var (
+	requestChangesFile      string
+	requestChangesOverLimit bool
+)
+
+var requestChangesCmd = &cobra.Command{
+	Use:   "request-changes <id> -f <file>",
+	Short: "Write what a review sent back into the item body.",
+	Long: `A review routes a finding back to the branch, and the operator re-runs the item.
+What that run reads is the item body and nothing else: not the reviewer's
+report, not the audit note, not the conversation the review happened in. So a
+gap recorded only in those is a gap the next run rediscovers or ships again.
+
+request-changes is the step that closes that. It replaces the ` + "`" + prompts.ChangesHeading + "`" + `
+section with the evidence you hand it, appending the section when the body has
+none, and it touches nothing else in the file.
+
+What it will not do is as much of the point as what it does. The numbered
+requirements are the contract a re-run is audited against, and a reviewer who can
+edit them while auditing against them is auditing a target they moved: request-changes
+writes below the heading only, and refuses the write outright if the requirement
+count would change either way.
+
+It also demotes a top-level "N." line in your evidence to a bullet. Requirements
+are parsed as top-level numbered lines wherever they appear in the body, so a
+numbered list of findings silently becomes requirement 8 — which has happened,
+and the prompt then carries three findings dressed as contract.
+
+Nor will it send work back on an ` + "`" + backlog.OperatorTag + "`" + ` requirement alone. A finding is a heading in
+your evidence, traced through the R<n> it names; when every finding traces to
+an [operator] requirement, request-changes refuses and names them, since no session can
+meet one. The item goes to its pull request with them pending, and drive holds
+the merge until drover signoff records each.
+
+The section is replaced rather than appended to. The body is a prompt, not a
+history: a run reads it as current instructions and cannot tell a closed finding
+from an open one.
+
+The replaced text is not lost. Each round is kept beside the saved reports as
+<stem>-<slug>.changes-N.md, and both prompts list the earlier ones as headlines
+with the path. That list is the only thing that says whether five rounds closed
+five defects or circled one guarantee nobody wrote down: on its own, each round
+reads as a clean fix to a real gap, which is how five of them ship.`,
+	Example: `  drover request-changes B1 -f findings.md
+  drover review B1 | ...                       # write the evidence, then:
+  cat findings.md | drover request-changes B1 -f -      # or from stdin
+
+  Nothing enforces that a review requests changes. drover cannot tell a pass that found
+  nothing from one that found something and did not write it down, so the
+  instruction lives in the review prompt and this is the command behind it.
+
+Safety: local writes. Rewrites one section of the item body, keeps the evidence
+under [paths] reports, appends a body digest row and one changes row, refuses to
+change the numbered requirements, refuses evidence whose only findings are
+[operator] requirements, and reaches no tracker.`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(_ *cobra.Command, args []string) error {
+		s, err := open()
+		if err != nil {
+			return err
+		}
+		it, err := s.item(args[0])
+		if err != nil {
+			return err
+		}
+		if requestChangesFile == "" {
+			return Refusal{fmt.Errorf("request-changes needs the evidence: -f <file>, or -f - for stdin")}
+		}
+		text, err := readEvidence(requestChangesFile, os.Stdin)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(text) == "" {
+			return Refusal{fmt.Errorf("%s is empty: a request for changes with no evidence tells the next run nothing", requestChangesFile)}
+		}
+
+		// Before the cap, because this refusal is the more specific one: a round
+		// past the cap is the operator's call, and a round on an [operator]
+		// requirement is nobody's.
+		if ops, structure := operatorOnlyFindings(it, text); len(ops) > 0 {
+			return Refusal{operatorRefusal(it.ID.Bare(), ops, structure)}
+		}
+
+		// After the usage checks and before the write, so request-changes with no -f past
+		// the cap reports the missing flag rather than the cap: the caller can
+		// act on the first, and the second is not their decision to make.
+		if limit := s.cfg.Review.MaxReviewRounds; limit > 0 {
+			if n := s.ledger.Counts(it.ID.Bare()).ChangesRequested; n >= limit {
+				if !requestChangesOverLimit {
+					// Recorded before the refusal, because the refusal is the
+					// evidence. Without a row, a review that wanted to send work
+					// back and was turned away leaves an audit and no request for changes row,
+					// which is what a review that found nothing leaves; passResult
+					// would then have to guess, and would guess at_limit for every
+					// later pass on the item. A failure to write the row does not
+					// swallow the refusal: the caller still gets told no, and the
+					// worst case is that ambiguity rather than a request that appears
+					// to have been recorded.
+					if err := s.record(ledger.Row{
+						ID: it.ID.Bare(), Refused: "max_review_rounds", Date: ledger.Today(),
+					}); err != nil {
+						fmt.Fprintf(os.Stderr, "warn: the cap refusal went unrecorded: %v\n", err)
+					}
+					return Refusal{s.capRefusal(it.ID.Bare(), n, limit)}
+				}
+				if err := sealedFlag("request-changes", "over-limit",
+					"the cap bounds what a review may spend, and this session is the party it bounds"); err != nil {
+					return err
+				}
+				fmt.Printf("  ! %s is at [review] max_review_rounds (%d of %d) and --over-limit sent it back anyway.\n",
+					it.ID.Bare(), n, limit)
+			}
+		}
+
+		raw, err := os.ReadFile(it.Path)
+		if err != nil {
+			return err
+		}
+		head, body, err := splitFrontmatter(string(raw))
+		if err != nil {
+			return fmt.Errorf("%s: %w", it.Path, err)
+		}
+
+		section, demoted, sunk := demoteEvidence(strings.TrimSpace(text))
+		next := spliceSection(body, section)
+
+		before := len(it.Requirements())
+		after := len(backlog.Item{Body: next}.Requirements())
+		if before != after {
+			return Refusal{fmt.Errorf(
+				"refusing to write: the body has %d numbered requirements and this request would leave %d. "+
+					"The requirements are the contract; evidence goes below the heading as prose or bullets", before, after)}
+		}
+
+		written := []byte(head + next + "\n")
+		if err := os.WriteFile(it.Path, written, 0o600); err != nil {
+			return fmt.Errorf("write %s: %w", it.Path, err)
+		}
+		if err := s.wroteBody(it.ID.Bare(), written); err != nil {
+			return err
+		}
+		// The section this just overwrote is gone from the tree, and with it the
+		// one thing that says whether five rounds have been closing one defect or
+		// five. A failure here costs that record and nothing else, so it warns.
+		round, err := s.keepRound(it, text)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warn: round not kept: %v\n", err)
+		}
+		// After the body write, never before. A row claiming a request whose body
+		// write failed is the one wrong direction; a body written whose row
+		// failed reports the error and leaves the body correct.
+		if err := s.record(ledger.Row{ID: it.ID.Bare(), Changes: digest(text), Date: ledger.Today()}); err != nil {
+			return err
+		}
+		fmt.Printf("changes requested: %s -> %s (%d requirement(s) unchanged)\n",
+			it.ID.Bare(), rel(s.cfg.Root, it.Path), after)
+		if round != "" {
+			fmt.Printf("round kept: %s\n", rel(s.cfg.Root, round))
+		}
+		reportDemotions(demoted, sunk)
+		fmt.Printf("The next run reads it: drover run %s --dry-run\n", it.ID.Bare())
+		return nil
+	},
+}
+
+// requirementRef is a requirement named in evidence, as R6.
+var requirementRef = regexp.MustCompile(`\bR(\d+)\b`)
+
+// structuralHeadings are the leading words of a heading that organizes the
+// evidence rather than reporting a finding ("Settled, do not reopen"). The list
+// is closed on purpose: a heading outside it is read as a finding.
+var structuralHeadings = map[string]bool{
+	"settled": true, "holds": true, "held": true, "closed": true, "resolved": true,
+}
+
+// operatorOnlyFindings returns the [operator] requirements a request's findings
+// trace to when every finding traces to one, with the headings it read as
+// structure, and no requirements otherwise.
+//
+// A finding is a heading in the evidence outside a code fence, traced through
+// the R<n> it names; a body with no headings is one finding. It fails open:
+// refusing a legitimate round sends a real defect to the merge with nobody sent
+// back, and letting an operator-only one through costs one round. So any
+// BRANCH- token, any session requirement, and any heading that names no
+// requirement lets the request through, except a heading whose leading word is
+// in structuralHeadings.
+func operatorOnlyFindings(it backlog.Item, text string) (ops []backlog.Requirement, structure []string) {
+	reqs := map[int]backlog.Requirement{}
+	for _, r := range it.Requirements() {
+		reqs[r.Num] = r
+	}
+	var findings []string
+	fenced := false
+	for _, l := range strings.Split(text, "\n") {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			fenced = !fenced
+			continue
+		}
+		if !fenced && strings.HasPrefix(t, "#") {
+			findings = append(findings, t)
+		}
+	}
+	headed := len(findings) > 0
+	if !headed {
+		findings = []string{text}
+	}
+	seen := map[int]bool{}
+	for _, f := range findings {
+		if strings.Contains(f, "BRANCH-") {
+			return nil, nil
+		}
+		var named []backlog.Requirement
+		for _, m := range requirementRef.FindAllStringSubmatch(f, -1) {
+			n, _ := strconv.Atoi(m[1])
+			if r, ok := reqs[n]; ok {
+				named = append(named, r)
+			}
+		}
+		if len(named) == 0 {
+			if headed && structuralHeadings[leadingWord(f)] {
+				structure = append(structure, f)
+				continue
+			}
+			return nil, nil
+		}
+		for _, r := range named {
+			if !r.Operator {
+				return nil, nil
+			}
+		}
+		for _, r := range named {
+			if !seen[r.Num] {
+				seen[r.Num] = true
+				ops = append(ops, r)
+			}
+		}
+	}
+	if len(ops) == 0 {
+		return nil, nil
+	}
+	return ops, structure
+}
+
+// leadingWord is a heading's first word, lowercased and without the #s or the
+// punctuation that follows it.
+func leadingWord(heading string) string {
+	fields := strings.Fields(strings.TrimLeft(heading, "# "))
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.ToLower(strings.TrimRight(fields[0], ",.:;!?-"))
+}
+
+// operatorRefusal names the requirements, the headings read as structure, and
+// what happens to the requirements instead.
+func operatorRefusal(id string, ops []backlog.Requirement, structure []string) error {
+	lines := make([]string, 0, len(ops))
+	for _, r := range ops {
+		lines = append(lines, fmt.Sprintf("    R%d: %s", r.Num, r.Text))
+	}
+	read := ""
+	if len(structure) > 0 {
+		read = "\n\nRead as structure, not findings:\n    " + strings.Join(structure, "\n    ")
+	}
+	return fmt.Errorf(
+		"every finding here traces to an %s requirement, which no session can meet:\n%s%s\n\n"+
+			"Another round would spend itself on work only the operator can do, so the item body is untouched.\n"+
+			"Record the look and let the item go to its pull request: it waits there with %s pending,\n"+
+			"and the merge holds until the operator runs drover signoff %s <n> \"<what was checked>\".\n\n"+
+			"    drover audit %s <reviewed|verified> --code-by agent \"<what you traced>\"\n\n"+
+			"A finding the session can fix goes in its own heading, and then request-changes takes it",
+		backlog.OperatorTag, strings.Join(lines, "\n"), read, reqNumbers(ops), id, id)
+}
+
+// readEvidence reads the evidence from a file, or from in when the path is
+// "-". Reading a document rather than taking an argv string is deliberate: the
+// evidence carries pasted output and code fences, and a command line invites
+// the one-line result the review brief asks reviewers not to write.
+func readEvidence(path string, in io.Reader) (string, error) {
+	if path == "-" {
+		b, err := io.ReadAll(in)
+		if err != nil {
+			return "", fmt.Errorf("read stdin: %w", err)
+		}
+		return string(b), nil
+	}
+	b, err := os.ReadFile(path) // #nosec G304 — the operator names the file
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// splitFrontmatter returns the fence (with its trailing newline) and the body
+// below it, so a rewrite of the body cannot disturb the metadata above.
+func splitFrontmatter(raw string) (head, body string, err error) {
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return "", "", fmt.Errorf("no frontmatter (expected a '---' fence on line 1)")
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return strings.Join(lines[:i+1], "\n") + "\n", strings.Join(lines[i+1:], "\n"), nil
+		}
+	}
+	return "", "", fmt.Errorf("frontmatter fence is never closed")
+}
+
+// spliceSection replaces everything from the review heading to the next "## "
+// with body, or appends the section when the heading is absent.
+func spliceSection(text, body string) string {
+	heading := prompts.ChangesHeading
+	lines := strings.Split(text, "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.TrimSpace(l) == heading {
+			start = i
+			break
+		}
+	}
+	section := heading + "\n\n" + body
+	if start < 0 {
+		return strings.TrimRight(text, "\n") + "\n\n" + section
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "## ") {
+			end = i
+			break
+		}
+	}
+	out := append([]string{}, lines[:start]...)
+	out = append(out, strings.Split(section, "\n")...)
+	if end < len(lines) {
+		out = append(out, "")
+		out = append(out, lines[end:]...)
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\n")
+}
+
+// topLevelNumbered matches the line shape backlog reads as a requirement.
+var topLevelNumbered = regexp.MustCompile(`(?m)^(\d+)\.[ \t]+`)
+
+// demoteHeadings pushes every heading in reviewer-supplied evidence below the
+// level a body's own sections use, and reports how many it moved.
+//
+// The same reason demoteNumbering exists, one level up: prose written into a
+// section must not create structure the body's own readers act on. A "## " line
+// in evidence ends the section as far as spliceSection is concerned, so a
+// replacement would land above the reviewer's own heading and everything below
+// it would stay, and the next run would read those settled findings as current
+// instructions.
+//
+// Prevention rather than a narrower boundary, because position cannot tell the
+// two apart. A project's implement template writes its own "## " sections into a
+// body and those have to survive a request-changes, which is what
+// TestSpliceSectionReplacesRatherThanAppends pins.
+func demoteHeadings(text string) (string, int) {
+	lines := strings.Split(text, "\n")
+	n := 0
+	for i, l := range lines {
+		trimmed := strings.TrimLeft(l, "#")
+		hashes := len(l) - len(trimmed)
+		if hashes == 0 || hashes > 2 || !strings.HasPrefix(trimmed, " ") {
+			continue
+		}
+		lines[i] = "###" + trimmed
+		n++
+	}
+	if n == 0 {
+		return text, 0
+	}
+	return strings.Join(lines, "\n"), n
+}
+
+// demoteEvidence is what every command writing reviewer prose into an item body
+// applies first, and reportDemotions says what it moved. Two rules, both there so
+// that prose cannot create structure the body's own readers act on.
+func demoteEvidence(text string) (out string, numbered, headings int) {
+	out, headings = demoteHeadings(text)
+	out, numbered = demoteNumbering(out)
+	return out, numbered, headings
+}
+
+// reportDemotions names what demoteEvidence moved, on stderr, because a writer
+// is owed the news that their file reached the body in a different shape.
+func reportDemotions(numbered, headings int) {
+	if numbered > 0 {
+		fmt.Fprintf(os.Stderr, "note: demoted %d numbered line(s) to bullets; a top-level \"N.\" in the body is read as a requirement.\n", numbered)
+	}
+	if headings > 0 {
+		fmt.Fprintf(os.Stderr, "note: demoted %d heading(s) below ###; a \"## \" line is one of the body's own sections.\n", headings)
+	}
+}
+
+// demoteNumbering turns a top-level numbered line into a bullet and reports how
+// many it rewrote. Findings written as "1. 2. 3." are the natural way to list
+// them and the one shape the body cannot carry.
+func demoteNumbering(text string) (string, int) {
+	n := len(topLevelNumbered.FindAllString(text, -1))
+	if n == 0 {
+		return text, 0
+	}
+	return topLevelNumbered.ReplaceAllString(text, "- "), n
+}
+
+// digest identifies the evidence without copying it. Whitespace is collapsed
+// first, so a reflowed paragraph is the same finding and reads as one: the
+// point of the field is to tell a review repeating itself from one that found
+// something new, and a rewrap is not new.
+func digest(text string) string {
+	return digestBytes([]byte(strings.Join(strings.Fields(text), " ")))
+}
+
+// digestBytes is the 12-hex sum both ledger digests are written in.
+func digestBytes(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// bodySum is the body digest: the file's bytes with trailing spaces, tabs,
+// carriage returns and newlines at end of file removed, and nothing else.
+//
+// It skips digest's whitespace collapse. A rewrap is not a new finding, but it
+// is an edit, and drive has to see it. What follows the last character is
+// nobody's edit: an editor or a snapshot hook that adds or drops the final
+// newline would move an exact-bytes digest, and a review that found nothing
+// would park as edited over it.
+func bodySum(b []byte) string {
+	return digestBytes(bytes.TrimRight(b, " \t\r\n"))
+}
+
+// bodyMatches reports whether want is one body's digest in either form a
+// ledger may carry: sum, its bodySum, or exact, the digest of its exact bytes,
+// which is what every row recorded before bodySum holds. Without the second, an
+// item mid-review when the binary changed parks as edited on a body nobody
+// touched. An empty want matches nothing.
+func bodyMatches(want, sum, exact string) bool {
+	return want != "" && (want == sum || want == exact)
+}
+
+// capRefusal is read out of a log in the morning, so it names the count, the cap,
+// the key the number came from, what the reviewer does instead and what the
+// operator can do.
+//
+// Backend-aware, because `drover follow-up` refuses under [register] backend =
+// "github" and a refusal that sends a reviewer to a command that will refuse is
+// a dead end.
+func (s *session) capRefusal(id string, n, limit int) error {
+	file := fmt.Sprintf(
+		"    drover new <kind> \"<what you found>\" --found-in %s -f <file>", id)
+	if s.cfg.RegisterBackend() == config.BackendFile {
+		file = fmt.Sprintf("    drover follow-up open \"<what you found>\" --owner %s --sev <C|H|M|L>", id)
+	}
+	return fmt.Errorf(
+		"%s has been sent back %d times and [review] max_review_rounds is %d: this finding does not go\n"+
+			"back to the branch. The refusal is recorded; the item body is untouched.\n\n"+
+			"The branch is no longer the destination. File it and let the work finish:\n\n"+
+			"%s\n\n"+
+			"Then record the look, which the cap does not change:\n\n"+
+			"    drover audit %s <reviewed|verified> --code-by agent \"<what you traced>\"\n\n"+
+			"To send it back anyway, the operator raises [review] max_review_rounds or runs request-changes --over-limit.\n"+
+			"Both are the operator's: --over-limit refuses inside a session drover launched, and the\n"+
+			"config is not this session's to edit",
+		id, n, limit, file, id)
+}
+
+func init() {
+	requestChangesCmd.Flags().StringVarP(&requestChangesFile, "file", "f", "",
+		"the evidence to write, or - for stdin (required)")
+	requestChangesCmd.Flags().BoolVar(&requestChangesOverLimit, "over-limit", false,
+		"send it back although the item is at [review] max_review_rounds; the operator's call, refused inside a launched session")
+	root.AddCommand(requestChangesCmd)
+}

@@ -1,0 +1,558 @@
+package cmd
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/ravinald/drover/internal/lease"
+	"github.com/ravinald/drover/internal/ledger"
+	"github.com/ravinald/drover/internal/runner"
+)
+
+// heldLease is where a holder child parks its handle. The lock lives on the
+// descriptor, and os closes an unreachable *os.File from a finalizer, so a
+// handle left to a blank identifier frees the lease at the child's next GC.
+// A holder then parks in time.Sleep rather than select{}: with no timer
+// pending, the runtime reads an empty select as a deadlock and exits, and the
+// kernel releases the lease with the process.
+var heldLease *lease.Handle
+
+// Two variables, because the child does two different jobs: one runs a command
+// against a tree this process is holding, the other holds a tree this process
+// contends for. Neither is on clearedEnv, which TestMain unsets before any
+// test body runs and so before the child could read one.
+const (
+	envLeaseRefuse = "DROVER_TEST_LEASE_REFUSE"
+	envLeaseHold   = "DROVER_TEST_LEASE_HOLD"
+	envTreeHold    = "DROVER_TEST_TREE_HOLD"
+)
+
+// leaseProject is draftProject's tree with git behind it.
+//
+// The git dir is what makes a cross-process test possible at all: TestMain
+// points XDG_CONFIG_HOME at a fresh directory per process, so the per-user
+// fallback would give the parent and the child two different lease files and a
+// contention test that could never contend. `.git` is a path both agree on
+// without sharing an environment, and it is where a real project's lease lives.
+func leaseProject(t *testing.T) string {
+	t.Helper()
+	isolate(t)
+	dir := draftProject(t, "")
+	git(t, dir, "init", "-q", "-b", "main")
+	return dir
+}
+
+// leasePath is the fixture's lease, asserted to be the one inside its git dir
+// rather than the per-user fallback. Both sides go through EvalSymlinks because
+// git reports a resolved path and the temp directory it is handed is a symlink
+// on darwin. That is the behavior drover wants: two names for one tree must not
+// produce two leases.
+func leasePath(t *testing.T, dir string) string {
+	t.Helper()
+	path, err := lease.Path(dir, "")
+	if err != nil {
+		t.Fatalf("lease.Path: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(filepath.Join(dir, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := filepath.EvalSymlinks(filepath.Dir(path)); got != want {
+		t.Fatalf("lease at %s, want it under %s: the fixture is not resolving through its git dir", path, want)
+	}
+	if filepath.Base(path) != lease.FileName {
+		t.Fatalf("lease file is %s, want %s", filepath.Base(path), lease.FileName)
+	}
+	return path
+}
+
+// relaunch runs this test binary again with one variable set, so the assertion
+// below is made against a genuinely separate process. An in-process test cannot
+// reach the kernel's release-on-death, which is the whole mechanism.
+func relaunch(t *testing.T, name, value string) *exec.Cmd {
+	t.Helper()
+	c := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$", "-test.count=1") // #nosec G204 -- this binary
+	c.Env = append(os.Environ(), name+"="+value)
+	return c
+}
+
+// childExit ends a child branch the way drover's own main does, and takes
+// TestMain's temp directory with it: os.Exit runs no deferred cleanup, and a
+// suite that leaked one per relaunch would fill /tmp over a week of runs.
+func childExit(err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "drover:", err)
+	}
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		_ = os.RemoveAll(dir)
+	}
+	os.Exit(Code(err))
+}
+
+// TestASecondProcessRefusesACheckoutThisOneHolds is the collision that remains,
+// run for real: a run holds the tree with a session on its branch, and the
+// operator types finish in another terminal. The exit code and the pid in the
+// message are the contract: a refusal the operator has to take to ps is not one
+// they can act on.
+func TestASecondProcessRefusesACheckoutThisOneHolds(t *testing.T) {
+	if dir := os.Getenv(envLeaseRefuse); dir != "" {
+		if err := os.Chdir(dir); err != nil {
+			childExit(err)
+		}
+		root.SetArgs([]string{"finish", "1"})
+		childExit(Execute())
+	}
+
+	dir := leaseProject(t)
+	h, err := lease.Acquire(leasePath(t, dir), lease.Lease{Command: "run", Item: "1", Root: dir, Branch: "main"})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Release() })
+
+	out, err := relaunch(t, envLeaseRefuse, dir).CombinedOutput()
+	if err == nil {
+		t.Fatalf("finish exited 0 against a held checkout:\n%s", out)
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) {
+		t.Fatalf("finish did not run: %v\n%s", err, out)
+	}
+	if exit.ExitCode() != ExitRefused {
+		t.Errorf("finish exited %d, want %d:\n%s", exit.ExitCode(), ExitRefused, out)
+	}
+	for _, want := range []string{
+		"drover run 1",
+		fmt.Sprintf("pid %d", os.Getpid()),
+		fmt.Sprintf("kill %d", os.Getpid()),
+	} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("the refusal does not name %q, so it sends the operator to ps:\n%s", want, out)
+		}
+	}
+}
+
+// TestKillingTheHolderFreesTheLeaseAtOnce covers the release path no in-process
+// test reaches. SIGKILL runs nothing the holder wrote, so what frees the lease
+// is the kernel closing the descriptor, which is why there is no stale state for
+// a --force to rescue and no reaper to write.
+func TestKillingTheHolderFreesTheLeaseAtOnce(t *testing.T) {
+	if dir := os.Getenv(envLeaseHold); dir != "" {
+		path, err := lease.Path(dir, "")
+		if err != nil {
+			childExit(err)
+		}
+		heldLease, err = lease.Acquire(path, lease.Lease{Command: "drive", Root: dir})
+		if err != nil {
+			childExit(err)
+		}
+		runtime.GC()
+		runtime.GC()
+		fmt.Println("held")
+		_ = os.Stdout.Close()
+		time.Sleep(time.Hour)
+	}
+
+	dir := leaseProject(t)
+	path := leasePath(t, dir)
+	child := relaunch(t, envLeaseHold, dir)
+	pipe, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child.Stderr = os.Stderr
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = child.Process.Kill()
+		_ = child.Wait()
+	}()
+
+	if line, err := bufio.NewReader(pipe).ReadString('\n'); err != nil || strings.TrimSpace(line) != "held" {
+		t.Fatalf("the holder never took the lease: %q %v", line, err)
+	}
+
+	l, busy, err := lease.Read(path)
+	switch {
+	case err != nil:
+		t.Fatalf("read: %v", err)
+	case !busy:
+		t.Fatal("the lease reads free while a live process holds it")
+	case l.PID != child.Process.Pid:
+		t.Errorf("the lease names pid %d, the holder is %d", l.PID, child.Process.Pid)
+	}
+
+	if err := child.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := child.Process.Wait(); err != nil {
+		t.Fatal(err)
+	}
+
+	// No retry and no sleep. A lease that needed either would be one drover was
+	// inferring liveness for rather than being told.
+	h, err := lease.Acquire(path, lease.Lease{Command: "run", Item: "1", Root: dir})
+	if err != nil {
+		t.Fatalf("a killed holder left the lease unacquirable: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Release() })
+	if h.Lease.PID != os.Getpid() {
+		t.Errorf("the payload still names %d: the dead holder's account was reported rather than overwritten", h.Lease.PID)
+	}
+}
+
+// TestStatusReportsAHeldLeaseAndRefusesNothing pins the half of the rule that
+// is not a refusal. status is how an operator finds out why the branch under
+// them moved, and a read-only command that exited 3 on somebody else's work
+// would be useless for exactly that.
+func TestStatusReportsAHeldLeaseAndRefusesNothing(t *testing.T) {
+	dir := leaseProject(t)
+	h, err := lease.Acquire(leasePath(t, dir), lease.Lease{Command: "drive", Root: dir, Branch: "main"})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Release() })
+
+	out := capture(t, func() {
+		if err := execute(t, "status"); err != nil {
+			t.Fatalf("status refused a held checkout: %v", err)
+		}
+	})
+	for _, want := range []string{"also here", "drover drive", fmt.Sprintf("pid %d", os.Getpid())} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the footer does not name %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestDriveDoesNotRefuseItsOwnFinish holds the one deadlock this design can
+// produce: drive leases the whole queue and then calls finish's own RunE to
+// reconcile what merged, which opens the same lease file inside the same
+// process. flock lives on the open file description, so that second open is
+// refused exactly as another terminal would be, and only the package state
+// tells the two apart.
+func TestDriveDoesNotRefuseItsOwnFinish(t *testing.T) {
+	dir := leaseProject(t)
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := s.takeLease("drive", "")
+	if err != nil {
+		t.Fatalf("drive could not take the tree: %v", err)
+	}
+	t.Cleanup(func() {
+		release()
+		held = nil
+	})
+
+	if err := s.leaseFree(); err != nil {
+		t.Fatalf("finish refused the drive that is holding the lease for it: %v", err)
+	}
+	if _, err := lease.Acquire(leasePath(t, dir), lease.Lease{Command: "run", Root: dir}); err == nil {
+		t.Fatal("a second open in this process took the lease: flock is not per open file description here, " +
+			"and the in-process half of this test proves nothing")
+	}
+}
+
+// TestFinishRefusesAHolderThatHasNotNamedItself is the window Acquire opens
+// between taking the tree and writing its account, seen from finish.
+//
+// drover can see the checkout is taken and only the name is missing, which is a
+// rule refusing rather than a read failing. Exit 1 here would tell a wrapper the
+// tool did not work, when what it is reporting is the state of the tree.
+func TestFinishRefusesAHolderThatHasNotNamedItself(t *testing.T) {
+	dir := leaseProject(t)
+	path := leasePath(t, dir)
+	h, err := lease.Acquire(path, lease.Lease{Command: "drive", Root: dir, Branch: "main"})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Release() })
+	if err := os.Truncate(path, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.leaseFree()
+	if err == nil {
+		t.Fatal("finish accepted a checkout somebody is holding")
+	}
+	if got := Code(err); got != ExitRefused {
+		t.Errorf("finish exits %d on an unnamed holder, want %d: %v", got, ExitRefused, err)
+	}
+	if !strings.Contains(err.Error(), "has not written its account yet") {
+		t.Errorf("the refusal does not say what is missing: %v", err)
+	}
+}
+
+// The same holder in the footer. status reports and never refuses, and a line
+// reading "pid 0" would name a process rather than the microsecond it is.
+func TestStatusNamesAHolderThatHasNotWrittenItsAccount(t *testing.T) {
+	dir := leaseProject(t)
+	path := leasePath(t, dir)
+	h, err := lease.Acquire(path, lease.Lease{Command: "drive", Root: dir, Branch: "main"})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Release() })
+	if err := os.Truncate(path, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	out := capture(t, func() {
+		if err := execute(t, "status"); err != nil {
+			t.Fatalf("status refused a held checkout: %v", err)
+		}
+	})
+	if !strings.Contains(out, leaseUnnamed) {
+		t.Errorf("the footer does not name the unwritten holder:\n%s", out)
+	}
+	if strings.Contains(out, "pid 0") {
+		t.Errorf("the footer invented pid 0 as a holder:\n%s", out)
+	}
+}
+
+// holdDrive takes the checkout's lease as a drive would, without setting the
+// package state that lets the drive's own finish through: what is asserted is
+// how finish and open-pr treat somebody else's drive.
+func holdDrive(t *testing.T, dir string) {
+	t.Helper()
+	h, err := lease.Acquire(leasePath(t, dir), lease.Lease{Command: "drive", Root: dir, Branch: "main"})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Release() })
+}
+
+// Items can merge through the forge's queue mid-drive, and finish must not
+// refuse them for as long as the drive runs. The drive's items are in worktrees
+// of their own, so nothing it is doing is in the tree finish switches.
+func TestFinishPassesADriveHoldingTheCheckout(t *testing.T) {
+	dir, branch := finishProject(t, noProject)
+	stubPATH(t)
+	t.Setenv(runner.EnvActor, "")
+	t.Chdir(dir)
+	holdDrive(t, dir)
+
+	var err error
+	out := capture(t, func() { err = execute(t, "finish", "B1") })
+	if err != nil {
+		t.Fatalf("finish refused while a drive held the checkout: %v\n%s", err, out)
+	}
+	for _, want := range []string{branch + " is merged", "ledger: merged", "on main"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("finish wrote:\n%s\nwant it to name %q", out, want)
+		}
+	}
+}
+
+func TestOpenPRPassesADriveHoldingTheCheckout(t *testing.T) {
+	t.Cleanup(func() { openPRForce = false })
+	dir, _, ghLog := openPRReady(t)
+	holdDrive(t, dir)
+
+	if err := execute(t, "open-pr", "1"); err != nil {
+		t.Fatalf("propose refused while a drive held the checkout: %v", err)
+	}
+	if n := prCreates(t, ghLog); len(n) != 1 {
+		t.Errorf("opened %d pull requests, want 1: %v", len(n), n)
+	}
+}
+
+// Two drives over one queue run the same items twice, so narrowing what the
+// lease refuses for finish and open-pr must not narrow it for drive.
+func TestASecondDriveStillRefuses(t *testing.T) {
+	dir := leaseProject(t)
+	holdDrive(t, dir)
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := s.takeLease("drive", "")
+	if err == nil {
+		release()
+		t.Fatal("a second drive took a checkout a drive is holding")
+	}
+	if Code(err) != ExitRefused || !strings.Contains(err.Error(), fmt.Sprintf("pid %d", os.Getpid())) {
+		t.Errorf("exited %d, want %d naming the holder: %v", Code(err), ExitRefused, err)
+	}
+}
+
+// finish removes the item's worktree, and a live session holding that tree's
+// lease is working in it. The holder is a second process, because this one's
+// own tree lease is the drive finishing its own item and is let through.
+func TestFinishRefusesWhileASessionHoldsTheItemsWorktree(t *testing.T) {
+	if path := os.Getenv(envTreeHold); path != "" {
+		lp, err := lease.Path(path, "")
+		if err != nil {
+			childExit(err)
+		}
+		heldLease, err = lease.Acquire(lp, lease.Lease{Command: "drive", Item: "B1", Root: path})
+		if err != nil {
+			childExit(err)
+		}
+		runtime.GC()
+		runtime.GC()
+		fmt.Println("held")
+		_ = os.Stdout.Close()
+		time.Sleep(time.Hour)
+	}
+
+	dir, branch := finishProject(t, noProject)
+	stubPATH(t)
+	t.Setenv(runner.EnvActor, "")
+	s := openIn(t, dir)
+	it, err := s.item("B1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := s.treePath(it)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "worktree", "add", "-q", tree, branch)
+
+	child := relaunch(t, envTreeHold, tree)
+	pipe, err := child.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child.Stderr = os.Stderr
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = child.Process.Kill()
+		_ = child.Wait()
+	}()
+	if line, err := bufio.NewReader(pipe).ReadString('\n'); err != nil || strings.TrimSpace(line) != "held" {
+		t.Fatalf("the holder never took the tree's lease: %q %v", line, err)
+	}
+
+	err = execute(t, "finish", "B1")
+	if Code(err) != ExitRefused {
+		t.Fatalf("finish exited %d with a live session in the item's worktree, want %d: %v", Code(err), ExitRefused, err)
+	}
+	for _, want := range []string{tree, fmt.Sprintf("pid %d", child.Process.Pid)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q: %v", want, err)
+		}
+	}
+	if _, err := os.Stat(tree); err != nil {
+		t.Errorf("the worktree a session holds is gone: %v", err)
+	}
+	if openIn(t, dir).ledger.State("B1").Merged {
+		t.Error("finish refused and recorded the completion anyway")
+	}
+}
+
+// A drive and an operator's finish can record one merge from two processes, each
+// having read the ledger before the other wrote. Both sessions are opened first
+// to stand for that, then they record in each order, and the command's own path
+// runs last against the result.
+func TestFinishAndADriveRecordOneCompletionInEitherOrder(t *testing.T) {
+	for _, driveFirst := range []bool{true, false} {
+		name := "finish first"
+		if driveFirst {
+			name = "drive first"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir, _ := finishProject(t, noProject)
+			stubPATH(t)
+			t.Setenv(runner.EnvActor, "")
+			drive, operator := openIn(t, dir), openIn(t, dir)
+			yes := true
+			first, second := operator, drive
+			if driveFirst {
+				first, second = drive, operator
+			}
+			for i, s := range []*session{first, second} {
+				wrote, err := s.recordDone(ledger.Row{ID: "B1", Merged: &yes, MergedRunner: "impl", Date: ledger.Today()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if wrote != (i == 0) {
+					t.Errorf("recorder %d wrote=%v, want only the first to write", i+1, wrote)
+				}
+			}
+			if !second.ledger.State("B1").Merged {
+				t.Error("the recorder that skipped still reads B1 as not done")
+			}
+
+			finishInDrive = !driveFirst
+			t.Cleanup(func() { finishInDrive = false })
+			var err error
+			out := capture(t, func() { err = execute(t, "finish", "B1") })
+			if err != nil {
+				t.Fatalf("finish: %v\n%s", err, out)
+			}
+			if !strings.Contains(out, "already done") {
+				t.Errorf("finish did not report the row it found:\n%s", out)
+			}
+			l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := 0
+			for _, r := range l.Rows {
+				if r.ID == "B1" && r.Merged != nil {
+					done++
+				}
+			}
+			if done != 1 {
+				t.Errorf("the ledger holds %d completion rows for B1, want 1", done)
+			}
+		})
+	}
+}
+
+// The trunk lock waits for its holder rather than refusing, and a holder that
+// outlasts the wait costs the fast-forward, reported, and nothing else.
+func TestTheTrunkLockWaitsThenReports(t *testing.T) {
+	dir, _ := finishProject(t, noProject)
+	s := openIn(t, dir)
+	path := filepath.Join(dir, ".git", lease.TrunkFileName)
+	restore := trunkWait
+	t.Cleanup(func() { trunkWait = restore })
+
+	h, err := lease.Acquire(path, lease.Lease{Command: "drive", Root: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trunkWait = 200 * time.Millisecond
+	errOut := captureErr(t, func() { s.syncTrunk("main") })
+	out := capture(t, func() {
+		if err := s.backToTrunk("main"); err != nil {
+			t.Errorf("a held trunk lock failed the return to the trunk: %v", err)
+		}
+	})
+	for stream, text := range map[string]string{"syncTrunk": errOut, "backToTrunk": out} {
+		if !strings.Contains(text, "held the trunk for longer than") || !strings.Contains(text, "drover drive") {
+			t.Errorf("%s did not report the lock it waited on:\n%s", stream, text)
+		}
+	}
+
+	trunkWait = 5 * time.Second
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = h.Release()
+	}()
+	release, err := s.trunkLock("finish")
+	if err != nil {
+		t.Fatalf("the lock did not come free once its holder released it: %v", err)
+	}
+	release()
+}

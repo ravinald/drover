@@ -1,0 +1,529 @@
+package cmd
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"os"
+	"os/exec"
+	"regexp"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/ravinald/drover/internal/gitcmd"
+	"github.com/ravinald/drover/internal/ledger"
+)
+
+// forgeCheck is one check run the forge holds for a commit, as GitHub's
+// check-runs endpoint returns it. For an Actions job the id is the job's id,
+// and details_url carries the workflow run it belongs to.
+type forgeCheck struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	Conclusion  string `json:"conclusion"`
+	HTMLURL     string `json:"html_url"`
+	DetailsURL  string `json:"details_url"`
+	CompletedAt string `json:"completed_at"`
+}
+
+// red reports a completed check whose conclusion is a failure of some kind. A
+// canceled run is red here though merge-gate.sh waits on it: it is the run
+// most often canceled by the forge rather than the code, and rerunning it is
+// the answer either way.
+func (r forgeCheck) red() bool {
+	return r.Status == "completed" &&
+		slices.Contains([]string{"failure", "timed_out", "startup_failure", "cancelled"}, r.Conclusion)
+}
+
+// green reports a completed check whose conclusion lets a head merge.
+func (r forgeCheck) green() bool {
+	return r.Status == "completed" && slices.Contains([]string{"success", "neutral", "skipped"}, r.Conclusion)
+}
+
+// parkInfraFailure is a head whose checks failed on the forge's infrastructure
+// while rerun_infra_failure is below auto, so a person or a supervisor reruns
+// them rather than drive.
+const parkInfraFailure = "infra_failure"
+
+// infraPatterns are the log lines that mark a failed job as the forge's
+// infrastructure failing, matched case-insensitively. Each is a failure a
+// supervisor reran by hand and that passed unchanged. [forge] infra_patterns
+// adds to them.
+var infraPatterns = []string{
+	"toomanyrequests",     // Docker Hub's pull rate limit
+	"rate limit exceeded", // GitHub's API and most registries
+	"429 Too Many Requests",
+	"No space left on device",
+	"The runner has received a shutdown signal",
+	"lost communication with the server",
+	"Could not resolve host",
+	"Temporary failure in name resolution",
+	"connection reset by peer",
+	"TLS handshake timeout",
+}
+
+// judged is one red check and what drive took it for.
+type judged struct {
+	run      forgeCheck
+	class    string
+	evidence string
+	// workflow is the Actions run to rerun, zero for a check no workflow run
+	// produced.
+	workflow int64
+}
+
+// settled is what settleChecks concluded about a head before the gate reads
+// it. A park stops the item; none reports a head no workflow ran on, for a
+// verify refusal that follows to say so.
+type settled struct {
+	park, reason string
+	stop         error
+	none         string
+}
+
+// settleChecks waits for the checks on sha and classifies every red one before
+// [drive] merge_gate reads it, because the gate cannot tell whose failure a red
+// check is and sends every one of them back to the item.
+//
+// infra is rerun and waited on again, up to [forge] reruns per head; trunk
+// parks trunk_red, since no branch fixes a check the trunk fails too; code is
+// left for the gate, as it always was. Anything it cannot read leaves the gate
+// to answer, which is what drive did before it classified anything.
+func (s *session) settleChecks(ctx context.Context, d *DriveItem, sha string, deadline time.Time) settled {
+	d.head = sha
+	superseded := map[int64]bool{}
+	for {
+		runs, err := s.waitChecks(ctx, d.ID, sha, deadline, superseded)
+		if err != nil || ctx.Err() != nil {
+			return settled{}
+		}
+		if len(runs) == 0 {
+			why := fmt.Sprintf("no workflow ran on this head (%s) in %s", shortSHA(sha), s.cfg.ForgeChecksWait())
+			s.recordCheck(d.ID, sha, judged{class: ledger.ClassNone, evidence: why}, false, "")
+			fmt.Fprintf(os.Stderr, "  · %s: %s; [drive] merge_gate decides\n", d.ID, why)
+			return settled{none: why}
+		}
+		// A rerun attempt the forge has not replaced yet is still the old red
+		// one, which waitChecks returns only at its limit; classifying it again
+		// would rerun it again.
+		var reds []judged
+		for _, r := range runs {
+			if r.red() && !superseded[r.ID] {
+				reds = append(reds, s.classify(ctx, r))
+			}
+		}
+		if len(reds) == 0 {
+			return settled{}
+		}
+		out, rerun := s.actOnReds(ctx, d, sha, reds)
+		if len(rerun) == 0 {
+			return out
+		}
+		for _, id := range rerun {
+			superseded[id] = true
+		}
+	}
+}
+
+// actOnReds records each red check and decides what follows: a park, the
+// check ids drive reran and now waits on, or neither, which leaves the gate.
+func (s *session) actOnReds(ctx context.Context, d *DriveItem, sha string, reds []judged) (settled, []int64) {
+	trunkPol, _ := s.cfg.Policy("report_trunk_red")
+	infraPol, _ := s.cfg.Policy("rerun_infra_failure")
+	for i := range reds {
+		switch {
+		case reds[i].class == ledger.ClassTrunk && trunkPol == polOff:
+			reds[i].class, reds[i].evidence = ledger.ClassCode, reds[i].evidence+"; report_trunk_red is off"
+		case reds[i].class == ledger.ClassInfra && infraPol == polOff:
+			reds[i].class, reds[i].evidence = ledger.ClassCode, reds[i].evidence+"; rerun_infra_failure is off"
+		case reds[i].class == ledger.ClassInfra && reds[i].workflow == 0:
+			reds[i].class, reds[i].evidence = ledger.ClassCode, reds[i].evidence+"; no workflow run to rerun"
+		}
+	}
+	has := func(class string) bool {
+		return slices.ContainsFunc(reds, func(j judged) bool { return j.class == class })
+	}
+
+	if has(ledger.ClassTrunk) {
+		var named []string
+		for _, j := range reds {
+			act := ""
+			if j.class == ledger.ClassTrunk {
+				act = "report_trunk_red"
+				named = append(named, j.evidence)
+			}
+			s.recordCheck(d.ID, sha, j, false, act)
+		}
+		return settled{park: parkTrunkRed, stop: errTrunkRed, reason: strings.Join(named, "\n") +
+			"\nno branch can fix a check the trunk fails too, so nothing was sent back"}, nil
+	}
+	// A code failure goes to the gate, which sends it back, so rerunning the
+	// infra failures beside it would spend reruns on a head that is going back.
+	if has(ledger.ClassCode) {
+		for _, j := range reds {
+			s.recordCheck(d.ID, sha, j, false, "")
+		}
+		return settled{}, nil
+	}
+
+	var workflows []int64
+	for _, j := range reds {
+		if !slices.Contains(workflows, j.workflow) {
+			workflows = append(workflows, j.workflow)
+		}
+	}
+	if spent, limit := s.ledger.Reruns(d.ID, sha), s.cfg.ForgeReruns(); spent+len(workflows) > limit {
+		for _, j := range reds {
+			j.class = ledger.ClassCode
+			j.evidence += fmt.Sprintf("; %d of %d reruns of this head spent, so it is the code's", spent, limit)
+			s.recordCheck(d.ID, sha, j, false, "")
+		}
+		return settled{}, nil
+	}
+	if infraPol != polAuto {
+		var lines []string
+		for _, j := range reds {
+			s.recordCheck(d.ID, sha, j, false, "rerun_infra_failure")
+			lines = append(lines, j.run.Name+": "+j.evidence)
+		}
+		return settled{park: parkInfraFailure, reason: "a check failed on the forge's infrastructure, and rerun_infra_failure is " +
+			string(infraPol) + ", so drive did not rerun it:\n" + strings.Join(lines, "\n")}, nil
+	}
+
+	var ids []int64
+	rerun := map[int64]bool{}
+	for _, j := range reds {
+		first := !rerun[j.workflow]
+		if first {
+			rerun[j.workflow] = true
+			fmt.Fprintf(os.Stderr, "  · %s: %s failed on the forge (%s); rerunning its failed jobs\n", d.ID, j.run.Name, j.evidence)
+			if err := s.rerunFailed(ctx, j.workflow); err != nil {
+				fmt.Fprintf(os.Stderr, "  · %s: the rerun of %s would not start, so [drive] merge_gate decides: %v\n", d.ID, j.run.Name, err)
+				s.recordCheck(d.ID, sha, j, true, "rerun_infra_failure")
+				return settled{}, nil
+			}
+		}
+		s.recordCheck(d.ID, sha, j, first, "rerun_infra_failure")
+		ids = append(ids, j.run.ID)
+	}
+	return settled{}, ids
+}
+
+// classify reads one red check: infra when its job ran no step, its run was
+// canceled or its log carries an infrastructure line; trunk when the same check
+// concluded failure on the trunk's latest completed run; code otherwise.
+func (s *session) classify(ctx context.Context, r forgeCheck) judged {
+	j := judged{run: r, workflow: workflowRun(r.DetailsURL)}
+	if r.Conclusion == "cancelled" {
+		j.class, j.evidence = ledger.ClassInfra, "the run was canceled"
+		return j
+	}
+	if j.workflow > 0 {
+		if ran, err := s.stepsRun(ctx, r.ID); err == nil && ran == 0 {
+			j.class, j.evidence = ledger.ClassInfra, "the job failed with no step run"
+			return j
+		}
+		if log, err := s.ghAPI(ctx, "repos/"+s.repo()+"/actions/jobs/"+strconv.FormatInt(r.ID, 10)+"/logs"); err == nil {
+			if line := infraLine(string(log), append(slices.Clone(infraPatterns), s.cfg.Forge.InfraPatterns...)); line != "" {
+				j.class, j.evidence = ledger.ClassInfra, line
+				return j
+			}
+		}
+	}
+	trunk := s.trunk()
+	if u := s.trunkRed(ctx, trunk, r.Name); u != "" {
+		j.class, j.evidence = ledger.ClassTrunk, r.Name+" concluded failure on "+trunk+"'s latest completed run too: "+u
+		return j
+	}
+	j.class, j.evidence = ledger.ClassCode, "no infrastructure line in its log, and "+trunk+" does not fail it"
+	return j
+}
+
+var workflowRunPath = regexp.MustCompile(`/actions/runs/(\d+)`)
+
+// workflowRun is the Actions run a check's details URL names, zero for a check
+// some other app reported.
+func workflowRun(details string) int64 {
+	m := workflowRunPath.FindStringSubmatch(details)
+	if m == nil {
+		return 0
+	}
+	n, _ := strconv.ParseInt(m[1], 10, 64)
+	return n
+}
+
+// logStamp is the timestamp Actions prefixes to every log line.
+var logStamp = regexp.MustCompile(`^\S+Z `)
+
+// evidenceMax bounds the log line a row carries.
+const evidenceMax = 200
+
+// infraLine is the first log line carrying one of patterns, without its
+// timestamp, or "" when none does.
+func infraLine(log string, patterns []string) string {
+	for _, line := range strings.Split(log, "\n") {
+		low := strings.ToLower(line)
+		for _, p := range patterns {
+			if strings.Contains(low, strings.ToLower(p)) {
+				line = strings.TrimSpace(logStamp.ReplaceAllString(strings.TrimSpace(line), ""))
+				if len(line) > evidenceMax {
+					line = line[:evidenceMax]
+				}
+				return line
+			}
+		}
+	}
+	return ""
+}
+
+// stepsRun counts the steps of an Actions job that ran to a conclusion. A job
+// the forge failed before its runner started has none.
+func (s *session) stepsRun(ctx context.Context, job int64) (int, error) {
+	out, err := s.ghAPI(ctx, "repos/"+s.repo()+"/actions/jobs/"+strconv.FormatInt(job, 10))
+	if err != nil {
+		return 0, err
+	}
+	var doc struct {
+		Steps []struct {
+			Conclusion string `json:"conclusion"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		return 0, fmt.Errorf("gh api answered %q: %w", lastLines(string(out), 1), err)
+	}
+	n := 0
+	for _, st := range doc.Steps {
+		if st.Conclusion != "" && st.Conclusion != "skipped" {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// trunkWindow is how many first-parent trunk commits trunkRed reads back from
+// the tip before calling a check not red.
+const trunkWindow = 10
+
+// trunkRed is the URL of the trunk's latest completed run of the check named
+// name when that run failed, or "" when it passed, never ran in the last
+// trunkWindow commits or cannot be read.
+//
+// The tip alone is not enough under drive: every merge moves it, so the next
+// item's checks finish while the tip's own run of the same check is still in
+// progress, or never starts on a path-filtered workflow. It walks back along
+// first parents and stops at the first commit holding a completed run, red or
+// green, and at the first one it cannot read, so an older failure never
+// outvotes a newer commit nobody could see.
+func (s *session) trunkRed(ctx context.Context, trunk, name string) string {
+	for _, rev := range append([]string{trunk}, s.trunkCommits(trunk)...) {
+		latest, err := s.completedRun(ctx, rev, name)
+		if err != nil {
+			return ""
+		}
+		if latest == nil {
+			continue
+		}
+		if !slices.Contains([]string{"failure", "timed_out", "startup_failure"}, latest.Conclusion) {
+			return ""
+		}
+		if latest.HTMLURL != "" {
+			return latest.HTMLURL
+		}
+		return latest.DetailsURL
+	}
+	return ""
+}
+
+// trunkCommits are the trunk's last trunkWindow first-parent commits, newest
+// first, read from origin's trunk the catch-up fetched and from the local one
+// where there is no origin. Reading git costs no forge call. The tip stays in
+// the list although trunkRed asked the forge for it by name: a fetch older than
+// the forge's tip makes the two different commits.
+func (s *session) trunkCommits(trunk string) []string {
+	ref := "origin/" + trunk
+	if gitAt(s.cfg.Root, "rev-parse", "--verify", "--quiet", ref+"^{commit}") != nil {
+		ref = trunk
+	}
+	out, err := gitcmd.Command(s.cfg.Root, "rev-list", "--first-parent", "-n", strconv.Itoa(trunkWindow), ref).Output()
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(out))
+}
+
+// completedRun is the latest completed run of the check named name on rev, nil
+// when rev has none.
+func (s *session) completedRun(ctx context.Context, rev, name string) (*forgeCheck, error) {
+	out, err := s.ghAPI(ctx, "repos/"+s.repo()+"/commits/"+url.PathEscape(rev)+
+		"/check-runs?filter=all&per_page=100&check_name="+url.QueryEscape(name))
+	if err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Runs []forgeCheck `json:"check_runs"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		return nil, err
+	}
+	var latest *forgeCheck
+	for i, r := range doc.Runs {
+		if r.Status == "completed" && (latest == nil || r.CompletedAt > latest.CompletedAt) {
+			latest = &doc.Runs[i]
+		}
+	}
+	return latest, nil
+}
+
+// rerunFailed asks the forge to rerun the failed jobs of one workflow run.
+func (s *session) rerunFailed(ctx context.Context, run int64) error {
+	args := []string{"run", "rerun", strconv.FormatInt(run, 10), "--failed"}
+	if s.cfg.GitHub.Repo != "" {
+		args = append(args, "--repo", s.cfg.GitHub.Repo)
+	}
+	cmd := exec.CommandContext(ctx, "gh", args...) // #nosec G204 -- run comes from the forge and repo from project config
+	cmd.Dir = s.cfg.Root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("gh run rerun: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// repo is [github] repo, or the placeholders gh fills from the project's remote.
+func (s *session) repo() string {
+	if s.cfg.GitHub.Repo != "" {
+		return s.cfg.GitHub.Repo
+	}
+	return "{owner}/{repo}"
+}
+
+// ghAPI reads one forge path from the project root.
+func (s *session) ghAPI(ctx context.Context, path string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "gh", "api", path) // #nosec G204 -- path is built from forge ids and project config
+	cmd.Dir = s.cfg.Root
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh api %s: %w", path, err)
+	}
+	return out, nil
+}
+
+// recordCheck writes one classification to the ledger and the event stream. A
+// row that will not write is reported and drive goes on: the classification
+// already decided what happens to the item, and the ledger is its account.
+func (s *session) recordCheck(id, sha string, j judged, rerun bool, act string) {
+	row := ledger.Row{ID: id, Head: sha, Check: j.run.Name, Class: j.class, Evidence: j.evidence, Rerun: rerun, Date: ledger.Today()}
+	if err := s.record(row); err != nil {
+		fmt.Fprintf(os.Stderr, "  · %s: the ledger would not record %s as %s: %v\n", id, row.Check, j.class, err)
+	}
+	events.emit(DriveEvent{Event: evCheck, ID: id, Action: act, Head: sha, Check: row.Check, Class: j.class, Evidence: j.evidence})
+}
+
+// noneFirst heads a gate's refusal with the report that no workflow ran on the
+// head, where one was made, because that is a different fix from a red check:
+// CI that never fires on a branch push rather than a check that failed.
+func noneFirst(none, reason string) string {
+	if none == "" {
+		return reason
+	}
+	return none + "; " + reason
+}
+
+// recheckInfra reads the checks once more on the head of each item this drive
+// parked infra_failure, before the drive ends. A rerun somebody started by
+// hand, or one the forge retried on its own, turns such a head green while the
+// queue runs, and without this the item waits for the operator to find it in
+// status. A head that moved is somebody else's push and is left for the next
+// drive, as is one whose checks are still red or unreadable.
+//
+// Every item the drive picked up replaces its entry in done. It returns the
+// stop a pickup raised, nil when none did.
+func (s *session) recheckInfra(ctx context.Context, done []DriveItem, deadline time.Time, enc *json.Encoder) error {
+	for i, d := range done {
+		if d.Outcome != outcomeParked || d.Park != parkInfraFailure || d.head == "" {
+			continue
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		if !s.headGreen(ctx, d) {
+			fmt.Fprintf(os.Stderr, "  · %s: checks on %s still red at the end of the drive; left parked\n", d.ID, shortSHA(d.head))
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "  · %s: checks on %s went green after the park; picking it up\n", d.ID, shortSHA(d.head))
+		r := s.pickUp(ctx, d, deadline)
+		done[i] = r
+		events.itemEvents(r)
+		activeDrive.Load().revise(r)
+		if driveJSON {
+			if err := enc.Encode(r); err != nil {
+				return err
+			}
+		}
+		if r.stop != nil {
+			fmt.Fprintf(os.Stderr, "· %v; stopping the drive\n", r.stop)
+			return r.stop
+		}
+	}
+	return nil
+}
+
+// headGreen is one read of the checks on d's recorded head: true when every
+// run on it completed with a conclusion that merges and the branch still
+// points there.
+func (s *session) headGreen(ctx context.Context, d DriveItem) bool {
+	runs, err := s.checkRuns(ctx, d.head)
+	if err != nil || len(runs) == 0 || slices.ContainsFunc(runs, func(r forgeCheck) bool { return !r.green() }) {
+		return false
+	}
+	now, err := revParse(s.cfg.Root, d.Branch)
+	return err == nil && now == d.head
+}
+
+// pickUp sends an item parked on its checks back through the gate and the
+// merge, on a session and worktree of its own as dispatch gives every item.
+// The green row goes in first, so the ledger reads the park, the pickup and
+// whatever the gate made of it in that order.
+func (s *session) pickUp(ctx context.Context, d DriveItem, deadline time.Time) (res DriveItem) {
+	d.Outcome, d.Park, d.Reason, d.Detail, d.Evidence, d.Log = "", "", "", "", "", ""
+	d.Ended = ""
+	defer func() {
+		res.Ended = time.Now().Format(time.RFC3339)
+		if res.Outcome == outcomeParked {
+			s.recordPark(&res, nil, nil)
+			s.announcePark(res)
+		}
+	}()
+	park := func(cause, why string) DriveItem {
+		d.Outcome, d.Park, d.Reason = outcomeParked, cause, why
+		return d
+	}
+	w, err := s.fork(nil)
+	if err != nil {
+		return park("branch_failed", err.Error())
+	}
+	it, err := w.item(d.ID)
+	if err != nil {
+		return park("branch_failed", err.Error())
+	}
+	w.recordCheck(d.ID, d.head, judged{class: ledger.ClassGreen,
+		evidence: "every check on this head passed when drive read it again at the end of the drive"}, false, "")
+	tree, err := w.openItemTree(it, d.Branch, w.trunk())
+	defer tree.close()
+	if err != nil {
+		if tree != nil {
+			d.Tree = tree.Path
+		}
+		return park(parkWorktree, err.Error())
+	}
+	w.tree, d.Tree = tree.Path, tree.Path
+	park = func(cause, why string) DriveItem {
+		d.Outcome, d.Park, d.Reason = outcomeParked, cause, why
+		w.leaveItem(&d)
+		return d
+	}
+	return w.inTrunkStage(func() DriveItem { return w.finishAtHead(ctx, it, &d, park, w.trunk(), deadline, &settled{}) }, park)
+}

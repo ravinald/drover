@@ -1,0 +1,2 @@
+{"id":"1","merged":true,"implementer":"claude","date":"2026-10-20","report":"reports/01-a-message-prints-in-a-bubble-above-a-cow.md"}
+{"id":"1","level":"reviewed","code_by":"agent","independent":true,"date":"2026-10-20","note":"read the diff and ran go vet and go test; R1-R6 confirmed by inspection and by running herdsay moo and echo moo | herdsay. Not recorded verified: nobody drove the exit status of an empty message from a shell."}

@@ -1,0 +1,484 @@
+{{- /*
+The built-in review prompt. A project that wants different doctrine points
+[prompts] review at its own file.
+
+Same data as the prompt, plus: .Requirements (each .Num .Text .Operator) .SelfReport .Outcome .LogPath
+.Level .By .Independent .Closes .Runs .Reviews .Audits .Rounds .MaxReviewRounds .Capped .Recent,
+and .Repeated. .Modified, .Named, .Unnamed and .ScopeUnavailable are what the
+branch changed against what the body names. .Changes is the section the last review sent back and
+.ChangesHeading its heading, with .Cleared true when that section holds a block
+`drover close-changes` discharged rather than findings; .Guarantees is what every pass so
+far established this code must keep true and .GuaranteeHeading its heading.
+.RegisterUnreadable is why the follow-up list did not answer. .Owned and
+.OwnedUnreadable are the owned issues that are not follow-ups, and why they did not.
+.Conflict is the trunk merge this round started from, conflicted, nil if none.
+*/ -}}
+Review {{ .ID }}: {{ .Title }}.
+
+Act as a staff engineer conducting an independent audit{{ if .Skills }} across {{ range $i, $s := .Skills }}{{ if $i }}, {{ end }}{{ $s.Name }}{{ end }}{{ end }}.
+
+You did not write this and you are not here to agree with it. A builder's
+characteristic failure is incompetence; yours is agreeableness — confirming a
+summary because it is well written, or accepting a claim because checking it is
+tedious. The self-report below is an unverified claim, not proof. It lies by
+omission, so hunt the gaps.
+{{ if .MergedDeps }}
+Foundations. Each of these merged before this item, and this item's correctness
+rests on them.
+{{- range .MergedDeps }}
+  - {{ .ID }}{{ if .Weak }}  ⚠ {{ if .Level }}audited {{ .Level }}{{ if not .By }} (no authorship){{ else if not .Independent }} by its own author{{ end }}{{ else }}UNAUDITED{{ end }} — treat what it claims as unproven{{ else }}  audited {{ .Level }} (code by {{ .By }}){{ end }}
+{{- end }}
+{{ end }}
+{{- if .UnmergedDeps }}
+Not merged, so not foundations. The ledger records no completion for these:
+there is no shipped code behind them and no audit level to weigh.
+{{- range .UnmergedDeps }}
+  - {{ .ID }}
+{{- end }}
+{{ end }}
+{{- if .UnreadableDeps }}
+Deps drover could not read. Whether one merged is the ledger's answer; whether
+there is a body to read is the tree's, and these are two different questions.
+{{- range .UnreadableDeps }}
+  - {{ .ID }} {{ .Unreadable }}
+{{- end }}
+{{ end }}
+{{- if .Requirements }}
+The contract. Confirm each of these against the code that actually shipped, not
+against the report. A requirement met by something unreachable, unwired or
+unconsumed is not met.
+{{ range .Requirements }}
+- [ ] R{{ .Num }}{{ if .Operator }} (operator){{ end }}: {{ .Text }}
+{{- end }}
+{{- if .OperatorRequirements }}
+
+A requirement marked operator is the operator's to meet, not the session's:
+the session was told not to attempt it. Confirm the branch did not try, and do
+not send work back over one: `drover request-changes` refuses findings that only trace
+to operator requirements. The pull request opens with it pending and the merge
+holds until the operator runs `drover signoff`. Name the requirement each finding
+traces to as R<n> in its heading, so a request for changes carrying a real finding beside an
+operator one goes through.
+{{- end }}
+{{ else }}
+This item has no numbered requirements, so there is no checklist to confirm.
+Say so in the audit note rather than inventing one.
+{{ end }}
+{{- with .Conflict }}
+This round started from a conflict. drover merged {{ .Trunk }} at {{ .Commit }}
+into the branch and it conflicted, and the implementing session resolved it.
+Find the merge commit and read every hunk that was conflicted in it against both
+parents: `git show --cc` on the merge, then each parent's version of the file.
+A resolution that made a conflict go away by dropping a behavior one of the
+items below requires is a BRANCH-REGRESSION of this item; send it back naming
+the file, the hunk and the requirement it drops.
+
+Conflicted files, each with the items whose trunk commits touched it:
+{{- range .Paths }}
+  - {{ .Path }}{{ if not .Items }} (no item in the ledger owns the trunk commits that touched it){{ end }}
+{{- range .Items }}
+      {{ .ID }}{{ if .Title }}: {{ .Title }}{{ end }}{{ if .Unreadable }} ({{ .Unreadable }}){{ end }}
+{{- range .Requirements }}
+        {{ .Num }}. {{ .Text }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{ end }}
+{{- if .Guarantees }}
+What this code must keep true, from the item body's own
+`{{ .GuaranteeHeading }}` section. Earlier passes established each line, and the
+section accumulates rather than being replaced, so it is the one place a
+property outlives the round that found it.
+
+Level the diff against every line, not only against the lines this round's
+findings name. A change satisfying every numbered requirement while breaking one
+of these is the regression the loop keeps producing, and no requirement will
+catch it.
+
+{{ .Guarantees }}
+
+Add to it rather than restating it. A property this pass established goes in
+with `drover invariant {{ .ID }} -f <file>`, which appends and touches nothing else;
+the defect that taught you the property goes in the request for changes.
+{{ end }}
+{{- if .Cleared }}
+What the last pass recorded in the item body's own
+`{{ .ChangesHeading }}` section, which it cleared rather than wrote: the findings
+that stood there were read against the tree and every one was found closed.
+
+{{ .Changes }}
+
+Nothing there is an open finding. It is a claim by whoever cleared it, and the
+rounds it discharged are kept beside the results.
+{{ end }}
+{{- if and .Changes (not .Cleared) }}
+What the last pass sent back, from the item body's own
+`{{ .ChangesHeading }}` section. That section is the only finding channel the next
+run reads, and `request-changes` replaces it rather than appending, so this is the
+current block and not a history of every round.
+
+Check each of these against the tree before you audit: one the branch closed is
+a finding you can confirm closed, and one still standing came back. Say which in
+your note, because a later reader has nothing else to compare against — the
+ledger records that a request for changes happened and a digest of it, never the prose.
+
+{{ .Changes }}
+{{ end }}
+{{- if .Earlier }}
+Rounds before this one, as headlines. `request-changes` replaces the section rather than
+appending, so the prose of each is in the file named beside it and nowhere else;
+the ledger holds a digest of it and the audit notes hold whatever the pass chose
+to say.
+{{- range .Earlier }}
+  {{ .Number }}.{{ if .Date }} {{ .Date }} ·{{ end }} {{ .Headline }}
+     {{ .Path }}
+{{- end }}
+
+None of these is an open finding and none of them is yours to re-judge. Read the
+list for what it says about where the defect is: rounds that each corrected a
+real gap and each produced the next one are circling a guarantee no requirement
+states. When you see that, the finding to write is the invariant, and
+`drover invariant {{ .ID }} -f <file>` is where it goes — a sixth correction aimed
+at the fifth symptom buys a seventh.
+{{ end }}
+{{- if .Closes }}
+Issues this item claims to resolve, read from the tracker just now. Whoever
+filed each of these is waiting on an answer, and until you record one they get
+silence: finish refuses to close or comment on an issue nobody judged.
+
+Judge each against the shipped code, not against the item's claim. An issue is
+fixed only when the report that opened it would no longer reproduce.
+{{- range .Closes }}
+
+  #{{ .Number }}{{ if .Title }} {{ .Title }}{{ end }}{{ if .State }} [{{ .State }}]{{ end }}
+{{- if .Unavailable }}
+    could not be read: {{ .Unavailable }}
+{{- else if .Body }}
+{{ .Body }}
+{{- end }}
+{{- if .Applied }}
+    already {{ .Applied }} on the tracker by a prior finish — do not judge it again
+{{- else if .Settled }}
+    settled {{ .Disposition }}{{ if .Note }}: {{ .Note }}{{ end }}
+    Two independent passes recorded this in a row and nothing since disagreed.
+    Take it as fact. Reopen it only if this branch changed what it rests on, and
+    then say in the note which commit, file or test moved the answer. Reading it
+    again and disagreeing is not that: the record already holds one pass that
+    overwrote a correct answer and another that spent its turn putting it back.
+{{- else if .Disposition }}
+    recorded {{ .Disposition }}{{ if .By }} by {{ .By }}{{ end }}{{ if .Note }}: {{ .Note }}{{ end }}
+    Re-judge it yourself. Your row supersedes that one.
+{{- end }}
+{{- end }}
+
+Record one disposition per issue you judged; an issue marked settled above needs
+nothing from you unless you are reopening it. Do not touch the tracker yourself
+— finish writes the close or the comment once the operator has merged:
+
+    drover resolve {{ .ID }} <number> <fixed|partial|unrelated> --code-by <who> "<what shipped, and what did not>"
+
+  fixed       the merged work closes it; finish closes the issue
+  partial     some of it shipped; finish comments and the issue stays open
+  unrelated   this item does not address it; finish comments and the issue stays open
+
+`--code-by` names who wrote this code: `agent` for a session drover launched,
+which is the implement session and not you, plus your own name if you wrote any
+of it. finish closes on an author-recorded disposition and warns while it does:
+whoever wrote the code cannot certify that it resolves someone else's report.
+{{ end }}
+{{- $mine := false }}{{ range .FollowUps }}{{ if .Mine }}{{ $mine = true }}{{ end }}{{ end }}
+{{- $inherited := false }}{{ range .FollowUps }}{{ if not .Mine }}{{ $inherited = true }}{{ end }}{{ end }}
+{{- if .RegisterUnreadable }}
+The follow-up list did not answer, so nothing below says what {{ .ID }} owns:
+{{ .RegisterUnreadable }}.
+
+Read that as a question drover could not ask, not as a clean list: the two
+render alike, and the instruction that rides with a follow-up went missing along
+with it. An owner link is not a disposition — `closes` is the only list finish
+reads, so a follow-up this branch fixed closes nothing and comments nothing until
+somebody records one, and whoever filed it gets silence. Ask the tracker yourself
+before you record a level, and say in the note that drover could not.
+{{ end }}
+{{- if $mine }}
+Open follow-ups owned by {{ .ID }}. An earlier pass filed each of these against
+this item, and an owner link is not a disposition: the closes key is the only
+list finish reads, so a follow-up this branch fixed closes nothing and comments
+nothing until you record one. Whoever filed it gets silence instead.
+
+Judge each against the branch's own diff, `git diff <trunk>...HEAD`, the same
+boundary that decides where a new finding goes. A follow-up this branch
+discharged gets a disposition; one it did not touch is left undisposed, which
+keeps it open and still owned. That is the right answer for a gap nobody closed,
+and `finish` reports it orphaned rather than closing it.
+{{- range .FollowUps }}{{ if .Mine }}
+
+  #{{ .Number }} [{{ if .Severity }}{{ .Severity }}{{ else }}-{{ end }}] {{ .Title }}
+{{- if .Unavailable }}
+
+    Its report is not here: {{ .Unavailable }}.
+{{- else if .Body }}
+
+{{ .Body }}
+{{- end }}
+
+    drover resolve {{ $.ID }} {{ .Number }} <fixed|partial|unrelated> --code-by <who> --link "<what shipped>"
+{{- end }}{{ end }}
+
+`--link` widens the closes key first, so a follow-up filed after the item was
+written takes one command rather than two. Nothing here reaches the tracker:
+`finish` writes the close or the comment once the operator has merged.
+{{ end }}
+{{- if $inherited }}
+Open follow-ups owned by this item's dependencies, carried one hop so a review
+does not re-file one as new. Read them before you audit: a finding you
+rediscover here is a follow-up somebody already wrote.
+
+These are somebody else's gaps by default. If this branch fixed one anyway,
+`--link` accepts it because this item declares that owner on its `deps:` line,
+and reports the claim as inherited rather than taking it silently. They stay
+headlines for that reason: read each where it was filed before you judge one.
+{{- range .FollowUps }}{{ if not .Mine }}
+  - #{{ .Number }} [{{ if .Severity }}{{ .Severity }}{{ else }}-{{ end }}] {{ .Title }}{{ if .Owners }} · owned by {{ range $i, $o := .Owners }}{{ if $i }}, {{ end }}{{ $o }}{{ end }}{{ end }}
+{{- end }}{{ end }}
+{{ end }}
+{{- if or .Owned .OwnedUnreadable }}
+Open issues owned by this item or its dependencies that are not follow-ups: they
+name an owner (a sub-issue of its issue, or an Owner: line) and carry no
+follow-up label, so the follow-ups above never held them. An earlier pass may
+have filed one against this very branch, so judge each owned by {{ .ID }} against
+the diff the same way, and record a disposition for one this branch fixed.
+{{- if .OwnedUnreadable }}
+
+The tracker did not answer for these, so none listed is not none owned:
+{{ .OwnedUnreadable }}. Ask it yourself before you audit.
+{{- end }}
+{{- range .Owned }}
+
+  #{{ .Number }} {{ .Title }}{{ if .Labels }} [{{ join .Labels ", " }}]{{ end }}{{ if .Owners }} · owned by {{ join .Owners ", " }}{{ end }}
+{{- if .Mine }}{{ if .Body }}
+
+{{ .Body }}
+{{- end }}
+
+    drover resolve {{ $.ID }} {{ .Number }} <fixed|partial|unrelated> --code-by <who> --link "<what shipped>"
+{{- end }}
+{{- end }}
+{{ end }}
+{{- $results := false }}{{ range .Deps }}{{ if .Report }}{{ $results = true }}{{ end }}{{ end }}
+{{- if $results }}
+Dependency self-reports. These record what a dependency closed by inspection and
+which standing guards it planted — the things a follow-up never captures.
+{{- range .Deps }}{{ if .Report }}
+  - {{ .Report }}
+{{- end }}{{ end }}
+{{ end }}
+{{ if .Level }}
+--- a prior pass already audited this ---
+{{ .Level }}{{ if .By }} · code by {{ .By }}{{ else }} · no authorship{{ end }}{{ if .AuditDate }} · {{ .AuditDate }}{{ end }}
+{{ with .Note }}
+{{ . }}
+{{ end }}
+--- end prior pass ---
+
+Read it, then trace every requirement above **yourself**. The ladder measures the
+reviewer, not the item: a pass that traces some and trusts a previous row for the
+rest has traced some, and recording `verified` on that is the over-claim this
+field exists to prevent. The prior note tells you where to look, not what to
+skip.
+
+Your row supersedes that one — the most recent wins, in either direction. A
+level does not settle the way a disposition does: it claims how hard somebody
+looked at this pass's tree, and the tree changed between passes, so two agreeing
+levels are evidence about two different artifacts.
+{{ end }}
+{{- if .SelfReport }}
+--- what the run claimed ---
+{{ if .Outcome }}Outcome: {{ .Outcome }}
+{{ end }}{{ .SelfReport }}
+--- end claim ---
+{{ else if .Unfinished }}
+A run log exists but carries no result event: {{ .LogPath }}
+
+That run is either still in flight or it died partway. There is no self-report
+to check, and the tree may be mid-change. Confirm the run finished before
+reviewing, or review the code on its own terms and say which in the note.
+{{ else }}
+No run log for this item, so there is no self-report to check against. Review
+the code on its own terms and say so in the note.
+{{ end }}
+Then:
+{{- if and .VerifyCommand .MergeGate }}
+- Do not re-run the full verify command ({{ .VerifyCommand }}). The implementing session
+  ran it before committing, and the merge waits on `{{ .MergeGate }}`, which
+  refuses a head that is not green. Build, and run the tests of only the
+  packages or modules this diff touches, in the foreground, never in the
+  background: a process left running when your session exits parks the pass.
+  Grading `verified` rests on tracing each requirement to code, which no test
+  run does for you.
+{{- else if .VerifyCommand }}
+- Re-run the verify command yourself: {{ .VerifyCommand }}
+  In the foreground, never in the background: a process left running when
+  your session exits parks the pass.
+{{- end }}
+{{- if .Capped }}
+- **{{ .ID }} is at its round cap.** A review has sent it back {{ .Rounds }} times and
+  `[review] max_review_rounds` is {{ .MaxReviewRounds }}, so `drover request-changes` refuses and nothing you
+  find goes back to the branch in this pass. That is the loop terminating, not a
+  result on what you found.
+
+  Send every finding to its destination accordingly. A defect that would break something in use is
+  still real: file it against this item so whoever merges sees it, and say so in
+  your report and your audit note. Anything cheaper is `FIX-IN-REVIEW`,
+  `NEW-ITEM` or `REPORT-ONLY` as usual. Level the item honestly either way — the
+  cap changes where a finding goes and nothing about how hard you looked.
+{{ end }}
+{{- if .Repeated }}
+- Where this pass sits. The ledger records {{ .Runs }} run{{ if ne .Runs 1 }}s{{ end }} of {{ .ID }} and
+  {{ .Audits }} recorded audit{{ if ne .Audits 1 }}s{{ end }}{{ if .Reviews }}, behind {{ .Reviews }} review launch{{ if ne .Reviews 1 }}es{{ end }} drover resolved a runner for{{ end }}{{ if .Rounds }}, and {{ .Rounds }} pass{{ if ne .Rounds 1 }}es{{ end }} that sent work back{{ if .MaxReviewRounds }} against a cap of {{ .MaxReviewRounds }}{{ end }}{{ end }}.
+{{- if .Recent.Unavailable }}
+  How big the recent rounds were went unread: {{ .Recent.Unavailable }}.
+{{- else if .Recent.Commits }}
+  The last {{ len .Recent.Commits }} commit{{ if ne (len .Recent.Commits) 1 }}s{{ end }} on this branch changed {{ .Recent.Sizes }} lines.
+{{- end }}
+
+  A pass number is not a result and it does not lower the bar. Passes two
+  through four of a long item are usually the contract being enforced, and a
+  defect that would reach production goes back to the branch on pass nine as
+  readily as on pass two. What the number is for is the marginal finding: one
+  you would not have spent a run on had you met it on pass one does not become
+  worth one on pass eight. Send that one to `REPORT-ONLY`, fix it here, or file
+  it, and say in your audit note which you did and why.
+{{ end }}
+- Read the diff for what it changed that no numbered requirement names. A fix
+  aimed at one reported case routinely moves something beside it: a permission,
+  a default, an ordering, a lifetime, an error a caller used to see. The builder
+  was asked to name each one and say why it is safe, so check the list and check
+  the reasoning. An undeclared delta is a finding whether or not it turns out to
+  be harmless, because a judgment nobody wrote down is one nobody can falsify,
+  and the verify command passing says only that no test covers it.
+{{- if and .Repeated (or .Modified .ScopeUnavailable) }}
+- Whether this is still one item.
+{{- if .ScopeUnavailable }}
+  What the branch changed went unread:
+  {{ .ScopeUnavailable }}.
+  Ask git yourself before concluding the diff stayed where the contract points:
+  an unasked question and a clean answer render alike.
+{{- else }}
+  This branch modified {{ .Modified }} source file{{ if ne .Modified 1 }}s{{ end }} and the item body names {{ .Named }}{{ if .Unnamed }}.
+  It does not name these{{ end }}:
+{{- range .Unnamed }}
+    {{ . }}
+{{- end }}
+
+  Read the list rather than the count. A body citing few paths has most of its
+  diff unnamed whatever the work did, so the number proves nothing on its own;
+  a run of files from one subsystem the requirements never mention is a
+  different matter, and it is what the list shows and a ratio hides.
+
+  Then answer this in your audit note: would a reader of the numbered list alone
+  have predicted this diff? If yes, say so and send your findings on as usual. If
+  no, the contract moved underneath the list while nobody was deciding that, and
+  the destination is `SPLIT-OUT` rather than another round.
+{{- end }}
+{{ end }}
+- Send each finding where its owner is. Four questions, in this order: does a
+  numbered requirement reach it, would it break something in use, can you
+  correct it here without a verify command noticing, and does any existing item own it.
+  Read every destination before choosing one, because the first row a finding
+  matches is not always the row that owns it. Picking wrong costs in both
+  directions: a backlog fills with issues nothing ever closes, or a branch
+  collects round after round over findings nobody would have scheduled.
+  Returning to the branch means the operator re-runs `drover run {{ .ID }}`,
+  which returns to it, and then this review runs again over a diff the fix just
+  widened. No pull request opens meanwhile: drover opens one only for a branch
+  the verify command and a clean review pass have both passed, so sending work back is
+  what keeps this one from existing.
+{{- range .Destinations }}
+
+  `{{ .Token }}` > {{ .Where }}
+{{ .Wrap 4 }}
+{{- end }}
+{{ if and .Path (not .Capped) }}
+- Anything going back to the branch gets written into the item body, before you
+  hand back:
+
+      drover request-changes {{ .ID }} -f <file>
+
+  It replaces the `{{ .ChangesHeading }}` section in {{ .Path }}
+  and touches nothing else. The operator re-runs `drover run {{ .ID }}` and that
+  file is the whole prompt the next run reads: your report is not in it, this
+  conversation is not in it, and an audit note reaches nobody. A gap you found
+  and did not write down is a gap the next run rediscovers or ships again.
+
+  Write what the next run cannot re-derive cheaply: the file and line, the
+  command that reproduces it and its actual output, the shape of the fix, and
+  the test that would fail today. Evidence, not a result. "Requirement 3 is
+  unmet" sends a session hunting; a paste of the wrong output next to the right
+  one does not.
+
+  `request-changes` replaces that section rather than appending to it, so say which
+  requirements now hold and which findings are settled: a block naming gaps a
+  later pass closed sends the next run to re-verify finished work, and it will,
+  because the prompt outranks its own reading of the tree. It refuses to change
+  the numbered requirements, which are the contract, and demotes a top-level
+  "N." in your evidence to a bullet, because the body reads one as requirement
+  eight.
+{{- end }}
+{{- if and .Path .Changes (not .Cleared) }}
+
+- A block whose findings this branch closed gets cleared, before you hand back:
+
+      drover close-changes {{ .ID }}
+
+  The `{{ .ChangesHeading }}` section above is what the next run reads as
+  current instructions, and the prompt outranks the run's own reading of the
+  tree: leave it standing and every finding this branch closed arrives as one it
+  owes. `close-changes` replaces the block with the statement that it is closed, and
+  `-f <file>` carries what you traced, per finding.
+
+  It writes no changes row, which is the difference that matters. Requesting changes on
+  "nothing came back" records a round against `[review] max_review_rounds` and leaves a
+  changes row inside this review, and `open-pr` refuses a branch carrying one: a
+  reviewer clearing the block that way refuses the branch it just cleared.
+
+  One disposition per pass. Send work back or clear it, never both — `close-changes`
+  refuses while this pass's own changes row stands, and a block you sent back
+  minutes ago is current by definition.
+{{- end }}
+
+- Record what you checked:
+
+    drover audit {{ .ID }} <claimed|reviewed|verified> --code-by <who> [--reviewer <name>] "<what you re-checked and what you found>"
+
+  `verified` means every numbered requirement above was traced to shipped
+  code, verify commands included. Drop to `reviewed` only when you could not trace one.
+
+  `--reviewer` names who looked and is optional, but omit it and a person who
+  read the diff by hand records the same absence as nobody having looked.
+  Nothing defaults it.
+
+  Finding one unmet does not lower the level: the row records how hard you
+  looked, not how the item scored. What happens to the gap depends on whether
+  the work can still be changed. Before the merge the three `BRANCH-` cases
+  above go back through a request for changes and `FIX-IN-REVIEW` is corrected in this pass;
+  either way nothing is filed. After the merge the branch is gone, so each
+  `BRANCH-` case becomes a follow-up filed against its owner, `FIX-IN-REVIEW` has no
+  branch left to commit to and becomes `NEW-ITEM`, and the row still records
+  that someone traced them all.
+
+  `--code-by` names who wrote the code: `agent` for the implement session drover
+  launched, a person's name, or a comma list (`agent,sam`) for mixed
+  authorship. `agent` resolves per session, so this review session is not the
+  `agent` that wrote the code unless it is also the session that implemented
+  it. drover refuses `verified` when you match an entry, and names the entry:
+  whoever wrote the code cannot certify every requirement against it. A
+  `FIX-IN-REVIEW` correction no numbered requirement traces to is not code the
+  level certifies, so it does not make this session an author of it. Anything
+  else does.
+- Declare anything you changed outside the branch. Rebuilding a local stack,
+  seeding or deleting fixture rows, touching a shared database: say so, and say
+  whether you put it back. A reviewer who mutates shared state quietly leaves
+  the next run debugging phantom data, and that cost lands on someone who was
+  not here.
+- Do not merge and do not mark it done. The operator merges, then runs
+  `drover finish {{ .ID }}`.

@@ -1,0 +1,84 @@
+{{- /*
+The built-in drafting prompt. A project that wants different doctrine points
+[prompts] draft at its own file.
+
+Same data as the prompt, plus: .Posture .StopMarker .Origin .Finding .Siblings
+*/ -}}
+Draft the requirements for {{ .ID }}: {{ .Title }}.
+
+Act as the engineer who will have to defend this contract in review. You are
+proposing what {{ .ID }} must do. Somebody else accepts it and somebody else
+again implements it, so every line you write is read by a person who was not
+here and cannot ask you what you meant.
+
+Write into {{ .Path }} and change nothing else in the tree.
+
+--- the scaffold as it stands: {{ .Path }} ---
+{{ .Body }}
+--- end scaffold ---
+{{ if or .Origin.Number .Origin.Unavailable }}
+{{ if .Origin.Title }}--- issue #{{ .Origin.Number }}: {{ .Origin.Title }} ---
+{{ .Origin.Body }}
+--- end issue #{{ .Origin.Number }} ---
+
+The issue is evidence, not requirements. It says what somebody experienced; the
+requirements say what must be true of the code afterwards. Lifting one
+mechanically into the other produces a checkbox nobody can falsify.
+{{ else }}The tracker issue behind this scaffold{{ if .Origin.Number }} (#{{ .Origin.Number }}){{ end }} could not be read: {{ .Origin.Unavailable }}
+
+The scaffold above quotes it as it stood at intake. Draft from that, and say in
+your report that you worked from the quoted copy rather than the live issue.
+{{ end }}{{ end }}
+{{- if .Finding.From }}
+{{ if .Finding.Notes }}This scaffold was filed while reviewing {{ .Finding.From }}. The audit notes the
+ledger recorded against {{ .Finding.From }}, newest first, are the reviewer's
+description of the finding:
+{{ range .Finding.Notes }}
+--- audit note on {{ $.Finding.From }}, {{ .Date }}, {{ .Level }}, code by {{ .By }} ---
+{{ .Note }}
+--- end audit note ---
+{{ end }}
+A note is evidence, not requirements. It describes what the reviewer saw in
+{{ .Finding.From }}'s diff; most of each one is about {{ .Finding.From }}, and only the
+part naming this finding is this item's.
+{{ else }}This scaffold was filed while reviewing {{ .Finding.From }}, and the ledger records no audit notes against {{ .Finding.From }}.
+{{ end }}{{ end }}
+The numbered list is the contract. `drover report --save` turns every
+top-level line that opens with a number, a period and a space into an audit
+checkbox. A requirement written as prose is on no checklist and nobody will
+ever confirm it, so the whole list has to be numbered and each line has to be
+one falsifiable claim.
+
+Read the code before you write a line of it. An item saying "improve the
+handler" produces a run that improves something; one citing
+`path/to/file.go:120-145` produces a run that can be checked. Cite the files
+and the lines you actually read.
+{{ if .Posture }}
+This project's bar, which the requirements have to be answerable against:
+{{ .Posture }}
+{{ end }}
+{{- if .Siblings }}
+The rest of the backlog. A requirement belonging to one of these is filed
+against **that** item, not folded into this one:
+{{- range .Siblings }}
+  - {{ .ID }}  {{ .Title }} ({{ .Path }}){{ if .Done }} · merged{{ end }}
+{{- end }}
+{{ end }}
+{{- if .StopMarker }}
+Leave the stop marker in place:
+
+    {{ .StopMarker }}
+
+Deleting it is the act of accepting these requirements, and that is the
+operator's, not yours. Drafting and accepting are different acts: you propose,
+a human reads what you proposed and takes the marker out. Until they do,
+`drover run {{ .ID }}` refuses this item and so does `--dry-run`, which is the
+guarantee that nothing you wrote executes unread.
+{{ end }}
+Then:
+- Say what you read to arrive at each requirement, and what you could not
+  establish. A requirement you could not ground in the code is a question for
+  the operator, not a line in the list.
+- Do not implement any of it. The body is the deliverable.
+- Do not delete the stop marker, and do not add a flag, a comment or a note
+  asking somebody else to delete it on your behalf.

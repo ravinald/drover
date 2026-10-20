@@ -1,0 +1,11 @@
+{"type":"thread.started","thread_id":"01a0b561-7067-77f1-a8ec-4ecaef300bc2"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `does-not-exist` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest."}}
+{"type":"error","message":"Reconnecting... (unexpected status 404 Not Found: model does-not-exist)"}
+{"type":"error","message":"Reconnecting... (unexpected status 404 Not Found: model does-not-exist)"}
+{"type":"error","message":"Reconnecting... (unexpected status 404 Not Found: model does-not-exist)"}
+{"type":"error","message":"Reconnecting... (unexpected status 404 Not Found: model does-not-exist)"}
+{"type":"error","message":"Reconnecting... (unexpected status 404 Not Found: model does-not-exist)"}
+{"type":"error","message":"Reconnecting... (unexpected status 404 Not Found: model does-not-exist)"}
+{"type":"turn.failed","error":{"message":"unexpected status 404 Not Found: model does-not-exist"}}

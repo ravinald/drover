@@ -1,0 +1,116 @@
+%% drover builtin:obsidian. Copy it with `drover status --print-template builtin:obsidian`; style it with the snippet `drover status --print-css obsidian` prints, saved under .obsidian/snippets. %%
+# fixture
+
+## Needs you
+
+- <span class="drover-unaudited">unaudited</span> [[#^b1|B1]] merged, and nobody has audited it · since 275d ago · `drover audit B1 verified --code-by agent "<what you re-checked>"`
+- <span class="drover-parked">parked</span> [[#^b2|B2]] no_commits: runner_exit · since 1d ago · `drover drive B2`
+- <span class="drover-scaffold">scaffold</span> [[#^b5|B5]] requirements unwritten · `write B5's requirements, then drover accept B5`
+- <span class="drover-needs-operator">needs-operator</span> [[#^b12|B12]] trunk_red: vuln · since 9h ago · `fix the trunk, then drover drive B12`
+- **follow-up** the follow-up list could not be read: the forge was not asked (--no-tracker, or a drive's render) · `drover follow-ups`
+
+## Running drive
+
+**D2** · day run · started 1h ago · 1 at a time
+
+- <span class="drover-running">running</span> [[#^b8|B8]] Running now · stage implement · 4m elapsed · ETA 11:11 PDT (in 11m)
+- queued: [[#^b9|B9]]
+
+## Open
+
+### Drive D2 · day run
+
+#### <span class="drover-running">running</span>
+
+- **B8** Running now ^b8
+
+### Drive D1 · night run
+
+#### <span class="drover-parked">parked</span>
+
+- **B2** Parked on no commits · no_commits: runner_exit · blocks [[#^b3|B3]] ^b2
+
+### No drive
+
+#### <span class="drover-needs-operator">needs-operator</span>
+
+- **B12** Trunk went red · trunk_red: vuln ^b12
+
+#### <span class="drover-broken">broken</span>
+
+- **B11** (unreadable) · <root>/work/B11-broken.md: no frontmatter (expected a '---' fence on line 1) ^b11
+
+#### <span class="drover-running">implemented</span>
+
+- **B10** Ran clean ^b10
+
+#### <span class="drover-ready">ready</span>
+
+- **B7** &lt;script&gt;alert(1)&lt;/script&gt; &amp; co ^b7
+- **B9** Queued next ^b9
+- **B13** The place's sign reads a &lt; b · blocks [[#^b14|B14]] ^b13
+
+#### <span class="drover-blocked">blocked</span>
+
+- **B3** Blocked by the park · deps [[#^b2|B2]] · blocks [[#^b4|B4]] ^b3
+- **B4** Blocked behind that · deps [[#^b3|B3]] ^b4
+- **B14** Published as an issue · deps [[#^b13|B13]] ^b14
+
+#### <span class="drover-scaffold">scaffold</span>
+
+- **B5** Scaffold ^b5
+
+## Done
+
+- **B6** Merged with a level · <span class="drover-done">reviewed</span> · PR [#236](https://forge.example/acme/widgets/pull/236) · merged 2026-10-16 ^b6
+- **B1** Merged first · <span class="drover-unaudited">unaudited</span> · merged 2026-01-15 ^b1
+
+## Trends
+
+2026-10-04 to 2026-10-17, 14 days. n is how many items a figure is read from; n/a is a period with nothing to read.
+
+| Day | Finished | Cycle median | Cycle p90 | Passes per item | Changes-requested rate | Parks | Review to merge | Verify median |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-04 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-05 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-06 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-07 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-08 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-09 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-10 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-11 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-12 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-13 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-14 | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
+| 2026-10-15 | 0 | n/a | n/a | n/a | n/a | 0 | n/a | n/a |
+| 2026-10-16 | 1 | 59m 0s (n=1) | 59m 0s | n/a | 0% (n=1) | 1 | n/a | n/a |
+| 2026-10-17 | 0 | n/a | n/a | n/a | n/a | 1 | n/a | n/a |
+| **14 days** | 1 | 59m 0s (n=1) | 59m 0s | n/a | 0% (n=1) | 2 | n/a | n/a |
+
+Parks by reason:
+
+- no_commits: 1
+- trunk_red: 1
+
+## Key
+
+Red waits on a person, yellow is moving, gray is held by a paused drive, orange cannot move yet or is unproven, green is settled.
+
+| State | Meaning |
+| --- | --- |
+| <span class="drover-needs-operator">needs-operator</span> | Waiting on you. Needs you names the command. |
+| <span class="drover-parked">parked</span> | A drive stopped the item. The park reason follows its title. |
+| <span class="drover-broken">broken</span> | The item's body does not parse. |
+| <span class="drover-running">running</span> | A session is working on it now. |
+| <span class="drover-pausing">pausing</span> | Its drive is paused and it is finishing the stage it is in. It holds once that stage ends. |
+| <span class="drover-paused">paused</span> | Held by a paused drive before its next stage. Nothing runs until `drover drive --resume`. |
+| <span class="drover-running">implemented</span> | Implemented, waiting on its review and pull request. |
+| <span class="drover-ready">ready</span> | Every dependency has merged and nothing has run. |
+| <span class="drover-blocked">blocked</span> | A dependency has not merged. |
+| <span class="drover-scaffold">scaffold</span> | Requirements not written. Write them, then `drover accept`. |
+| <span class="drover-done">claimed</span> <span class="drover-done">reviewed</span> <span class="drover-done">verified</span> | Merged, at the audit level recorded: the author's word, a read of the diff, every requirement traced. |
+| <span class="drover-unaudited">unaudited</span> | Merged, and nobody has audited it. |
+| **follow-up** | An open follow-up nothing is scheduled to carry. |
+
+---
+Rendered 2026-10-17 11:00 PDT (America/Los_Angeles) · fixture · drover v9.9.9-test

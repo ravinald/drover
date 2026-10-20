@@ -1,0 +1,415 @@
+## Tooling: `drover`
+
+[`drover`](https://github.com/ravinald/drover) drives the work in this project:
+the backlog, the completion ledger, result capture, and the prompt an agent is
+handed. It finds the project by walking up to `.drover.toml`, so it runs from
+anywhere inside the tree.
+
+A work item is one file at `{{ .Bodies }}/<NN>-<slug>.md`: metadata in a leading
+`---` fence, prose below. The directory listing is the backlog, so adding an item
+needs no config edit and no change to drover.
+
+The fence is driver metadata, not part of what a run is asked to do. The prompt
+is everything under it, and its numbered requirements are the contract.
+{{ if .Namespaces }}
+Ids without a prefix are the planned backlog. Prefixed ids arrive from the
+tracker:
+{{ range .Namespaces }}
+- `{{ .Prefix }}` — {{ .Kind }}
+{{- end }}
+{{ end }}
+Frontmatter is a closed schema. An undeclared key is a parse error, because a
+typo'd `deps` would read as no dependencies and render a blocked item READY.
+
+- Required (may be empty, may not be absent): {{ range $i, $k := .Required }}{{ if $i }}, {{ end }}`{{ $k }}`{{ end }}
+{{- if .Optional }}
+- Optional: {{ range $i, $k := .Optional }}{{ if $i }}, {{ end }}`{{ $k }}`{{ end }}
+{{- end }}
+{{- if .Closes }}
+- `closes` holds the tracker issue numbers this item resolves. `drover resolve
+  <id> <n> <disposition>` records a judgment on one and refuses a number the key
+  does not name; `--link` adds it to the key first. `drover finish` closes each
+  issue recorded `fixed`, and `drover check` reports `NO DISPOSITION` for a
+  merged item whose key names an issue nobody judged. An item that leaves the key
+  empty closes nothing when it merges.
+{{- end }}
+{{- if .Issue }}
+- `issue` is the tracker issue `drover intake` created this item from. `finish`
+  reads `closes`, not `issue`, so an item meant to close its own intake issue
+  names it in both.
+{{- end }}
+
+### Command safety
+
+| Class | Commands |
+| --- | --- |
+{{- range .Safety }}
+| {{ .Class }} | {{ range $i, $c := .Commands }}{{ if $i }}, {{ end }}{{ $c }}{{ end }} |
+{{- end }}
+
+What each one changes, with this project's own paths resolved:
+
+| Command | What it changes |
+| --- | --- |
+{{- range .Effects }}
+| `{{ .Command }}` | {{ cell .Effect }} |
+{{- end }}
+
+`drover <command> --help` prints the same sentence, under a `Safety:` line
+naming the class, and an `Actor:` line on the commands below.
+
+### Whose step it is
+
+These refuse inside a session drover launched, and exit 3. Each certifies work
+somebody else has to trust, or reaches a tracker other people read.
+
+| Command | Why it is not yours |
+| --- | --- |
+{{- range .Operator }}
+| {{ .Class }} | {{ index .Commands 0 }} |
+{{- end }}
+
+A launched session also cannot launch another, so `run`, `draft --runner` and
+`review --runner` refuse there too: report what you found and let the operator
+start the next one. Everything not listed here is safe from a session,
+`audit` included — a review session is legitimately independent of the session
+that implemented the work.
+
+### What a supervising session may do
+
+`drover supervise` launches one session with `DROVER_ACTOR=supervisor` to watch
+drives and handle what comes up. It answers to the table above, except that it
+may run `drive` while `enqueue` is `supervisor` or `auto`; the sessions that
+drive launches are agents. It also answers to this project's `[supervise]`
+policy: a command that is one of these actions runs only at `supervisor` or
+`auto`, and refuses with exit 3 otherwise. Here a supervisor may not run
+{{ range $i, $c := .SupervisorRefused }}{{ if $i }}, {{ end }}{{ $c }}{{ end }}.
+
+| Action | Policy | Ceiling | What it is |
+| --- | --- | --- | --- |
+{{- range .Policies }}
+| `{{ .Key }}` | {{ .Policy }}{{ if not .Declared }} (default){{ end }} | {{ .Ceiling }} | {{ .Description }} |
+{{- end }}
+
+`auto`: drive does it. `supervisor`: a supervising session may do it, and
+reports it. `operator`: drover stops, notifies, and waits for a person. `off`:
+nothing happens and the park stands. An agent session never acts on this table;
+it is here so you know whom a park belongs to.
+
+The check reads an environment variable drover sets when it launches you. It is
+a guardrail against running a command you read in a code block, not a boundary:
+if you find yourself wanting to strip it, that is the signal to stop and report
+instead.
+
+Exit codes: `0` clean, `1` drover could not answer, `2` findings against the
+project (`check`), `3` a rule drover enforces refused the operation.
+
+`--json` is on `status`, `show`, `unaudited`, `drive`, `drives`, `attach`, `check`, `follow-ups`,
+`intake --list`, `projects`, `skills` and `report`. Parse that, never the table.
+
+### When this file runs out
+
+`drover <command> --help` answers first: it carries a `Safety:` line resolved
+against this project's own paths, an `Actor:` line on the commands above, and a
+worked `Examples:` block with a sample object for every `--json` command.
+
+The drover repository is not on disk here, only the binary is, so the rest is at
+{{ .DocsRef }}, the ref this binary was built from:
+
+- [Agent guide](https://github.com/ravinald/drover/blob/{{ .DocsRef }}/docs/agent-guide.md):
+  every refusal you will hit and the exit code it carries.
+- [Automation](https://github.com/ravinald/drover/blob/{{ .DocsRef }}/docs/automation.md):
+  every `--json` shape with its field meanings, including which fields report a
+  read drover could not complete rather than a count of zero.
+- [Prompt templates](https://github.com/ravinald/drover/blob/{{ .DocsRef }}/docs/prompts.md):
+  the data a prompt, review or drafting template reaches. Only needed to edit one.
+- [rtk filters](https://github.com/ravinald/drover/blob/{{ .DocsRef }}/docs/rtk-filters.toml):
+  copy to `.rtk/filters.toml` if this project uses rtk. It keeps every line of
+  `drover status` except the merged rows, which is most of what `--all` prints.
+
+## Work-item completion review, triggered by "<id> finished" (or similar)
+
+When the operator says an item finished, run this loop for that id without
+waiting for further instruction.
+
+**Start with `drover review <id>`.** It assembles the prompt: the numbered
+contract, every dependency with how well it is audited, the open follow-ups,
+the dependency results, the run's self-report, and the verify command. Those are six
+things a reviewer would otherwise gather from as many commands, and the failure
+mode of gathering them by hand is skipping one silently.
+{{- if .ReviewRunner }}
+
+**This project splits the two roles.** `drover review <id>` hands the prompt to
+`{{ .ReviewRunner }}` rather than printing it, so whoever implemented an item is
+not who reviews it. `--runner` overrides that for one pass, and the item's own
+frontmatter never selects a reviewer: it names who implements the item, and
+reviewing under the same name is the self-certification `audit` refuses to
+record as `verified`.
+{{- end }}
+
+Then do the part no tool can:
+
+1. **Validate against the code, not the summary.** Confirm each numbered
+   requirement against the tree that actually shipped, and against this
+   project's principles: {{ .Posture }}
+2. **Treat a flagged dependency as unproven.** `review` marks any dependency
+   nobody independently confirmed. What it claims to have built is a claim.
+3. **Send what you find to its owner; do not absorb it.** Four questions, in this order:
+   does a numbered requirement reach it, would it break something in use, can
+   you correct it here without a verify command noticing, and does any existing item own
+   it. `git diff <trunk>...HEAD` names what the run answers for, and that
+   answers who caused a defect rather than whether a pull request should stay
+   open. Read every destination before choosing one; the first row a finding
+   matches is not always the row that owns it, and picking wrong costs in both
+   directions. A backlog fills with rows nothing closes, or a branch collects
+   round after round over findings nobody would have scheduled.
+{{- range .Destinations }}
+
+   `{{ .Token }}` > {{ .Where }}
+{{ .Wrap 6 }}
+{{- end }}
+
+   `FOLLOW-UP-TO-OWNER` is the only one that reaches the tracker. `NEW-ITEM`
+   writes a body in this project's backlog and reaches no tracker at all, and
+   `FIX-IN-REVIEW` reaches neither. `FOLLOW-UP-TO-OWNER` goes there labeled,
+   with its owner as a link rather than a label:
+   - follow-up carried forward > labels `{{ .FollowUpLabel }}` +
+     `{{ .SeverityPrefix }}<critical|high|medium|low>`, filed as a sub-issue of
+     the owning item's issue (`gh issue create --parent <n>`) when that item
+     names one, otherwise with an `Owner: <owning id>` line in the body. Never an
+     owner label: drover reads none.
+   - a concrete reproducible defect worth its own unit of work > your tracker's
+     bug label, then `drover intake <n>`
+
+   Ownership travels **one hop**: a prompt reads what the item itself owns plus
+   what each id on its `deps:` line owns, nothing further. `drover unaudited`
+   walks the graph transitively; prompts deliberately do not, because carrying
+   every ancestor's open gaps would bury the ones the author can act on. Confirm
+   the run you expect to close it lists that owner as a direct dependency:
+   `drover run <id> --dry-run | grep -A20 'Open follow-ups'`. A follow-up with no
+   owner link reaches nobody.
+4. **Discharge what this branch already fixed.** Everything above points
+   outward; this is the hop back. A follow-up owned here from an earlier pass is named
+   on no `closes:` key, and `closes:` is the only list `finish` reads, so a row
+   this branch fixed closes nothing and comments nothing. Whoever filed it gets
+   silence. `review` lists the rows and pre-fills the command:
+
+   `drover resolve <id> <n> <fixed|partial|unrelated> --code-by <who> --link "<what shipped>"`
+
+   `--link` widens the key first, which is what a follow-up filed after the item
+   was written needs. Record nothing for a row the branch did not touch:
+   undisposed keeps it open and owned, and `finish` reports it orphaned.
+5. **Write anything going back to the branch into the item body**, with
+   `drover request-changes <id> -f <file>`. That body is the whole prompt `run` assembles:
+   a report and an audit note both reach the operator and neither reaches the
+   next run, so a gap recorded only there is one the next run rediscovers or
+   ships again. Give it the file and line, the command that reproduces it and
+   its actual output, the shape of the fix, and the test that would fail today.
+   `request-changes` replaces the section rather than appending, so say which findings are
+   now settled; it refuses to change the numbered requirements, which are the
+   contract you are auditing against.
+
+   **A property the code must keep goes in with `drover invariant <id> -f <file>`
+   instead**, which appends and is never replaced. A finding names the case that
+   broke; an invariant names what may not break again, and every later pass reads
+   it. Five rounds of fixes each aimed at the reported case is what happens when
+   only the first channel exists.
+
+   **A block this branch closed gets cleared with `drover close-changes <id>`**, which
+   replaces the section with the statement that it is closed and writes no
+   ledger row. Leave one standing and the next run reads settled gaps as current
+   instructions; request changes on "nothing came back" instead and the row that
+   writes falls inside this review, where `open-pr` refuses the branch it just cleared
+   and `[review] max_review_rounds` counts the round. One disposition per pass: `close-changes`
+   refuses while this pass's own changes row stands.
+{{- if .MergeGate }}
+6. **Leave the full verify command to the merge gate.** The implementing session
+   ran it before committing, and every merge waits on `{{ .MergeGate }}`, which
+   refuses a head that is not green. Build, and run the tests of only the
+   packages this diff touches. This project's verify commands, for reference:
+{{- else }}
+6. **Re-run the verify command yourself.** `review` prints the exact command. This
+   project's verify commands:
+{{- end }}
+
+   | When | Command |
+   | --- | --- |
+{{- range .VerifyCommands }}
+   | {{ if eq .Name "default" }}no flag set{{ else }}`{{ .Name }}: yes`{{ end }} | `{{ .Command }}` |
+{{- end }}
+
+   A verify command named for a frontmatter key wins when that key is `yes`. Names are
+   tried in sorted order and the first match wins, so a flagged verify command must be a
+   superset of the default: drover selects one verify command, it never composes several,
+   and a check living in only one of them stops running the moment two flags are
+   set together.
+7. **Record what you checked.** `review` prints this pre-filled:
+
+   `drover audit <id> <claimed|reviewed|verified> --code-by <who> [--reviewer <name>] "<note>"`
+
+   `--reviewer` is optional and nothing defaults it, so omitting it records the
+   same absence as nobody having looked. Name yourself there when a person read the
+   diff; a session drover launched is already on the row `review` wrote.
+
+   `verified` means every numbered requirement was traced to shipped code,
+   verify commands included. Finding one unmet does **not** lower the level: the row
+   records how hard you looked, not how the item scored. What happens to the gap
+   depends on whether the work can still be changed. Before the merge the three
+   `BRANCH-` cases above go back through a request for changes and `FIX-IN-REVIEW` is
+   corrected in this pass; either way nothing is filed. After the merge the
+   branch is gone, so each `BRANCH-` case becomes a follow-up filed against its
+   owner, `FIX-IN-REVIEW` has no branch left to commit to and becomes
+   `NEW-ITEM`, and the row still records that someone traced them all.
+   Drop to `reviewed` only when you could not trace one.
+
+   **`--code-by` is not a formality.** It names who wrote the code under
+   review: `agent` for a session drover launched, a person's name, or a comma
+   list (`agent,sam`) for mixed authorship. `agent` resolves per session
+   against the item's stage rows, so a review session drover launched is
+   independent of the implement session it follows. drover **refuses**
+   `verified` and exits 3 when you match an entry, because whoever wrote the
+   code cannot certify every requirement against it. A `FIX-IN-REVIEW`
+   correction no numbered requirement traces to is not code the level
+   certifies, so it does not make this session an author of it; anything else
+   does. If you ran the item and are now reviewing it, the honest level is
+   `claimed` or `reviewed`, and someone else records `verified` later.
+
+   The **most recent** row wins, not the strongest, so a level can be corrected
+   in either direction and `drover audit` prints `(DOWNGRADED from …)` when it
+   lowers one. The note is the value: name what you re-checked and what you
+   found, not that you looked. If you could not fully check the item, leave the
+   level where it is and say why — an over-claimed `verified` is worse than
+   `UNAUDITED`, which is at least honest about what nobody knows.
+{{- if .MergeDrivePR }}
+8. **Merge only what this project lets a supervisor merge.** A session drover
+   launched as an agent never merges and never marks an item done, and never
+   opens a pull request: `open-pr` is the operator's, and an open one is the
+   claim that this branch may merge. This project sets `[supervise]
+   merge_drive_pr = "supervisor"`, so a supervising session
+   (`DROVER_ACTOR=supervisor`) may: {{ .MergeDo }}
+{{- if .MergeDenyPaths }}
+   A pull request that changes a `[drive] protected_paths` file is one of these too,
+   once the supervisor has read the diff of each denied file and named each in
+   its report before merging.
+{{- else }}
+   A pull request that changes a `[drive] protected_paths` file stays the operator's.
+{{- end }}
+   Everything else stops at the merge point: code the session wrote,
+   a pull request drive did not open, a red or pending check. Report the item
+   ready and let the operator make it.
+{{- else }}
+8. **Stop at the merge point.** Do not merge and do not mark it done. Do not open
+   a pull request either: `open-pr` is the operator's, and an open one is the
+   claim that this branch may merge. Report the item ready and let them make it.
+{{- end }}
+
+## After the merge
+{{ if .Git }}
+{{ if .MergeDrivePR }}The operator, or a supervising session under `merge_drive_pr`, merges, then
+runs `drover finish [id]`, which appends the completion{{ else }}The operator merges, then runs `drover finish [id]`, which appends the completion{{ end }}
+row to `{{ .Ledger }}`, saves the result under `{{ .Reports }}/`, and returns
+the tree to the trunk. With no id it resolves the item from the checked-out
+branch.
+
+`mark-merged` is the subset of it: the ledger row alone, for a merge recorded by hand.
+Running that first does not block `finish`, which skips the row it finds and does
+the rest.
+
+`finish` refuses on a branch it cannot see merged, and exits 3. Work that merged
+under a branch name the template does not render (a hand-named branch, or an
+item filed after the fact) needs `--force`, or `mark-merged` plus `audit` if you are
+not on the tree anyway.
+
+That name comes from `[run] branch`, which this project renders as:
+
+```
+{{ .Branch }}
+```
+
+Nothing parses it back into an id. Every command that needs an item's branch
+renders this template again, so a branch created under an older one is a branch
+drover no longer looks for. `drover show <id>` prints the name an item resolves
+to today.
+
+`finish` deliberately does not audit. Finishing is mechanical; auditing is judgement,
+and a command that did both would let the thing that merged the work also
+certify it.
+{{- else }}
+This project sets `[git] enabled = false`. There are no branches and no merge,
+so `finish` refuses and exits 3. The operator records completion with `drover mark-merged
+[id]`, which appends the row to `{{ .Ledger }}`, and records its level with
+`drover audit [id] <level> --code-by <who> [--reviewer <name>]`.
+
+Work in place. Nothing switches branches before a run, and nothing verifies a
+merge after one.
+{{- end }}
+
+## Writing an item
+
+- **A mechanical change is one item, and its requirement is a script.** A
+  rename, a reformat, a file move or a dependency bump is a term map applied by
+  a script in one branch, plus the build and test fixes it causes, under one
+  review. Splitting it into parts multiplies the implementing and reviewing
+  sessions and makes no part easier to check: drover's own six-item rename took
+  a day that one scripted pass would have done in hours.
+- **Keep new behavior out of a mechanical item.** A flag that changes what a
+  command does, a new field, a new rule: each is its own item with its own
+  requirements. Mixed into a sweep, the review argues design while it is meant
+  to be checking that nothing was missed.
+- **A change to a stored format carries its migration.** An item that renames
+  a config key, a ledger field or a stored value ships the script that rewrites
+  existing data, with a test that runs it on a sample, in the same branch.
+  "The operator migrates it later" leaves the migration for whoever installs
+  the release, written under deadline.
+- **State the cost before queuing several items.** Say how many items, how many
+  sessions each, and the time you expect, so the operator can choose a cheaper
+  route before the queue spends the day.
+- **The numbered list is the contract.** `report --save` turns every top-level
+  `N. ` line into an audit checkbox, so a requirement written as prose vanishes
+  from the checklist and nobody will ever confirm it.
+- **Name files and lines.** An item that says "improve the handler" produces a
+  run that improves something; one that cites `path/to/file.go:120-145` produces
+  a run that can be checked.
+- **Cite files, not directories.** Under `drive --jobs` a directory in
+  backticks holds the item apart from every item citing anything below it, and
+  the dispatcher cannot tell a directory named for context from one the item
+  will edit. Name a directory that is context only in plain prose, without
+  backticks and without a file name after it.
+{{- if .StopMarker }}
+- **Scaffolded items carry the marker `{{ .StopMarker }}`** and drover refuses
+  to launch or even preview them until a human writes the requirements.
+  Requirements lifted mechanically from a bug report are checkboxes nobody can
+  falsify.
+{{- if .DraftRunner }}
+- **`drover draft <id>` hands the drafting prompt to `{{ .DraftRunner }}`**: the
+  issue read fresh from the tracker, the principles above, the numbered-list
+  contract, the rest of the backlog for finding owners, and the body file to write
+  into. The draft leaves the marker in place. Removing it is the operator
+  accepting the requirements, and no flag on `draft` does it for them.
+{{- else }}
+- **`drover draft <id>` assembles the prompt for writing them** and prints it.
+  Set `[run] draft_runner` to hand it to an agent instead. Either way the draft
+  leaves the marker in place: removing it is the operator accepting the
+  requirements, and no flag on `draft` does it for them.
+{{- end }}
+- **`drover accept <id>` is that removal, and `drover unaccept <id>` reverses
+  it.** Both are the operator's to run. Neither is reachable from a runner's
+  argv, which is the whole reason accepting is a command and not a flag.
+{{- end }}
+{{- if .Specs }}
+- **`spec:` tokens resolve against `{{ .Specs }}/`.** A token naming a file that
+  is not there is carried into the prompt verbatim, so check what a run will
+  actually be told to read.
+{{- end }}
+{{- if .Skills }}
+- **`skills:` tokens must be vendored under `{{ .Skills }}/<name>/SKILL.md`.**
+  Run `drover skills` after adding one: a referenced guide that is not vendored
+  degrades to a suggestion an unattended run cannot read.
+{{- end }}
+
+## Doctrine lives in the templates, not here
+
+{{ if .Implement }}`{{ .Implement }}` holds what a run is told{{ else }}The built-in prompt template holds what a run is told{{ end }}{{ if .Draft }}, `{{ .Draft }}` holds what a draft is told{{ end }}{{ if .Review }}, and `{{ .Review }}` holds what a review is told{{ end }}.
+Change what an agent is handed by editing {{ if .Implement }}those files{{ else }}`[prompts] implement`{{ end }}, not this
+document: a template reaches the item, its dependencies, the verify command and the open
+follow-ups, so it applies per item rather than per reader who remembers to look.

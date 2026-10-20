@@ -1,0 +1,11 @@
+/bin/
+/dist/
+*.test
+*.out
+
+# Per-developer agent instructions and settings.
+/CLAUDE.md
+# Host-local agent permissions.
+/.claude/settings.local.json
+# Finder metadata.
+.DS_Store

@@ -1,0 +1,61 @@
+schema_version = 2
+drover_version = "v0.1.0"
+project = "herdsay"
+
+[paths]
+# Kept beside the code so a reader sees the whole demo in one directory.
+backlog     = "backlog"
+ledger      = "ledger.jsonl"
+reports     = "reports"
+root_marker = "go.mod"
+
+[ids]
+# The kind of work each id prefix holds: B1 is a bug, F1 and F2 are features.
+# Item 1 has no prefix because it was planned rather than filed.
+namespaces = { B = "bug", E = "enhancement", F = "feature" }
+
+[frontmatter]
+# The schema is closed: an undeclared key is an error, because a typo'd deps
+# reads as no dependencies and renders a blocked item READY.
+required = ["title", "deps"]
+optional = ["kind", "issue", "severity", "skills", "runner"]
+
+[frontmatter.shape]
+# severity fails without saying so when unchecked: an unknown letter maps to
+# unranked, and a typo then looks like a body that declared no rank.
+issue    = "int"
+severity = "enum:C,H,M,L"
+
+[status]
+column = "kind"
+
+[run]
+default_runner = "claude"
+# The reviewer is a separate session from the implementer, so the review that
+# records an item verified is never the session that wrote it.
+review_runner  = "claude"
+
+[drive]
+# What has to pass before drive merges a pull request. The demo has no CI to
+# ask, so the gate is its own tests run on the branch head.
+merge_gate      = ["sh", "-c", "go vet ./... && go test ./..."]
+# A branch that changes go.mod keeps its pull request but waits for a person to
+# merge it, because a new dependency changes what every later item builds on.
+protected_paths = ["go.mod"]
+
+[verify]
+# The command that must pass before an item merges, and what the agent is told
+# to run before it commits.
+default = "go vet ./... && go test ./..."
+
+[agents]
+principles = "a drawing is tested as an exact string, never by eye; an error names the input it refused and what would have been accepted"
+
+[intake]
+stop_marker = "STOP: requirements not yet written"
+
+[register]
+# The demo has no tracker. Left unset, gh infers a repository from the git
+# remote of whatever tree this is copied into, and drover would report that
+# repository's issues as the demo's follow-ups.
+backend = "none"

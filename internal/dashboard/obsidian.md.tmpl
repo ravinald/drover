@@ -1,0 +1,112 @@
+%% drover builtin:obsidian. Copy it with `drover status --print-template builtin:obsidian`; style it with the snippet `drover status --print-css obsidian` prints, saved under .obsidian/snippets. %%
+{{/* status --all-projects hands this template {projects, now} and status hands it one project's report: .projects is present only in the first. */ -}}
+{{if ne (printf "%T" .projects) "<nil>" -}}
+# drover projects
+
+{{with .projects -}}
+| Project | Drive | Item | Queue | Needs you | Finished | Last finished |
+| --- | --- | --- | --- | --- | --- | --- |
+{{range . -}}
+{{$link := ""}}{{range .renders}}{{if and (not $link) (eq .format "md")}}{{$link = .href}}{{end}}{{end -}}
+| {{if $link}}[{{.project | esc | md}}](<{{$link}}>){{else}}{{.project | esc | md}}{{end}} | {{if .error}}unreadable: {{.error | esc | md}} | | | | | |{{else}}{{with .drive}}{{.}}{{else}}-{{end}}{{with .label}} · {{. | esc | md}}{{end}}{{if .paused}} · paused{{end}} | {{range $i, $r := .running}}{{if $i}}, {{end}}{{$r}}{{else}}-{{end}} | {{with .queue}}{{.}}{{else}}-{{end}} | {{with .attention}}{{.}}{{else}}-{{end}} | {{with .finished}}{{.value}}{{else}}n/a{{end}} | {{with .last_finished}}{{time "2006-01-02 15:04" .}}{{else}}-{{end}} |{{end}}
+{{range .worktrees}}| worktree {{. | esc | md}} | | | | | | |
+{{end}}{{end}}{{else -}}
+No projects are registered.
+{{end}}
+---
+Rendered {{time "2006-01-02 15:04 MST" .now}}
+{{else -}}
+# {{.project | esc | md}}
+
+## Needs you
+
+{{range .attention -}}
+{{$a := . -}}
+- {{if eq .kind "follow-up"}}**follow-up**{{with .id}} {{with issue .}}[#{{$a.id}}]({{.}}){{else}}#{{$a.id}}{{end}}{{end}}
+{{- else}}<span class="drover-{{class .kind}}">{{class .kind}}</span>{{with .id}} [[#^{{anchor .}}|{{.}}]]{{end}}{{end}} {{.reason | esc | md}}
+{{- with .since}} · since {{ago .}}{{end}} · `{{.command}}`
+{{else -}}
+Nothing is waiting on you.
+{{end}}
+## Running drive
+
+{{$running := false -}}
+{{range .drives}}{{if .running}}{{$running = true -}}
+**{{.id}}**{{with .label}} · {{. | esc | md}}{{end}}{{if .paused}}{{with pausing $.lease}} · <span class="drover-pausing">pausing</span>, {{.}} still finishing a stage{{else}} · <span class="drover-paused">paused</span>{{end}}{{end}} · started {{ago .started}}{{with .jobs}} · {{.}} at a time{{end}}
+
+{{with $.lease}}{{range .running}}{{$id := .}}{{range $.items}}{{if eq .id $id -}}
+{{$h := held $.lease .id -}}
+- {{if $h}}<span class="drover-paused">paused</span>{{else if $.lease.paused}}<span class="drover-pausing">pausing</span>{{else}}<span class="drover-running">running</span>{{end}} [[#^{{anchor .id}}|{{.id}}]] {{.title | esc | md}} · {{if $h}}held before {{$h}}{{else}}stage {{or .stage "unknown"}}{{end}}{{with .stage_started}} · {{dur . $.now}} elapsed{{end}}{{if not $h}} · ETA {{with .eta}}{{time "15:04 MST" .}} ({{ago .}}){{else}}unknown{{end}}{{end}}
+{{end}}{{end}}{{end}}{{with .queue}}- queued: {{range $i, $q := .}}{{if $i}}, {{end}}[[#^{{anchor $q}}|{{$q}}]]{{end}}
+{{end}}{{end}}{{end}}{{end -}}
+{{if not $running}}No drive is running.
+{{end}}
+## Open
+
+{{range groups .items .drives .lease -}}
+### {{if .drive}}Drive {{.drive}}{{with .label}} · {{. | esc | md}}{{end}}{{else}}No drive{{end}}
+
+{{range .states -}}
+#### <span class="drover-{{.class}}">{{.state}}</span>
+
+{{range .items -}}
+- **{{.id}}** {{.title | esc | md}}
+{{- with .park}} · {{.}}{{end}}{{with .detail}}: {{. | esc | md}}{{end}}{{with .error}} · {{. | esc | md}}{{end}}
+{{- with .severity}} · sev {{.}}{{end}}
+{{- with .deps}} · deps {{range $i, $d := .}}{{if $i}}, {{end}}[[#^{{anchor $d}}|{{$d}}]]{{end}}{{end}}
+{{- with .blocks}} · blocks {{range $i, $b := .}}{{if $i}}, {{end}}[[#^{{anchor $b}}|{{$b}}]]{{end}}{{end}}
+{{- with .pr}}{{$u := or .url (pr .number)}}{{with .number}} · PR {{if $u}}[#{{.}}]({{$u}}){{else}}#{{.}}{{end}}{{end}}{{end}} ^{{anchor .id}}
+{{end}}
+{{end}}{{else -}}
+Nothing is open.
+
+{{end -}}
+## Done
+
+{{range done .items -}}
+- **{{.id}}** {{.title | esc | md}} · <span class="drover-{{class (or .level "unaudited")}}">{{or .level "unaudited"}}</span>
+{{- with .pr}}{{$u := or .url (pr .number)}}{{with .number}} · PR {{if $u}}[#{{.}}]({{$u}}){{else}}#{{.}}{{end}}{{end}}{{end}}
+{{- with .finished}} · merged {{time "2006-01-02" .}}{{end}} ^{{anchor .id}}
+{{else -}}
+Nothing has merged yet.
+{{end}}
+## Trends
+
+{{with .trends -}}
+{{.from}} to {{.to}}, {{.window}} days. n is how many items a figure is read from; n/a is a period with nothing to read.
+
+| Day | Finished | Cycle median | Cycle p90 | Passes per item | Changes-requested rate | Parks | Review to merge | Verify median |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{{range .days -}}
+| {{.date}} | {{template "trendcells" .}} |
+{{end -}}
+| **{{.window}} days** | {{template "trendcells" .total}} |
+{{with .total.parks}}{{with .by_reason}}
+Parks by reason:
+
+{{range $reason, $n := .}}- {{$reason}}: {{$n}}
+{{end}}{{end}}{{end}}{{end}}
+## Key
+
+Red waits on a person, yellow is moving, gray is held by a paused drive, orange cannot move yet or is unproven, green is settled.
+
+| State | Meaning |
+| --- | --- |
+| <span class="drover-needs-operator">needs-operator</span> | Waiting on you. Needs you names the command. |
+| <span class="drover-parked">parked</span> | A drive stopped the item. The park reason follows its title. |
+| <span class="drover-broken">broken</span> | The item's body does not parse. |
+| <span class="drover-running">running</span> | A session is working on it now. |
+| <span class="drover-pausing">pausing</span> | Its drive is paused and it is finishing the stage it is in. It holds once that stage ends. |
+| <span class="drover-paused">paused</span> | Held by a paused drive before its next stage. Nothing runs until `drover drive --resume`. |
+| <span class="drover-running">implemented</span> | Implemented, waiting on its review and pull request. |
+| <span class="drover-ready">ready</span> | Every dependency has merged and nothing has run. |
+| <span class="drover-blocked">blocked</span> | A dependency has not merged. |
+| <span class="drover-scaffold">scaffold</span> | Requirements not written. Write them, then `drover accept`. |
+| <span class="drover-done">claimed</span> <span class="drover-done">reviewed</span> <span class="drover-done">verified</span> | Merged, at the audit level recorded: the author's word, a read of the diff, every requirement traced. |
+| <span class="drover-unaudited">unaudited</span> | Merged, and nobody has audited it. |
+| **follow-up** | An open follow-up nothing is scheduled to carry. |
+
+---
+Rendered {{time "2006-01-02 15:04 MST" .now}} ({{.zone}}) · {{.project | esc | md}} · drover {{.version}}
+{{end -}}
+{{define "trendcells"}}{{with .finished}}{{.value}}{{else}}n/a{{end}} | {{with .cycle_time}}{{secs .median}} (n={{.n}}){{else}}n/a{{end}} | {{with .cycle_time}}{{secs .p90}}{{else}}n/a{{end}} | {{with .review_passes}}{{num .value}} (n={{.n}}){{else}}n/a{{end}} | {{with .changes_rate}}{{pct .value}} (n={{.n}}){{else}}n/a{{end}} | {{with .parks}}{{.value}}{{else}}n/a{{end}} | {{with .review_to_merge}}{{secs .median}} (n={{.n}}){{else}}n/a{{end}} | {{with .verify}}{{secs .median}} (n={{.n}}){{else}}n/a{{end}}{{end}}

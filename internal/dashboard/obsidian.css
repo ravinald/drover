@@ -1,0 +1,51 @@
+/* drover status classes for builtin:obsidian. Save as .obsidian/snippets/drover.css
+   and enable it under Settings, Appearance, CSS snippets. Every state is also
+   written out as a word, so the colors add to the text and never replace it. */
+
+.theme-light {
+  --drover-green: #1a7f37;
+  --drover-yellow: #9a6700;
+  --drover-orange: #bc4c00;
+  --drover-red: #cf222e;
+}
+
+.theme-dark {
+  --drover-green: #3fb950;
+  --drover-yellow: #d29922;
+  --drover-orange: #f0883e;
+  --drover-red: #f85149;
+}
+
+[class^="drover-"] {
+  font-weight: 600;
+  padding: 0 0.3em;
+  border: 1px solid currentColor;
+  border-radius: 0.3em;
+  white-space: nowrap;
+}
+
+.drover-done,
+.drover-ready {
+  color: var(--drover-green);
+}
+
+.drover-running,
+.drover-pausing {
+  color: var(--drover-yellow);
+}
+
+.drover-paused {
+  color: var(--text-muted);
+}
+
+.drover-blocked,
+.drover-scaffold,
+.drover-unaudited {
+  color: var(--drover-orange);
+}
+
+.drover-parked,
+.drover-broken,
+.drover-needs-operator {
+  color: var(--drover-red);
+}

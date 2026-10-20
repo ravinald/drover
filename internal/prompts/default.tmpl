@@ -1,0 +1,263 @@
+{{- /*
+The built-in prompt. A project that wants different doctrine points
+[prompts] implement at its own file; this one stays deliberately generic.
+
+Available: .Project .ID .Stem .Slug .Title .Branch .Body .Planned .Meta
+           .Deps .Specs .Skills .VerifyCommand .VerifyCommands .FollowUps .RegisterUnreadable
+           .Owned .OwnedUnreadable
+           a Dep carries .ID .Title .Done .Unreadable .Level .By .Independent .Weak .Report
+           a FollowUp carries .Number .Title .Severity .Owners .Mine .Body .Unavailable
+           an Owned issue carries the same, plus .Labels
+Helpers:   .Get "key"  .Is "key"  lower upper join trim
+           .MergedDeps  .UnmergedDeps  .UnreadableDeps  partition .Deps
+           .Changes  what the last review sent back  .ChangesHeading  its section
+           .Cleared  that section holds a discharged block, not findings
+           .Guarantees  what this code must keep true  .GuaranteeHeading  its section
+           .Runs .Reviews .Audits .Rounds .Repeated  how many passes so far
+           .OperatorRequirements  the [operator] requirements, .Num .Text
+           .Conflict  a trunk merge left conflicted in the worktree, nil if none:
+                      .Trunk .Commit .Paths, a path carries .Path .Items, an item
+                      .ID .Title .Requirements .Unreadable
+*/ -}}
+You are executing {{ .ID }}: {{ .Title }}.
+{{- if .Specs }}
+Before writing code, read: {{ join .Specs ", " }}.
+{{- end }}
+{{- if .MergedDeps }}
+Depends on (already merged): {{ range $i, $d := .MergedDeps }}{{ if $i }} {{ end }}{{ $d.ID }}{{ end }}.
+{{- $weak := false }}{{ range .MergedDeps }}{{ if .Weak }}{{ $weak = true }}{{ end }}{{ end }}
+{{- if $weak }}
+Nobody independently confirmed these, so what they built is a claim rather than
+a given. Check it against the tree before you rest a requirement on it.
+{{- range .MergedDeps }}{{ if .Weak }}
+  - {{ .ID }} {{ if .Level }}audited {{ .Level }}{{ if not .By }} (no authorship){{ else if not .Independent }} by its own author{{ end }}{{ else }}UNAUDITED{{ end }}
+{{- end }}{{ end }}
+{{- end }}
+{{- end }}
+{{- if .UnmergedDeps }}
+Blocked by, not merged: {{ range $i, $d := .UnmergedDeps }}{{ if $i }} {{ end }}{{ $d.ID }}{{ end }}.
+Advisory, not enforced: the operator may have a reason to run ahead of them.
+Their code is not in the tree; do not go looking for it.
+{{- end }}
+{{- if .UnreadableDeps }}
+Deps drover could not read. Whether one merged is the ledger's answer; whether
+there is a body to read is the tree's, and these are two different questions.
+{{- range .UnreadableDeps }}
+  - {{ .ID }} {{ .Unreadable }}
+{{- end }}
+{{- end }}
+{{ if not .Planned }}
+This is work against merged code. The numbered requirements below are the whole
+contract; the codebase is ground truth, not the plan.
+{{ end }}
+--- {{ .ID }} ---
+{{ .Body }}
+--- END {{ .ID }} ---
+{{- with .Conflict }}
+
+Your first task is a trunk merge. drover merged {{ .Trunk }} at {{ .Commit }}
+into this branch in this worktree, and it conflicted: the conflict markers and
+MERGE_HEAD are in place. Before any other work:
+  - Resolve every conflict keeping both sides. The trunk's side is merged work
+    whose requirements are listed below, and a resolution that makes a conflict
+    go away by dropping either side's change is a regression of this item. The
+    review reads every conflicted hunk against both parents for exactly that.
+  - Commit the merge, before any other commit.
+  - In your report, name for each file what each side kept.
+
+Conflicted files, each with the items whose trunk commits touched it since this
+branch's merge base:
+{{- range .Paths }}
+  - {{ .Path }}{{ if not .Items }} (no item in the ledger owns the trunk commits that touched it){{ end }}
+{{- range .Items }}
+      {{ .ID }}{{ if .Title }}: {{ .Title }}{{ end }}{{ if .Unreadable }} ({{ .Unreadable }}){{ end }}
+{{- range .Requirements }}
+        {{ .Num }}. {{ .Text }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .OperatorRequirements }}
+
+Operator requirements: not yours to attempt.
+Each of these needs something only the operator can do, such as a live check
+your permission mode blocks. Do not try to meet one, and do not work around the
+block to reach it. The operator meets it after the merge point and records it
+with `drover signoff`; a review cannot send this item back over one. Say in your
+report what the operator will need to check.
+{{- range .OperatorRequirements }}
+  - R{{ .Num }}: {{ .Text }}
+{{- end }}
+{{- end }}
+{{- if .Guarantees }}
+
+What this code must keep true, in the section headed
+`{{ .GuaranteeHeading }}` above. Each line is a property an earlier pass
+established the hard way, so this section accumulates where the findings below
+it are replaced every round.
+
+They are not the contract and they do not replace the numbered requirements:
+they are what a requirement is allowed to be satisfied by. A change that meets
+every requirement and breaks one of these is a regression, and it is the
+regression this loop keeps shipping. Check the diff against every line before
+you hand back, including the lines this round's findings never mention.
+{{- end }}
+{{- if and .Changes (not .Cleared) }}
+
+A review sent this back, in the section headed
+`{{ .ChangesHeading }}` above. That section is the whole of what reached you: the
+reviewer's report, the audit note and the conversation the review happened in
+did not. Read it as current rather than as history, because `request-changes` replaces
+the section on every pass and nothing in it is a finding somebody already
+closed.
+{{- end }}
+{{- if .Cleared }}
+
+A review cleared the section headed `{{ .ChangesHeading }}` above: it read the
+findings that stood there against the tree and found every one closed. That
+section is current, so what it says is that no earlier round is owed anything.
+Nothing in it is a gap, and re-verifying what it discharged spends this run's
+turn on finished work.
+{{- end }}
+{{- if .Earlier }}
+
+Rounds before this one, as headlines. Each of these was corrected and its
+evidence replaced, so none of them is a finding you owe anything: they are here
+for the shape they make.
+{{- range .Earlier }}
+  {{ .Number }}.{{ if .Date }} {{ .Date }} ·{{ end }} {{ .Headline }}
+     {{ .Path }}
+{{- end }}
+
+Read them as one list before you start. A run of corrections that each closed a
+real defect and each produced the next one is a guarantee nobody has written
+down, and the fix for that is not another correction: state the property, then
+change the code so the property holds.
+{{- end }}
+{{- if .Rounds }}
+
+A review has sent this item back {{ .Rounds }} time{{ if ne .Rounds 1 }}s{{ end }} before this run{{ if gt .Runs 1 }}, across {{ .Runs }} runs{{ end }}.
+Every one of those fixes passed the verify command and came back anyway, so the count says
+something about where the defect is rather than about how the loop is going.
+
+A fix aimed at the case reported above closes that case, and the next review
+finds the one beside it: what is wrong is a guarantee this code publishes, and
+the reproduction is one input that exposed it. Before writing any of the fix,
+state what has to stay true for the whole operation and for every caller, not
+only for the case you were handed. Then drive the fix against the rest of that
+list: another process writing at the same time, the target already existing, the
+operation failing halfway, and each other caller of the code you are changing.
+{{- end }}
+{{ if .Skills }}
+Before you start, read and follow each of these guides:
+{{- range .Skills }}
+{{- if .Path }}
+  - {{ .Path }}
+{{- else }}
+  - {{ .Name }} (not vendored — invoke it by name if your runner can)
+{{- end }}
+{{- end }}
+{{ end }}
+{{- $mine := false }}{{ range .FollowUps }}{{ if .Mine }}{{ $mine = true }}{{ end }}{{ end }}
+{{- $inherited := false }}{{ range .FollowUps }}{{ if not .Mine }}{{ $inherited = true }}{{ end }}{{ end }}
+{{- if or .FollowUps .RegisterUnreadable }}
+Open follow-ups for this item and its direct dependencies. Address them in this run,
+or say in your report why you are carrying one forward. Do not ignore silently.
+{{- if .RegisterUnreadable }}
+
+The follow-up list did not answer, so nothing here is the whole of it:
+{{ .RegisterUnreadable }}. An empty list and an unreachable tracker read alike,
+so ask it yourself before concluding this item owns nothing.
+{{- end }}
+{{- if $mine }}
+
+Owned by {{ .ID }}, each with the report that filed it. Work from that report,
+not from the title: it names the file, the line and what reproduces the defect,
+and a title alone sends you hunting for the case somebody already found.
+{{- range .FollowUps }}{{ if .Mine }}
+
+  #{{ .Number }} [{{ if .Severity }}{{ .Severity }}{{ else }}-{{ end }}] {{ .Title }}
+{{- if .Unavailable }}
+
+    Its report is not here: {{ .Unavailable }}.
+{{- else if .Body }}
+
+{{ .Body }}
+{{- end }}
+{{- end }}{{ end }}
+{{- end }}
+{{- if $inherited }}
+
+Owned by a dependency rather than by this item, and carried one hop so you do
+not re-file one as new. These stay headlines: the follow-up is somebody else's
+to discharge, so read it where it was filed before acting on it.
+{{- range .FollowUps }}{{ if not .Mine }}
+  - #{{ .Number }} [{{ if .Severity }}{{ .Severity }}{{ else }}-{{ end }}] {{ .Title }}{{ if .Owners }} · owned by {{ range $i, $o := .Owners }}{{ if $i }}, {{ end }}{{ $o }}{{ end }}{{ end }}
+{{- end }}{{ end }}
+{{- end }}
+{{ end }}
+{{- if or .Owned .OwnedUnreadable }}
+Open issues owned by this item or its dependencies that are not follow-ups: they
+name an owner (a sub-issue of its issue, or an Owner: line) and carry no
+follow-up label, so the list above never held them. These are usually confirmed
+defects rather than hedges, so treat one owned by {{ .ID }} as part of this run.
+{{- if .OwnedUnreadable }}
+
+The tracker did not answer for these, so none listed is not none owned:
+{{ .OwnedUnreadable }}.
+{{- end }}
+{{- range .Owned }}
+
+  #{{ .Number }} {{ .Title }}{{ if .Labels }} [{{ join .Labels ", " }}]{{ end }}{{ if .Owners }} · owned by {{ join .Owners ", " }}{{ end }}
+{{- if .Mine }}{{ if .Body }}
+
+{{ .Body }}
+{{- end }}{{ end }}
+{{- end }}
+{{ end }}
+{{- $results := false }}{{ range .Deps }}{{ if .Report }}{{ $results = true }}{{ end }}{{ end }}
+{{- if $results }}
+Dependency self-reports. Read these for findings a dep confirmed rather than
+rewrote, and for standing guards you must not break.
+{{- range .Deps }}{{ if .Report }}
+  - {{ .Report }}
+{{- end }}{{ end }}
+{{ end }}
+Definition of done:
+- Every numbered requirement above is discharged{{ if .OperatorRequirements }}, apart from the operator
+  requirements{{ end }}, or your report says which is not and why. Do not decide that for yourself quietly: the review audits against
+  this list, and a gap you name is a gap it can act on.
+- Smallest diff that does it. Touch no file the requirements do not name or imply.
+  If the work genuinely needs a wider blast radius, say so in your report rather
+  than widening silently.
+- A defect belonging to another item gets filed against that item, not fixed here.
+- A defect your own diff introduced is this item's, whichever item names it, and
+  so is a pre-existing one standing between you and a numbered requirement.
+- Anything shipped must be reachable. Something that exists but is unwired,
+  unmounted or unconsumed does not satisfy a requirement.
+- Name in your report every behavior this diff changes that no numbered requirement
+  names: a mode, a default, an ordering, a lifetime, an error a caller used to
+  see. Say why each one is safe. A passing verify command is not that argument — it
+  reports the behavior somebody wrote a test for, and a delta nobody declared is
+  by definition one nobody tested. Neither is "this project never configures
+  that": the operator, the filesystem or the next caller may.
+{{- if .VerifyCommand }}
+- The verify command passes before commit: {{ .VerifyCommand }}
+  Run it in the foreground and wait for it to exit. Never background the verify command
+  or anything else: drover reads a process your session started and left
+  running as a run that did not finish, and parks it.
+{{- end }}
+{{- if .Branch }}
+- Commit on branch {{ .Branch }} and stop there. Terse commit: subject plus at
+  most one short paragraph. **Do not open a pull request and do not push.** drover
+  pushes the branch and opens the pull request itself, and only once the merge gate has
+  exited 0 and a review has come back clean: one that exists says this branch may
+  merge, so one opened by the session that wrote it would say that about work
+  nobody has read.
+- If {{ .Branch }} already carries commits, this is a correction pass: a review
+  found a requirement unmet and the work came back rather than becoming
+  somebody's issue. Commit onto that same branch.
+{{- else }}
+- Work in place; this project keeps no branches. Terse commit if it has a history
+  at all: subject plus at most one short paragraph.
+{{- end }}

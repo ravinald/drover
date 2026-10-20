@@ -1,0 +1,497 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ravinald/drover/schema/v2/drover.schema.json",
+  "title": ".drover.toml",
+  "description": "Per-project drover configuration. Found by walking up from the working directory; the directory holding it is the project root every relative path resolves against. The schema is closed: an unrecognised key is an error, because a typo that took effect as silence would be worse than a refusal.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2,
+      "description": "Config format. A build refuses a version it does not understand rather than misreading it."
+    },
+    "drover_version": {
+      "type": "string",
+      "pattern": "^v\\d+\\.\\d+\\.\\d+$",
+      "description": "The drover release this config was last reviewed against, written by init and by `drover config --stamp`. A binary of a newer minor release refuses every project command until the config is reviewed and stamped, or until -I (--ignore-stale) is passed."
+    },
+    "project": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Names the log directory and the status banner."
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Project-relative unless absolute. A leading ~ expands to the home directory.",
+      "properties": {
+        "backlog": {
+          "type": "string",
+          "default": ".drover/backlog",
+          "description": "The item files. The directory listing is the backlog, so adding an item needs no index edit."
+        },
+        "ledger": {
+          "type": "string",
+          "default": ".drover/ledger.jsonl",
+          "description": "Append-only JSONL of completion and audit records."
+        },
+        "reports": {
+          "type": "string",
+          "default": ".drover/reports",
+          "description": "Saved run self-reports, handed to dependent runs as a path to read."
+        },
+        "specs": {
+          "type": "string",
+          "description": "Directory each frontmatter spec: token resolves against."
+        },
+        "skills": {
+          "type": "string",
+          "description": "Vendored guides, one directory per guide holding SKILL.md. A referenced guide that is not vendored cannot be read by an unattended run."
+        },
+        "shelf": {
+          "type": "string",
+          "description": "Retired bodies: items deliberately not going to be done, moved here rather than deleted so the text and the id survive. Read for ids and never parsed, so nothing here renders, enters the graph or affects a count. No default — a project that never wanted one must not gain a finding by upgrading."
+        },
+        "root_marker": {
+          "type": "string",
+          "description": "A path that must exist under the root. Catches a config copied to a tree it does not describe, which would otherwise resolve every path against a stranger."
+        },
+        "logs": {
+          "type": "string",
+          "description": "Run logs. Defaults to $XDG_CACHE_HOME/drover/<project>; they are multi-MB and belong outside the repo."
+        },
+        "log_prefix": {
+          "type": "string",
+          "description": "Prepended to every log filename, so a project migrating from another driver keeps its existing runs discoverable."
+        },
+        "register": {
+          "type": "string",
+          "default": ".drover/register.jsonl",
+          "description": "Append-only JSONL follow-up list. Read only under [register] backend = \"file\"; one object per event, folded newest-wins per number, and a row whose latest state is closed leaves the index."
+        }
+      }
+    },
+    "ids": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The shape of the id space: how far the planned backlog runs, and what kind of work each intake prefix holds.",
+      "properties": {
+        "planned_max": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0,
+          "description": "Bounds the planned backlog so an out-of-range id is rejected as the typo it usually is. 0 means unbounded, which is right until a plan is closed."
+        },
+        "namespaces": {
+          "type": "object",
+          "description": "Prefix to kind. The kind is matched against tracker labels by intake, so it must be the label's exact text.",
+          "propertyNames": {
+            "pattern": "^[A-Z]+$",
+            "description": "Uppercase ASCII: a prefix becomes a filename component."
+          },
+          "additionalProperties": { "type": "string" }
+        },
+        "allocator": {
+          "type": "string",
+          "enum": ["local", "git"],
+          "default": "local",
+          "description": "Where new, intake and split reserve an id. local reads the highest on disk under a lock on the backlog; git also advances refs/drover/ids on remote by compare-and-swap, so two hosts cannot issue one id."
+        },
+        "remote": {
+          "type": "string",
+          "pattern": "^[^-\\s][^\\s]*$",
+          "default": "origin",
+          "description": "The git remote name or URL holding refs/drover/ids under allocator = \"git\". The ref names drover on whatever remote holds it."
+        }
+      }
+    },
+    "frontmatter": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The item metadata schema, closed and declared per project. A key in neither list is a parse error. A key in both is a config error.",
+      "properties": {
+        "required": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["title", "deps"],
+          "description": "Must be present; may be empty. Presence is what proves the author considered the key. 'slug' is rejected: the filename is its only authored copy."
+        },
+        "optional": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Permitted but not demanded. A key here named in [verify] becomes a verify-command selector when the item sets it to 'yes'."
+        },
+        "shape": {
+          "type": "object",
+          "description": "What a declared key may hold. Optional and additive: a project writing none is checked as it was before the table existed. drover check reports a value that fails its shape as BAD VALUE, and a key here that [frontmatter] does not declare as UNDECLARED KEY. An empty value always passes, since 'required' is what separates presence from content.",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^(int|idlist|intlist|enum:.+)$",
+            "description": "'int' is a whole number, 'enum:C,H,M,L' is one of the listed members read case-sensitively, 'idlist' is whitespace-separated ids in bare form, 'intlist' is whitespace-separated positive numbers and is what closes declares. idlist checks the form and never existence, which is MISSING DEP's question."
+          }
+        }
+      }
+    },
+    "verify": {
+      "type": "object",
+      "description": "The verify command: what the agent runs to verify its work, rendered into the prompt; drive also runs it after updating a branch. 'default' applies unless a command named for a frontmatter key wins, which happens when that key is 'yes'. Names are tried in sorted order and the first match wins, so drover selects exactly one verify command and never composes several: a flagged command that is not a superset of the default silently drops checks.",
+      "additionalProperties": { "type": "string" },
+      "properties": {
+        "default": {
+          "type": "string",
+          "description": "Required in practice. drover check reports an empty default, because an item run without a verify command hands its agent no way to verify the work."
+        }
+      }
+    },
+    "status": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shapes the status table.",
+      "properties": {
+        "column": {
+          "type": "string",
+          "description": "Frontmatter key shown beside the id. An item with no value falls back to its namespace kind, which is what lets one setting serve both a planned backlog and an intake queue."
+        },
+        "column_prefix": {
+          "type": "string",
+          "description": "Prepended to that value: 'W' renders wave 3 as W3."
+        },
+        "timezone": {
+          "type": "string",
+          "default": "UTC",
+          "description": "The zone status reports every time in: UTC, local, or an IANA name such as America/Los_Angeles. status --tz overrides it for one call."
+        },
+        "refresh": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 60,
+          "description": "Seconds between the reloads builtin:html asks a browser for, through <meta http-equiv=\"refresh\">; 0 writes none."
+        },
+        "index": {
+          "type": "string",
+          "format": "uri-reference",
+          "description": "The href of the cross-project index (status --all-projects --html), relative to this project's page or absolute. When set, builtin:html renders its header as a drover / project breadcrumb linking back to it. A scheme other than http, https or file fails at load."
+        },
+        "render": {
+          "type": "array",
+          "description": "Files rendered from status through a project's own Go text/template or one drover ships. drive re-renders each after every ledger row it appends and every queue change; status --render renders them all once. A failed render is reported and never fails the drive.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["template", "path"],
+            "properties": {
+              "template": {
+                "type": "string",
+                "description": "The template file, relative to the project root unless absolute; ~/ resolves against $HOME. builtin:obsidian and builtin:html name the templates drover ships."
+              },
+              "path": {
+                "type": "string",
+                "description": "Where the rendered result is written, through a temp file and a rename; relative to the project root unless absolute, ~/ against $HOME."
+              }
+            }
+          }
+        }
+      }
+    },
+    "severity": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Colours the rank an item declares, so a backlog of audit findings can be scanned rather than read. An absent, empty or unrecognised value never errors: it renders as written and sorts last.",
+      "properties": {
+        "key": {
+          "type": "string",
+          "default": "severity",
+          "description": "Frontmatter key holding an item's rank. It must also appear in [frontmatter], or no item can declare one; drover check reports that as UNDECLARED KEY."
+        },
+        "ranks": {
+          "type": "object",
+          "description": "Rank to palette name. Keyed by letter or word, since C and Critical are one rank. An explicit table replaces the defaults rather than merging into them.",
+          "default": { "C": "red", "H": "orange", "M": "yellow", "L": "blue" },
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["red", "orange", "yellow", "blue", "green", "grey", "white"]
+          }
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Governs launching: the branch an item lands on and the binary that executes it.",
+      "properties": {
+        "branch": {
+          "type": "string",
+          "description": "Go template over the same data the prompt sees. Rendered from local data alone, so a branch does not change name when gh is unreachable."
+        },
+        "default_runner": {
+          "type": "string",
+          "default": "claude",
+          "description": "Used when neither the flag nor the item names one."
+        },
+        "runner_key": {
+          "type": "string",
+          "default": "runner",
+          "description": "Frontmatter key that pins a runner per item."
+        },
+        "review_runner": {
+          "type": "string",
+          "description": "Runner `drover review` hands the prompt to when --runner names none. Unset means review prints the prompt. Never read from an item's frontmatter: that key names who implements the item, and reviewing with it is the self-certification `audit` refuses to record as `verified`."
+        },
+        "draft_runner": {
+          "type": "string",
+          "description": "Runner `drover draft` hands the drafting prompt to when --runner names none. Unset means draft prints the prompt. No frontmatter key selects one: an item with no requirements yet cannot name who should propose them."
+        },
+        "trunk": {
+          "type": "string",
+          "description": "The branch work merges into. Empty asks origin/HEAD, then falls back to main."
+        }
+      }
+    },
+    "runners": {
+      "type": "object",
+      "description": "A runner is a whole binary, not a flag. A headless runner must write its event stream to stdout as JSONL.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "interactive": { "type": "array", "items": { "type": "string" } },
+          "headless": { "type": "array", "items": { "type": "string" } },
+          "stdin": {
+            "type": "boolean",
+            "description": "Pipe the prompt instead of appending it as the final argument."
+          }
+        }
+      }
+    },
+    "prompts": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What each session is handed. A template reaches the item, its dependencies, the verify command and the open follow-ups, so doctrine put here applies per item rather than per reader who remembers to look.",
+      "properties": {
+        "implement": {
+          "type": "string",
+          "description": "Path to the project's prompt template for an implementing run. Omit for the built-in."
+        },
+        "draft": {
+          "type": "string",
+          "description": "Path to the project's drafting prompt, the text `drover draft` hands an agent proposing an item's numbered requirements. Omit for the built-in."
+        },
+        "review": {
+          "type": "string",
+          "description": "Path to the project's review prompt. Put the project-specific half of the review doctrine here rather than in a document an agent has to remember to consult."
+        }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How often a review may send one item back.",
+      "properties": {
+        "max_review_rounds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many times a review may send one item back before request-changes refuses. 0, and an absent key, mean no cap. Set it higher than the worst item that went round the loop and finished correctly; the operator escapes one refusal with request-changes --over-limit, which a launched session cannot reach."
+        }
+      }
+    },
+    "intake": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Governs items scaffolded from a tracker issue.",
+      "properties": {
+        "stop_marker": {
+          "type": "string",
+          "description": "Holds a scaffolded item inert until a human writes its requirements. drover refuses to launch or preview an item whose body contains it."
+        }
+      }
+    },
+    "agents": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Shapes what `drover agents` generates.",
+      "properties": {
+        "principles": {
+          "type": "string",
+          "description": "One-line principles: the bar a reviewer holds the code to. The one thing `drover agents` cannot read off the rest of this file, kept here so regenerating the instructions cannot lose it."
+        },
+        "addendum": {
+          "type": "string",
+          "description": "A file whose text `drover agents` appends verbatim to the generated block under `## Project addendum`. Relative paths resolve against the project root; absolute and ~/ paths are allowed."
+        }
+      }
+    },
+    "git": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Whether the project has a work tree drover may drive. Branch automation and the merge check are the only parts that need one; the corpus, the ledger and the audit levels are files on disk.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "False turns branch automation and the merge check off rather than letting them fail at the point of use: run executes in place, finish refuses, status omits the here-line. Declared rather than probed, so a copied directory cannot change what a run does. `drover init` writes false in a directory with no work tree."
+        },
+        "merge_check": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "The merge authority for a forge that is not GitHub. Set, it answers instead of gh: finish runs it from the project root with the branch and the trunk appended as the last two arguments, reads exit 0 as merged, and reads any non-zero exit as not merged rather than as an error. Git ancestry is consulted after a no either way. Unset, gh answers."
+        },
+        "merge_method": {
+          "type": "string",
+          "enum": ["merge", "squash", "rebase"],
+          "default": "squash",
+          "description": "How `drover drive` asks the forge to merge: the flag it passes to `gh pr merge`. A fact about the repository, so only the project's .drover.toml may set it; a value in the per-user config is refused at load."
+        }
+      }
+    },
+    "drive": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Governs `drover drive`, the unattended walk of the queue. Whether a head may merge is the merge gate's exit status alone; what drive reads of the checks before the gate runs is [forge]'s.",
+      "properties": {
+        "merge_gate": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The project's go/no-go, run from the project root with the branch and the trunk appended as the last two arguments. Exit 0 means open the pull request and merge; 1 means this diff caused the failure and the finding goes back to the branch; 2, and any other non-zero, means the code did not cause it and the whole drive stops. drive merges what it drives, so undeclared this is a config error and `drover drive` refuses before its first launch; under `--no-merge` nothing needs to say green and each item stops green-and-reviewed. It runs before any pull request exists, so it reads the branch head rather than a pull request: drover pushes what it drives, and it opens a pull request only for a branch this merge gate has passed."
+        },
+        "protected_paths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Globs a merge refuses to carry, matched against the files the branch changed. An agent that edits the merge gate, a workflow or this config in its own pull request changes what every later item that night is measured by. Empty means the built-in set."
+        },
+        "worktree_links": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Root-relative paths drive symlinks into each item's worktree, in addition to the top directory of every [paths] entry inside the root. A worktree holds only what git tracks, so anything a session, the verify command or the merge gate reads from outside version control has to be linked, and each link must be a path git ignores."
+        },
+        "worktree_setup": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "An argv drive runs in each worktree it creates, before the first session, for dependencies a fresh checkout lacks. A non-zero exit parks that item with the output; the queue continues."
+        },
+        "max_load": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "The 1-minute load average above which drive holds dispatch while [supervise] host_load_admission is auto. Unset means the host's CPU count. At off, the default, drive never reads the load."
+        }
+      }
+    },
+    "finish": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "What runs once an item has finished.",
+      "properties": {
+        "post_check": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "An argv run from the project root after every finish, by `drover finish` or by a drive finishing what it merged, with DROVER_ITEM, DROVER_PR and DROVER_SHA in its environment. Exit 0 appends a post_finish ledger row carrying the first line of its output; any other exit files a follow-up owned by the item and emits needs_operator. Neither undoes the merge or changes the finish's exit. It runs only while [supervise] post_finish_check is above off, which is its default."
+        }
+      }
+    },
+    "numbered_files": {
+      "type": "object",
+      "description": "Numbered files whose order matters after a merge, such as database migrations: a name mapped to a glob relative to the repository root carrying one {n} placeholder, which matches a run of digits compared as an integer. drive refuses a branch adding a file that shares a number with another or sits at or below the trunk's highest, and names the number to use; drover check reports two tracked files sharing one as SEQUENCE CLASH. drover never renumbers, because a file's content can refer to its own number.",
+      "additionalProperties": { "type": "string" }
+    },
+    "github": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The tracker label vocabulary. Labels classify a follow-up; its owner is a link, not a label: the GitHub sub-issue parent when that parent is a backlog item's issue, and every Owner: <id> line in the issue body.",
+      "properties": {
+        "repo": {
+          "type": "string",
+          "pattern": "^[^/]+/[^/]+$",
+          "description": "owner/name. Unset lets gh infer from the project root's git remote, which resolves differently inside a fork."
+        },
+        "follow_up_label": {
+          "type": "string",
+          "default": "follow-up",
+          "description": "Membership. An issue carrying it is a follow-up; the query asks for it server-side, so the rest of the tracker is never read. drover creates it when the repository lacks it."
+        },
+        "severity_prefix": {
+          "type": "string",
+          "default": "severity:",
+          "description": "Label prefix carrying severity, followed by the spelled-out rank: critical, high, medium or low."
+        },
+        "page_limit": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 300,
+          "description": "Issues read in one call. Hitting it is reported, never silent."
+        }
+      }
+    },
+    "forge": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How drive reads a red check on a pushed head before [drive] merge_gate decides: infra (the forge's own infrastructure failed, so the failed jobs are rerun), trunk (the same check fails on the trunk, so the item parks trunk_red), or code (the merge gate decides, as before).",
+      "properties": {
+        "infra_patterns": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Log lines, matched case-insensitively as substrings of a failed job's log, that mark the failure as infrastructure. They add to the built-in list."
+        },
+        "reruns": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 2,
+          "description": "How many times drive reruns one head's infrastructure failures with `gh run rerun --failed` before reading the next one as the code's. 0 never reruns."
+        },
+        "checks_wait": {
+          "type": "string",
+          "default": "10m",
+          "description": "How long a head may show no check run at all before drive reports that no workflow ran on it, as a Go duration."
+        }
+      }
+    },
+    "register": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the follow-up list lives. drover reads one source and every consumer above it — owners, severity, orphaning, the counts in status and unaudited — reads the same index, so this selects the source rather than adding a second list.",
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": ["github", "file", "none"],
+          "default": "github",
+          "description": "github reads the tracker through gh. file reads the JSONL at [paths] register and adds `drover follow-up`. none turns the follow-up list off. file beside [github] repo is rejected at load."
+        }
+      }
+    },
+    "backlog": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where an item is visible beyond its file. The file stays the contract; a mirror is one-way and drover never reads requirements back from it.",
+      "properties": {
+        "mirror": {
+          "type": "string",
+          "enum": ["none", "github"],
+          "default": "none",
+          "description": "github publishes each accepted item as an issue: its title, its numbered requirements, a drover:<state> label and blocked-by links for its deps. Publishing makes item text public wherever the tracker is; leave it at none for a backlog that must stay private. Per-project only: the per-user config may not set it, and github needs issue declared in [frontmatter]."
+        }
+      }
+    },
+    "supervise": {
+      "type": "object",
+      "description": "Who carries out each supervised action: auto (drive does it), supervisor (a session `drover supervise` started may do it and reports it), operator (drover stops, notifies and waits), off (nothing happens; today's park stands). Keys are the action catalog `drover config` prints; an omitted key takes its default, and a policy above an action's ceiling is a load error.",
+      "properties": {
+        "template": {
+          "type": "string",
+          "description": "The template `drover supervise` renders its prompt from. Unset uses the built-in one."
+        },
+        "notify": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Argv run once per needs_operator event, with the event JSON on stdin. A failing or missing notifier is reported once per drive and never stops it."
+        }
+      },
+      "additionalProperties": {
+        "type": "string",
+        "enum": ["off", "operator", "supervisor", "auto"]
+      }
+    }
+  }
+}

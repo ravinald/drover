@@ -1,0 +1,582 @@
+# Concepts
+
+The [Glossary](glossary.md) gives every term on this page a one-line meaning; this page explains why each one is the way it is.
+
+## Item ids
+
+A work item's id is its filename stem: `B01-login-redirect.md` is item `B1`. The id is an optional letter prefix, a number, and an optional lowercase sub-letter: `1`, `2b`, `25e`, `B1`, `F20`.
+
+- **A bare number is a planned item.** `1` and `2b` belong to the backlog somebody wrote up front. `[ids] planned_max` can bound it, so an out-of-range planned id is rejected as the typo it almost always is.
+- **A letter prefix names the kind of work.** Each project declares its prefixes in [`[ids] namespaces`](configuration.md#ids). The defaults `drover init` writes are `B` for bug, `E` for enhancement and `F` for feature, so `B1` reads as a bug and `F3` as a feature. Prefixes are uppercase ASCII, because they become part of a filename. Namespaced ids are unbounded: work that arrives after the plan closed has no natural ceiling.
+
+Ids come in two forms, and they are not interchangeable:
+
+| Form | Example      | Where it appears                                                                 |
+| ---- | ------------ | -------------------------------------------------------------------------------- |
+| Bare | `2b`, `B1`   | Every command, the ledger, and an `Owner:` line.                                 |
+| Stem | `02b`, `B01` | Filenames only. Zero-padded so a plain directory listing sorts in backlog order. |
+
+Reading a filename and typing what you see is the reliable way to get this wrong, so a padded id is rejected with the bare form spelled out: `drover show B01` answers `id "B01" is zero-padded; ids are bare (B1)`. `drover status` prints every id in the form to type.
+
+## Where each fact lives
+
+drover keeps four stores. Which one a fact belongs in is decided by two questions: does a machine have to act on it, and must it survive with no network.
+
+| Fact                                          | Store                                       | Why there                                                            |
+| --------------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------- |
+| What an item asks for                         | `<backlog>/<stem>-<slug>.md`                | The agent reads it; its numbered list becomes the audit checklist.   |
+| Whether it merged, and how hard anyone looked | `<ledger>`                                  | Append-only, last-row-wins, exact offline, diffable in git.          |
+| What a run reported                           | `<reports>/<stem>-<slug>.md`                | Handed to dependent runs as a path to read.                          |
+| What is still unproven or deferred            | Tracker issues carrying the follow-up label | Grows comments over months; a label cannot be typo'd into inertness. |
+
+Completion, audit levels and the dependency graph are local reads and stay exact with no network. Reading or writing follow-ups needs `gh`.
+
+## Trust
+
+`.drover.toml` is executable configuration, and a repository you cloned brings its own. Running a project's build has always meant running the project's code; drover sits in the same class as a Makefile, a VS Code task or `direnv`. Three keys reach past drover's own process:
+
+| Key             | Reach                                                                                                                                                                                                                                           |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[runners]`     | The argv `drover run` executes, with the prompt appended as the final argument or piped to stdin. Whatever binary it names is launched with your privileges.                                                                                    |
+| `[verify]`      | A shell command the agent runs. It renders into the prompt as text, and the agent reading that prompt runs it; the one place drover runs it itself is `drover drive`, in an item's worktree, after merging the trunk into the branch.           |
+| `[github] repo` | Which repository `gh` reads. `intake` removes the follow-up label there from an issue it promotes, so a config naming someone else's repository edits their issue. Under `[backlog] mirror = "github"`, `accept` publishes item text there too. |
+
+The `[verify]` line is the one nobody can work out from the config alone: a verify command and a runner both look like a command in the file, and outside `drive` only the runner is executed by drover.
+
+Reading an unfamiliar project's `.drover.toml` before `drover run` is the operator's job. drover does not keep an allowlist of runner binaries and does not prompt before launching one: anyone running a cloned repository's build made that decision several commands earlier, and a confirmation on every ordinary run would buy nothing. What drover does instead is say what it resolved. Every command that hands the checkout to a runner (`run`, `review`, `draft` and each stage of `drive`) prints the same preamble to stderr first, so a launch that carried something unexpected is in the scrollback without re-running anything:
+
+```text
+==> B7 · implement · branch b07-login-redirect · round 1
+==> item   .drover/backlog/B07-login-redirect.md
+==> prompt .drover/templates/prompt.md
+==> runner claude: /opt/homebrew/bin/claude
+==> argv   claude -p --output-format stream-json --verbose <prompt>
+==> log    ~/.cache/drover/webapp/B07-login-redirect.20260919-110523.jsonl
+```
+
+| Line     | What it answers                                                                                                                                                                                                                                                                                                             |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The head | Which item, which stage, and the branch the runner will stand on. `round N` appears under `drive`, which runs the pair more than once. A project with `[git] enabled` false gets the root and the reason in the branch's place.                                                                                             |
+| `item`   | The body the prompt was assembled from.                                                                                                                                                                                                                                                                                     |
+| `prompt` | The template that assembled it: a path when `[prompts] implement` or `[prompts] review` names one, `built-in <name>` when the key is unset. A project that meant to override a template and left the key unset runs on drover's default, and the rendered prompt reads like a prompt either way.                            |
+| `runner` | The declared name, then argv[0] as `PATH` resolved it.                                                                                                                                                                                                                                                                      |
+| `argv`   | The full argument vector, with `<prompt>` standing where the prompt is appended, or `(prompt on stdin)` when it is piped.                                                                                                                                                                                                   |
+| `log`    | Where the event stream is written, in whichever of three forms pastes into a shell: relative to the project when `[paths] logs` puts it inside the tree, `~`-prefixed when it sits under your home (the default is `~/.cache/drover/<project>/`), absolute otherwise. Absent for an interactive session, which writes none. |
+
+`drover drive` prints one more block before the first launch, because a wrong answer there is wrong for the whole queue rather than for one item:
+
+```text
+==> drive · 3 items: B7 B8 B9
+==> runners: implement per item (default claude) · review codex
+==> prompts: implement .drover/templates/prompt.md · review built-in review
+==> bounds: until 2026-09-20T06:00:00-07:00, at most 2 items · merge: [drive] merge_gate decides
+==> max review rounds: 3 per item
+```
+
+`drover run <id> --dry-run` and `drover drive --dry-run` are the read-only way to see the same thing first. The run preview prints the body, the template, the resolved argv and the prompt the runner would be handed; the drive preview prints that header over a row per item. Neither switches a branch or starts anything.
+
+## Whose step it is
+
+Every command carries an actor alongside its safety class, and the two answer different questions. Safety is how far the effect reaches: `init` writes a file, `finish` writes a ledger row, `intake` writes to a tracker. Actor is narrower (may an agent run this unsupervised?), and only one of those three is a no.
+
+Ten are the operator's: `accept`, `unaccept`, `signoff`, `intake`, `finish`, `mark-merged`, `unmark-merged`, `open-pr`, `drive` and `supervise`. Each certifies work somebody else has to trust, reaches something other people read, or launches sessions, and a session certifying its own output is the failure the whole audit ladder exists to prevent. drover exports `DROVER_ACTOR=agent` into every session it launches and those ten refuse there, exit 3. Separately, a launched session cannot launch another, checked before the branch switch and the `stage` row so the refusal leaves nothing behind.
+
+The reasoning is the same one that made `accept` a command rather than a flag. A flag can be carried by a runner's argv; the point of the boundary is that nothing the run controls can reach it. The environment was the remaining way in.
+
+Three commands are deliberately open despite writing:
+
+| Open                    | Why                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `audit`, at every level | A review session is independent of the session that implemented the work. drover launched both, so the actor variable cannot tell them apart, and sealing `audit` would break the three-stage design rather than protect anything. The per-session `--code-by agent` check covers the dishonest case: the session id on the implement stage row is what tells the implementer from its reviewer. |
+| `init`, `init --user`   | The question is whether an agent may run the command, not who decides the answers it carries. `init --verify "go test ./..."` with a verify command the operator supplied is doing what it was told.                                                                                                                                                                                             |
+| `shelve`, `unshelve`    | Reversible, and they certify nothing.                                                                                                                                                                                                                                                                                                                                                            |
+
+**It stops accidents, not intent.** `env -u DROVER_ACTOR` defeats it. The failure it exists to stop is an agent that reads a fenced command out of `AGENTS.md` and helpfully runs it, not one that sets out to misreport. Stripping the variable is a deliberate act, and a deliberate act reads in a transcript as intent, which an accident does not. Anything stronger would need drover to own the session rather than launch it.
+
+## Items
+
+One item is one file. The directory is the backlog, so adding an item needs no change to any index and no change to drover.
+
+The frontmatter schema is **closed but declared per project**. An unknown key is an error, because the alternative has a specific cost: a typo'd `deps` reads as no dependencies, which renders a blocked item READY. That is a wrong answer, not a degraded one. Declaring the allowed set in config is what lets two projects with different axes share one tool.
+
+Required keys may be **empty but not absent**. Presence is what proves the author considered the key.
+
+There is no `slug` key. The filename is the only authored copy, and writing one is a parse error. Renaming a body therefore changes its branch, its log names and its report path, so run `drover check` after any rename.
+
+The numbering is the contract. `report --save` turns every top-level `N.` line into an audit checkbox, so a requirement written as prose vanishes from the checklist.
+
+One optional key is read rather than passed through: the one `[severity] key` names, `severity` by default. It ranks an item so a backlog arriving from an audit can be scanned instead of read end to end.
+
+| Written                      | Rank     |
+| ---------------------------- | -------- |
+| `C`, `Critical`              | Critical |
+| `H`, `High`                  | High     |
+| `M`, `Medium`                | Medium   |
+| `L`, `Low`                   | Low      |
+| anything else, empty, absent | unranked |
+
+Letter and word are the same rank and case does not matter, because the two spellings come from different authors: a hand-written item tends to carry the letter and an audit tool writes the word, and neither should have to know which one a project settled on.
+
+Severity is the one place the closed-schema rule does not apply to the _value_. An unrecognized rank is not an error: it renders as written, sorts last, and `--sev none` selects it. The reasoning inverts the one above. `deps` decides whether an item runs, so a typo there produces a wrong answer, while severity orders a view. A backlog that will not open because someone wrote `Sev1` costs more than an uncolored cell.
+
+## The mirror
+
+An item exists in one place: its file. That is what lets the body digest promise that the text a run read is the text an audit checked, and what lets an agent with no network read its contract. It also means a collaborator cannot find the work, discuss it, or tell that someone is already on it.
+
+`[backlog] mirror = "github"` publishes each accepted item as an issue. The mirror runs one way. The file stays the contract and the issue becomes the index and the place to talk about it: drover writes the issue from the file and never reads requirements back, because an issue body anyone can edit cannot promise the run and the audit read the same list. Making the tracker the source instead would trade that guarantee for visibility.
+
+**Mirroring publishes item text.** The title and the numbered requirements appear on the tracker, readable by everyone who can read the repository. A project whose items must stay private, such as one keeping its backlog in an overlay that never reaches the public tree, leaves the key at `none`, which is the default. The per-user config may not set it: one value there would publish every project on the machine.
+
+What reaches the tracker, and when:
+
+| Command         | Writes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `accept`        | An item whose `issue:` key is empty gets an issue: its title, the line saying the file is the contract, and the numbered requirements between `<!-- drover:requirements -->` fences. The new number goes into `issue:` and the ledger records the body row, as for any write drover makes to a body. Each `deps:` entry whose item names an issue becomes a GitHub blocked-by link; a dep with no issue is named in the output. Publishing an item also links every item naming it on `deps:` whose issue drover owns, so a dependent accepted first gets its link when the dep is published. Accepting an item that already has its issue rewrites that issue from the file, which is how a mirror that fell behind is repaired. |
+| `unaccept`      | `drover:draft`. The issue stays open and keeps the list it was published with until `accept` publishes the redrafted one. Run on an item that is already a scaffold, it rewrites the label only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `split`         | The label of the item it split, which now waits on the new item and so reads `drover:blocked`. The new item is a scaffold with no issue.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `run`, `drive`  | `drover:in-progress` at launch, then the state the item is in once the session ends.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `finish`        | `drover:merged`, and the issue closes. This is separate from the `closes:` dispositions: those answer a report somebody filed, and this one closes drover's own index entry. `--no-tracker` skips it and names every issue it left behind. A drive finishing a merge it finds, including one an earlier drive left unrecorded, writes the mirror and skips the dispositions.                                                                                                                                                                                                                                                                                                                                                      |
+| `mark-merged`   | The same as `finish`'s mirror write, with no dispositions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `unmark-merged` | The state the item is back in, and the issue reopens.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `shelve`        | `drover:deferred` in place of the state label, and the issue closes as not planned with a comment naming `drover unshelve <id>`. The shelved body is read for its `issue:` key alone; one whose frontmatter will not parse still moves, and the output says its issue was not closed. Like `drover:in-progress`, the label exists only on the tracker.                                                                                                                                                                                                                                                                                                                                                                            |
+| `unshelve`      | What `accept` writes for an accepted item: the issue reopens, its requirements are rewritten from the file, `drover:deferred` gives way to the state's label, and missing blocked-by links are added.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+
+A change to one item can move what other issues should carry. `finish`, `mark-merged` and `unmark-merged` change whether an item merged, and with it the state of every item naming it on `deps:`: finishing B1 moves an item waiting on it from `blocked` to `ready`, and `unmark-merged B1` moves it back. Publishing B1 gives each of those items a dep with an issue to be blocked by. So `accept`, `unaccept`, `split`, `finish`, `mark-merged` and `unmark-merged` also write the issue of each item naming the item on `deps:`: the label where it does not fit, and the blocked-by link to the item's issue where GitHub lacks it. `run` has no dependents to write, because `implemented` and `running` move no other item. A dependent whose label already fits is left alone, so a `drover:in-progress` label survives the finish that unblocked it.
+
+The state label comes from one table, one label per `status` state: `scaffold` is `drover:draft`, `ready` is `drover:ready`, `blocked` is `drover:blocked`, `implemented` is `drover:implemented` and `merged` is `drover:merged`. Two more exist only on the tracker. `drover:in-progress` marks a session in progress, which leaves nothing on disk that `status` reads. A shelved item's issue carries `drover:deferred`, tracker-only for the same reason: the shelf is never parsed as items, so no state is derived for anything on it. drover keeps one on each issue and removes the rest. Membership is a separate `drover` label, which is what marks an issue as drover's to write. An intaken item's `issue:` names the report it came from, which carries no such label, so drover never rewrites, labels or closes it: that issue is closed through a `closes:` disposition like any other.
+
+A tracker drover cannot reach never blocks `accept`, `unaccept`, `split`, `run`, `finish`, `mark-merged`, `unmark-merged`, `shelve` or `unshelve`. Each names the write it could not make, and `drover check` lists it on its next run:
+
+- `UNMIRRORED`: an accepted, unmerged item that names no issue.
+- `MIRROR DRIFT`: the issue's requirements differ from the file's. An unaccepted item is exempt, since its list is being redrafted.
+- `MIRROR STALE`: the state label, the open or closed state, or a blocked-by link lags the backlog.
+- `MIRROR SHELVED`: a shelved body's issue is still open or lacks `drover:deferred`.
+
+`drover accept <id>` is the remedy for the first three, except on a scaffold, where `drover unaccept <id>` rewrites the label without publishing a list nobody has accepted. A shelved body is not an item `accept` can read, so `MIRROR SHELVED` is repaired by `drover unshelve <id>`, then `drover shelve <id>`. `check` reads every issue carrying the `drover` label in one call, open and closed, and degrades the way `ORPHANED FOLLOW-UP` does: an unreachable tracker is a `note:` line, never a finding. `drover:in-progress` passes for `ready` or `implemented`, since nothing on disk can tell a live session from a label left behind.
+
+## The status table
+
+Each row is one item. The leading glyph is its state:
+
+| Glyph | State       | Meaning                                                                                                                                                                                                                                  |
+| ----- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `[x]` | merged      | The ledger records it merged.                                                                                                                                                                                                            |
+| `[~]` | implemented | A run finished clean; nothing has validated or merged it.                                                                                                                                                                                |
+| `[>]` | ready       | Dependencies met, nothing has run.                                                                                                                                                                                                       |
+| `[ ]` | blocked     | A dependency has not merged; the note names which.                                                                                                                                                                                       |
+| `[?]` | scaffold    | The body still carries its stop marker. The note says which step is next: `scaffold · needs requirements` when no numbered requirement is written, `drafted · N reqs · drover accept <id>` when the list is written and waits on accept. |
+| `[!]` | broken      | The body will not parse.                                                                                                                                                                                                                 |
+
+The second column is a one-character gutter. `▸` marks the item whose branch is checked out, and the same item is named in a `▸ here:` line below the totals. On a terminal that row is also bold green, but color is never the only signal: the glyph and the footer line carry it for a reader who cannot see the color, for a piped or redirected run, and when `NO_COLOR` is set.
+
+The current item is found by rendering `run.branch` for every item and comparing against `HEAD`, not by parsing the branch name. The template is project-defined and its default renders a planned item to a bare slug carrying no id at all, so there is nothing in the string to parse. Standing on a branch no item renders to, or on one that several render to, leaves the gutter marker off and the footer names the branch alone:
+
+```text
+▸ here: branch bug/41-login-redirect-loops  #41 Login redirect loops on an expired session  (F2)
+▸ here: branch release-2024-cutover  (no item owns it)
+▸ here: branch shared-name  (B1, B2 — name the id)
+```
+
+Work filed against the tracker has no item and so no rendered branch. To name it anyway the footer reads digit runs out of the branch and looks each one up in the open follow-up list, the one place a number is confirmed rather than assumed. One confirmed number is a match; two are a coincidence and report nothing, and a branch carrying a year or a port number resolves to nothing at all. A closed issue is not in the follow-up list, so a stale branch falls back to `(no item owns it)` rather than naming work that is already finished.
+
+A project with [`[git] enabled = false`](configuration.md#git) has no branches at all, so the footer is omitted entirely rather than reported as unknown. The table above it is the whole answer there.
+
+The third form is the branch several items render to, and it is the one case where the marker is absent because there are too many answers rather than none. A shared branch is legal (the template belongs to the project, and two items whose slugs match render the same string), so the footer names the candidates in the form `drover finish` refuses them with, and no row carries `"current": true` in `--json`. Marking one would pick a winner drover has just said it cannot pick. Naming an id resolves it for any command that takes one.
+
+When `[status] column` names the same key as `[severity] key`, that cell is colored by rank:
+
+| Rank     | Color                              |
+| -------- | ---------------------------------- |
+| Critical | red                                |
+| High     | orange                             |
+| Medium   | yellow                             |
+| Low      | blue                               |
+| unranked | none (the reader's own foreground) |
+
+Unranked emits no escape sequence at all rather than an explicit white, which would paint the cell unreadable on a light background. The same doctrine as the `▸` marker applies: the letter is the signal and the color only makes it faster to find, so a piped run, `NO_COLOR`, and a reader who cannot see red all still get the rank as text. `[status] column` pointed at anything else is left plain, because tinting a column by an axis it is not showing lies in color.
+
+`--sev C,H` narrows to the ranks named, `--sev none` to items declaring nothing drover recognizes. A `[!] broken` row always survives the filter: it has no readable frontmatter to rank, and hiding the row that says the backlog is damaged is how a filter starts lying. `--by-sev` orders worst first _within_ the planned and intake sections rather than across them, since the `-- intake --` header prints at the first unplanned row. Without it the table stays in id order.
+
+Merged rows are dropped by default and `--all` brings them back. **The totals still count them either way** and the footer says how many it hid, because a list that quietly shortens itself is a worse lie than a long one. `--sev` follows the same rule for the same reason: it filters the view, never the arithmetic, and the footer names how many rows it dropped. `--json` carries the same scope the table does, so it needs `--all` for every row, and adds `"current": true` to the checked-out item and `"severity"` verbatim as written: the raw string, not a rank, so a value drover does not recognize survives the round trip.
+
+The totals sit on two lines under the table. The first is progress: the two ratios against a known total, and how many rows the view hid. The second is what waits on somebody: scaffolds to draft and to accept, items awaiting a pull request, merged items nobody audited, unreadable bodies, and the follow-up list's bare count of open rows, which is the ordinary state of a project that knows where its gaps are. Either line is omitted when it has nothing to say:
+
+```text
+19 of 19 planned complete  ·  16 of 16 intake done  ·  3 done rows hidden
+1 to accept  ·  2 awaiting PR  ·  81 open follow-ups (drover follow-ups)
+```
+
+An `implemented` or `ready` note carries `at-limit` once the item has reached `[review] max_review_rounds`: the next `request-changes` refuses, so sending it back is not one of the options.
+
+The PR column names each item's pull request and its state: `open`, `draft`, `merged` or `closed`. One `gh pr list --state all` call reads them all, newest first up to `[github] page_limit`, matched on the branch each item renders to and never on a fork's branch of the same name. A merged item whose number the [ledger](#the-ledger) recorded answers from the ledger alone, so a table of merged rows asks the forge nothing. The column is absent when no printed row has a pull request, on a project with `[git] enabled = false`, and in a checkout whose remotes name no GitHub host, where there are no pull requests to read. A row there whose number the ledger recorded still reads `unknown (no GitHub remote)`.
+
+A read that fails is not a blank. The cell says `unknown` and why in a word (`gh missing`, `not authenticated`, `forge unreachable`, `gh failed`), a footer line carries what gh said, and `status` still prints every other column and exits 0. `--no-tracker` asks the forge nothing: the cell reads `unknown (--no-tracker)` wherever the ledger cannot answer, and the footer omits the follow-up count.
+
+```text
+[>]   1           #240 draft First      READY
+[>]   2                      Second     READY
+
+[>]   1           unknown (not authenticated) First      READY
+pull requests unread: not authenticated: exit status 4: HTTP 401: Bad credentials
+```
+
+On a terminal, every issue and pull request number drover prints is an [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda) hyperlink to its page, built from the repository `gh repo view` resolves, so a fork or a GitHub Enterprise host links to its own. Where the number came from a read that already returned its URL, that URL is used; otherwise drover asks `gh repo view` once per process, bounded at 5 seconds, and a failure is a plain number. That is a forge read, so `--no-tracker` skips it and links only what is already in hand. The visible text is the same either way, and links are off on a pipe, under `NO_COLOR`, under `TERM=dumb`, and in every `--json` document. A follow-up list kept in a file has no web page behind its numbers, so those stay plain.
+
+The title column sizes to the terminal: `COLUMNS` when it is set, otherwise the width of the terminal on stdout, otherwise 110 columns with titles capped at 71. The status cell takes the width of the longest note that prints, and the title yields the rest.
+
+It is not the ordinary state when nothing reaches those rows, so the count names the [live](#follow-up-owners) ones when there are none, or when orphaned plus unowned outnumber them. Same rule as the `follow-ups` footer: a state the reader already assumes is not worth a word, and 71 orphaned rows beside 10 unowned ones print the line above unchanged without it.
+
+```text
+81 open follow-ups · 0 live (drover follow-ups)
+```
+
+The counts stay out of `status --json`, whose `items` are one object per item. A follow-up total is a fact about the project rather than a row, and `drover follow-ups --json` already carries the rows it is derived from.
+
+## The ledger
+
+JSONL, one record per line, append-only. Thirteen row types:
+
+```json
+{"id":"16","stage":"implement","runner":"claude","session":"3f9a0c2e71b4","date":"2026-07-14"}
+{"id":"16","merged":true,"implementer":"claude","date":"2026-07-14","report":".drover/reports/16-x.md"}
+{"id":"20","level":"verified","reviewer":"sam","code_by":"agent","independent":true,"date":"2026-07-23","note":"R1-R5 traced to shipped code"}
+{"id":"20","issue":47,"disposition":"fixed","code_by":"agent","independent":true,"date":"2026-07-23","note":"traced to the handler"}
+{"id":"16","changes":"9f3c1a2b7d44","date":"2026-07-24"}
+{"id":"16","review_result":"at_limit","date":"2026-07-25"}
+{"id":"16","refused":"9f3c1a2b7d44","date":"2026-07-25"}
+{"id":"16","branch":"bug/b16-the-slug","head":"c0ffee1234","date":"2026-07-25"}
+{"id":"16","body":"4e1d0c9a7b23","date":"2026-07-25"}
+{"id":"16","body":"4e1d0c9a7b23","cleared":true,"date":"2026-07-26"}
+{"id":"16","branch":"bug/b16-the-slug","pr":236,"date":"2026-07-25"}
+{"id":"16","head":"c0ffee1234","check":"build","class":"infra","evidence":"toomanyrequests: You have reached your pull rate limit.","rerun":true,"date":"2026-07-25"}
+{"id":"16","park":"died","detail":"stream_cut","evidence":"The stream was interrupted","log":"/home/op/.cache/drover/drover/16-x-review.20261017-031200.jsonl","drive":"D3","date":"2026-10-17"}
+{"id":"drive","drive":"D3","label":"night run","queued":["16","17"],"jobs":1,"date":"2026-10-17"}
+{"id":"drive","drive":"D3","exit":0,"outcomes":[{"id":"16","outcome":"parked"},{"id":"17","outcome":"ready_to_merge"}],"date":"2026-10-17"}
+```
+
+A non-zero `issue` is what makes the fourth type a disposition, and a `changes` field the fifth; every other type leaves each out, so no reader has to infer which record a line is from the fields that happen to be populated.
+
+The fifth is the row `request-changes` writes when a review sends work back. Nothing folds it, and it is the first type that carries a digest rather than prose. `request-changes` already writes the evidence into the item body, and the digest is there so a reader can tell a review sending back the same finding twice from one that found something new.
+
+The sixth is `drive`'s reading of one review pass, or of a tree it parked on. The seventh is a send-back that `[review] max_review_rounds` turned away. Without it, a review at the cap records its audit, is refused, and leaves an audit with no `changes` row, which reads the same as a review that found nothing at all.
+
+The eighth is the evidence that a branch carried a commit the trunk did not, written before every push. Nothing else can say it after the merge. A branch that never held a commit sits at or behind the trunk, so `git branch --merged` lists it the same way it lists one whose work went in; a stage row cannot supply the difference either, because it is written at launch, before any commit exists. It is keyed by branch rather than by id alone, because the branch is what a merge check is asked about. Without one, an ancestry "merged" is read as a branch that never started, and `drover finish` refuses it without `--force`.
+
+The ninth is a digest of an item file's bytes, frontmatter included, with spaces, tabs, carriage returns and newlines at the end of the file left out (a digest of the exact bytes also matches), appended by every command that writes an item body: `request-changes`, `close-changes`, `invariant`, `link`, `resolve --link`, `split` and `accept`/`unaccept`. A review stage row carries the same `body` field, taken as the session launches. The latest of them is the body as drover last left it, so a review whose item does not match it changed the body by some other path, and `drive` parks that pass `body_edited` (see [`drive --json`](automation.md#drive---json)). It is a row of its own rather than a field on each command's row because `link` and `invariant` write no other row to carry it. The row `close-changes` writes adds `"cleared":true`, because the digest alone cannot say which command wrote the body, and `open-pr` reads a `close-changes` after a `findings_open` pass as that pass passing (see [`drive --json`](automation.md#drive---json)).
+
+The tenth is the pull request `open-pr` opened or found for the item's branch, written by `drover open-pr` and by `drive` when its merge gate passes. A non-zero `pr` is what makes it this type, and it shares `branch` with the eighth, which carries `head` instead. It folds last-row-wins, and a correction pass that finds the same pull request open again writes nothing, so a row means the number or the branch changed. It is the only place the number outlives the command that learned it: `status` reads it to name a merged item's pull request without asking the forge. An item with no such row falls back to the live read.
+
+The eleventh is `drive` classifying a red check on a pushed head before the merge gate read it: the check, its `class` (`infra`, `trunk`, `code`, or `none` for a head no check ran on, which names no check) and the line that decided it. A `green` row names no check either: it is an `infra_failure` head whose checks passed when `drive` read them again at the end of the drive, and it ends the park that came before it, as a stage or completion row does. A non-empty `class` is what makes it this type, and it carries `head` with no `branch`, so it is never read as a push. `rerun` marks a check `drive` reran, and the count of those on one head is what [`[forge] reruns`](configuration.md#forge) bounds, across drives as well as within one.
+
+The twelfth is `drive` parking an item: the `park`, its `detail` (see [Park details](automation.md#park-details)), the `evidence` line and the `log` it came from. A non-empty `park` is what makes it this type. It stands until the next stage row or completion row for the item, which is somebody acting on it, and while it stands `status` prints the item as `parked: <park> (<detail>)` rather than `implemented`, and `show` prints the evidence and the log.
+
+The thirteenth is a drive's own pair of rows, under `"id":"drive"`, an id no namespace can mint, so a project that declares a `D` namespace never reads one as an item's. The drive's id, `D1`, `D2` and so on, is one past the highest any row names, allocated under the ledger's lock when the drive takes the lease. The start row carries it once the drive has read its queue, with the `label`, the ids `queued` and `jobs`; a drive that exits before then writes it with nothing `queued`, unless it was refused with exit 3 while no row carried its id, which writes no drive row. The end row, the one with `exit`, carries the exit code and each item's `outcome`. A drive that [re-executed onto a new binary](automation.md#resuming-onto-a-new-binary) writes a second start row under the same id, carrying `version` and `replaced`, the binaries after and before. Every other row a drive appends carries its id in `drive` too, which is how `status` names the drive that last touched an item and [`drover drives`](automation.md#drives---json) lists what each one ran; a row written outside a drive leaves it out.
+
+The first four resolve **last-row-wins**. A withdrawal is an append (`"merged":false`), never a rewrite, which keeps the file append-only for every reader and stops a withdrawal from destroying that item's audit history as a side effect.
+
+A drive's own account of a night is in none of these beyond the twelfth and the outcome words on the thirteenth. What an item amounted to on one invocation (the merge gate refused it, the review recorded nothing, the forge went down) is a fact about that invocation rather than about the item, and it expires, because "the merge gate exited 1" is true at 03:12 and false at 09:00. The park row is the one part drover reads back, and only until the item launches again. The rest `drover drive --json` writes to stdout and the caller keeps, which is why there is no fifth store.
+
+Last-row-wins answers "what is true now", which is the right question for everything above and the wrong one for "how many times". A review loop that sends work back round after round is correct on every pass, and only the count of passes says it is not terminating, so `drover status` and `drover show` read those rows a second way and report totals the fold discards.
+
+**A disposition two independent passes agree on is marked settled.** The supersede rule still stands above it: an early pass can be wrong, and appending a later row is the only way to correct one. What settled adds is the evidence that re-judging has stopped changing the answer, so the review prompt hands it over as fact rather than asking for it again. Agreement has to be trailing, an author's row can break a run but never complete one, and a row with no authorship counts as neither. `drover resolve` over a settled answer warns and records; it never refuses, because refusing would turn agreement into a lock.
+
+A malformed line is **reported, not skipped**. A silently dropped row is indistinguishable from a record nobody ever made.
+
+An agent that ran an item outside drover records the fact by appending one line itself. That protocol is why the ledger is text rather than a database: it has to be writable from a sandbox with no binary and no network.
+
+### Who ran which stage
+
+`run` and `review` each append a stage row naming the runner drover resolved and launched, and the `session` id the launched process carries in `DROVER_SESSION`. It is written before the launch, because a session killed halfway still happened, and the runs worth auditing are the ones that end badly. The session id is what `--code-by agent` resolves against.
+
+That row is the only place the answer can live. Deriving it from the newest run log works until someone runs an item twice with two runners, and fails outright on the interactive path, which writes no log at all.
+
+| Question                     | Field                             | When it is empty                                    |
+| ---------------------------- | --------------------------------- | --------------------------------------------------- |
+| Who did the project ask for? | the item's `runner` frontmatter   | The item pins no runner.                            |
+| Who implemented it?          | `stage: implement` row's `runner` | No run was recorded.                                |
+| Who reviewed it?             | `stage: review` row's `runner`    | No review was launched through drover.              |
+| Who looked at it?            | the audit row's `reviewer`        | `audit` ran without `--reviewer`.                   |
+| Who does the record credit?  | the completion row's `agent`      | Never: `mark-merged` and `finish` always write one. |
+
+The last of those defaults to the implementing runner, falling back to `[run] default_runner`; `--runner` overrides both. The others never default to anything. `drover show <id>` prints the two runners under the audit history and says `unknown (no run recorded)` when nothing did, because "nobody recorded it" and "claude did it" are the two answers this row exists to separate.
+
+drover does not enforce that the two runners differ. An independent audit **warns** on stderr when the record names one runner for both stages, names both, records the row and exits 0. Two sessions of one runner, with different context and different operators, are a legitimate split drover cannot see from a name, and a refusal there would teach people to record a runner they did not use, which costs more than the overstatement it would prevent.
+
+## The audit ladder
+
+Completion says an item merged. It says nothing about whether anyone checked it, so an item backed only by its agent's own report and one whose every requirement was re-confirmed against shipped code look identical without an audit level.
+
+| Level      | Means                                                          |
+| ---------- | -------------------------------------------------------------- |
+| `claimed`  | The agent's own report was captured. Nobody else looked.       |
+| `reviewed` | A review pass ran against the code.                            |
+| `verified` | **Every** numbered requirement confirmed against shipped code. |
+
+**The most recent row wins, not the strongest.** Correcting a level downward is the point: a sweep that recorded more than it checked would otherwise be permanent, and the only escape would also discard the completion record. `audit` prints `(DOWNGRADED from …)` so a correction is never silent.
+
+**The ladder measures the reviewer, not the item.** `verified` means every requirement was traced, including ones that turned out unmet. Finding a requirement unsatisfied does not lower the level. Drop to `reviewed` when you could not trace a requirement, never when you traced it and disliked the answer.
+
+**Where the unmet requirement goes depends on whether the work can still change.** Review sits before the merge, so the ordinary answer is: back to the branch. `drover run <id>` returns to it and the review runs again; no pull request exists yet, because drover opens one only for a branch the merge gate and a clean review pass have both passed. Nothing is filed, because the item that owns the gap is the one still in flight.
+
+A follow-up is for the other case: a gap owned by a _different_ item, or one found after the merge, when there is no branch left to return it to. Filing an unmet requirement of the item under review merges it incomplete and leaves a report whose only owner just shipped, which is how a backlog accumulates rows nothing ever closes.
+
+### Authorship
+
+`--code-by <who>` is required and is a separate axis from the level: who wrote the code.
+
+| Entry                       | Means                                                                                                                                                                                                                                  |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent`                     | A session drover launched. Reserved. Resolved per session against the item's `stage: implement` rows, so a review session drover launched is independent of the implement session it follows, and the implement session itself is not. |
+| any other value             | A person's name, compared as written against `--reviewer`.                                                                                                                                                                             |
+| a comma list (`agent,sam`) | Mixed authorship. The auditor has to differ from every entry.                                                                                                                                                                          |
+
+**`verified` needs an auditor who differs from every entry.** Otherwise drover refuses at the write path, exits 3 and names the entry that matched. A named entry with no `--reviewer` and no launched session behind the command cannot be told apart from anybody, so it is refused too. Without an authorship field, an agent that wrote the code and then recorded `verified` on it reads in the ledger the same as an independent pass, and only a later independent pass would find what the first one missed.
+
+The row keeps `by` as typed and adds `independent`, drover's reading at write time, because the auditor's identity is the process that wrote the row and nothing reading the file later can recover it. A row with no `by`, such as one appended by hand without it, renders in `status` as `<level> (no authorship)`. drover deliberately does not fill one in: assigning a value would fabricate provenance, and the same rule governs the stage rows above.
+
+### Who looked
+
+`--reviewer <name>` names who looked. It is attribution, and it is also what a named `--code-by` entry is compared against: code by `sam` recorded `verified` with `--reviewer sam` exits 3.
+
+Without it a human reviewer is representable only as the absence of a `stage: review` row, which is byte-identical to nobody having looked. An agent reviewer leaves the row `review` wrote when it launched; a person leaves nothing, and nothing is what "unaudited" already means. So a human review is recorded by naming the human:
+
+```console
+$ drover audit B1 reviewed --code-by agent --reviewer sam "read the diff"
+audit recorded: B1 -> reviewed (code by agent, reviewed by sam)
+```
+
+**Omitting it records nothing.** `finish` and `mark-merged` resolve an absent `--runner` through the implementing runner and then the project default; `audit` must not, because a name drover chose is a reviewer nobody can go and ask. `status` prints the recorded name in the trailing cell (`done · reviewed (sam)`) and `show` prints it beside the level in the audit history.
+
+A `--reviewer` naming somebody other than the recorded implementer also silences the same-runner warning above: the warning asks where the second look came from, and the operator has just answered.
+
+## Issue dispositions
+
+An item's `closes` frontmatter key names the tracker issues its work is meant to resolve. Every number there is a question somebody is waiting on, and drover answers each one individually.
+
+```yaml
+closes: 47 100 103
+```
+
+The judgment and the write are separate steps, held by different actors:
+
+| Step                                                        | Who                     | Reaches       |
+| ----------------------------------------------------------- | ----------------------- | ------------- |
+| `drover link <id> <issue>`                                  | the reviewer or the run | the item body |
+| `drover resolve <id> <issue> <disposition> --code-by <who>` | the reviewer            | the ledger    |
+| `drover finish <id>`                                        | the operator            | the tracker   |
+
+| Disposition | What `finish` writes                                            |
+| ----------- | --------------------------------------------------------------- |
+| `fixed`     | Closes the issue, with a comment naming the item and the merge. |
+| `partial`   | Comments. The issue stays open.                                 |
+| `unrelated` | Comments. The issue stays open.                                 |
+
+**An issue nobody judged is named and left alone.** `finish` prints it and the `resolve` line that would answer it, and writes nothing. Guessing a disposition would recreate the silence the key exists to end, one level down.
+
+**`finish` never forms a judgment, only executes one.** That is the same line it draws between recording a completion and auditing it: a session must not close an issue on the strength of its own account of what it built. A disposition the author of the code recorded is kept and warned about rather than refused, for the reason the same-runner check only warns: a refusal pushes people to record a `--code-by` they did not earn. `resolve` takes no `--reviewer`, so a named entry there is independent only of a session drover launched.
+
+**Applying is idempotent.** `finish` appends an `applied` row per issue once the tracker took the write, so a second `finish` skips what it already did. That row sticks: a later disposition cannot un-say a comment that is already public, and `resolve` refuses to rewrite one.
+
+**Two finishes write each issue once.** A drive's `finish` and an operator's can apply one item from two processes. Before each tracker call, `finish` appends a `locking` row for the issue under the ledger's lock, deciding from the file as it stands under that lock rather than as it was loaded. A `finish` that finds the issue applied prints `already <applied>`; one that finds a live lock prints `already being applied` and makes no call. A failed call appends a row releasing the lock, so the next `finish` retries at once. A lock with no applied row behind it expires after ten minutes, which is how long a `finish` that died mid-call holds its issues. A lock is not a write: `--no-tracker`, `show` and `check` still count the issue as pending.
+
+The mirror writes `finish` makes to drover's own issues take no lock. Each one reads the issue and writes only the difference, so a second process repeating it sets the label, state or link already set.
+
+**A tracker nobody can reach never fails the finish.** The merge happened and the ledger says so; `finish` reports what it could not write and moves on.
+
+`drover check` reports `NO DISPOSITION` for a merged item whose `closes` key names an issue nobody judged.
+
+### Why not the pull request's own keywords
+
+GitHub closes issues from `Closes #N` in a pull request body, and that mechanism silently drops most of a list. `Closes #47, #100, #103` is **one** closing reference, not three: the keyword has to be repeated before every number. A merged pull request naming eleven issues that way closes one, and nothing reports the other ten. A `closes` list is read as numbers and written one call per issue, so eleven numbers produce eleven tracker writes or a line saying why not.
+
+## Follow-up owners
+
+Unproven or deferred work lives as tracker issues by default, each one a follow-up. A label cannot be typo'd into inertness the way a hand-written table cell could, and an item that outgrows one line becomes a comment thread instead of a longer cell.
+
+A project with no tracker keeps the same follow-up list in an append-only file, which `drover follow-up` writes: see [`[register]`](configuration.md#register). Only the source changes. The vocabulary below, the owners, the severity ranking and every count read one index whichever backend answered.
+
+| Label or link                                  | Meaning                                                                                                                                                 |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `<follow_up_label>`                            | **Membership.** The issue is a follow-up.                                                                                                               |
+| `<severity_prefix>critical\|high\|medium\|low` | Severity, spelled out so the label needs no legend. It reads back as the word, and an item's frontmatter shorthand (`C`, `H`, `M`, `L`) ranks the same. |
+| Sub-issue parent                               | **Owner**, when the parent is the `issue:` of a backlog item.                                                                                           |
+| `Owner: <id>` line in the body                 | **Owner**, one per line, any number of them. Bare ids only: `Owner: 2b`, never `Owner: 02b`.                                                            |
+
+drover reads owners from links rather than labels: one label per item is a foreign key the tracker has to hold for every item the project ever wrote. It reads both sources and takes their union, so an issue that is a sub-issue of B12's issue and also says `Owner: B14` belongs to both. A follow-up drover files itself (`finish`'s post-check failure, `drover follow-up`, the review flow in `AGENTS.md`) is created as a sub-issue of the owner's issue when the owning item names one, and carries an `Owner: <id>` line otherwise. It never gets an owner label. By hand:
+
+```bash
+gh issue create --label follow-up --label severity:medium --parent 212 --title "..."
+gh issue create --label follow-up --label severity:low --body "Owner: B12" --title "..."
+```
+
+**The follow-up label is membership, not a kind.** `gh issue list` is asked for it server-side, so a repository's ordinary open issues are never read at all. That is the whole difference between a follow-up list and a backlog: without it, drover pointed at a repo with 200 open issues reports 200 open rows, and the two states "nothing is filed" and "we are reading somebody else's tracker" look identical.
+
+An issue that names an owner and carries no follow-up label is not a follow-up, and still reaches the prompts: `drover run` and `drover review` read the sub-issues of the item's issue and search for `Owner: <id>` for the item and each id on its `deps:` line, and render what comes back without the follow-up label in its own block after the follow-ups. A `bug` filed against a branch under review appears there. `follow-ups`, `unaudited`, `check` and the orphaned count still count follow-ups alone.
+
+The corollary is the failure this trades for: a follow-up nobody labels is invisible. Membership is a deliberate act. `drover follow-ups` names the label it asked for when it finds nothing, so an empty list says what question it answered:
+
+```text
+no open follow-ups (nothing in me/webapp carries the "follow-up" label)
+```
+
+A reproducible defect worth its own unit of work is **not** a follow-up. It is a tracker issue with your project's bug label, and `drover intake <n>` turns it into an item, or `drover new <kind>` writes one with no issue behind it. The follow-up list holds what nobody has priced; the backlog holds what somebody is going to do. Nothing is in both, and `intake` keeps it that way on the promotion path below.
+
+Neither is **work in flight on an open branch**. A row records a gap somebody else owns, and a reviewer looking at an unmerged branch is looking at work that can still be changed. What can still be changed goes back to that branch, which is still open, and nothing has to be filed to reach the person who can fix it; no pull request exists yet either, because drover opens one only once a review has come back clean; filing one merges the item incomplete and leaves a row whose only owner just shipped. Whether a finding is worth a run at all is a second question with its own answer, and the table that answers both is [where a finding goes](lifecycle.md#where-a-finding-goes).
+
+An issue naming no owner is **deliberately inert**: it records provenance for a human and reaches no run. That is the right state for a gap no item owns, but it is also what a typo looks like, so `follow-ups` marks it `(unowned — reaches no run)`.
+
+An issue owned by an item that has since merged is **orphaned**. It is not lost: the link still names the owner, and the next item declaring that id on its `deps:` line inherits the row. What it has lost is a run of its own, and nothing is scheduled to carry it until somebody declares that dependency. The ledger decides merged; the tracker never says whether an owner shipped.
+
+Orphaned rows are counted in the footer rather than stamped on each row, and `--live` hides them:
+
+```console
+$ drover follow-ups
+open follow-ups:
+  #68    [low] the login form drops the redirect target
+  ...
+
+8 open · 8 orphaned (every owner merged)
+
+$ drover follow-ups --live
+no live follow-ups — all 8 open follow-ups are orphaned
+```
+
+On a project whose items are written, run and merged in one sitting, every owned row is orphaned the moment its owner merges. A per-row annotation there fires on all of them and spends the columns the title needs.
+
+### Promoting an orphaned row
+
+`drover intake <n>` is the verb. It scaffolds an item as it does for any tracker issue, then removes the follow-up label, so the row leaves the follow-up list in the act that puts it in the backlog:
+
+```console
+$ drover intake 68 --kind bug
+
+scaffolded B7 -> .drover/backlog/B07-the-login-form-drops-the-redirect.md  (issue #68, bug)
+
+dropped "follow-up" from issue #68: it is a backlog item now, not a follow-up
+```
+
+`intake` refuses two states, both with exit 3:
+
+| State                                                 | What `intake` does                                                                                                                                                                              |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owned by an item the ledger does not record as merged | Refuses, naming the owner. That run already carries the row; a second item duplicates it.                                                                                                       |
+| No label matching an id namespace                     | Refuses. **`--kind` is required**: the follow-up label is membership, not a kind, and drover defaults no namespace, because the namespace decides which definition of done the item is held to. |
+
+The label write degrades the way every other one does: a scaffold whose label removal failed says so on stderr and leaves the body valid, because the file is what drover reads. The issue sits in both sets until the removal succeeds, and re-running `intake` is the repair: it short-circuits on the body file, names the item it already wrote, then re-asks the tracker and drops the label if the issue still carries it. It re-asks rather than removing unconditionally, so a run that finds the label already gone by somebody's hand reports nothing, and the repair is safe to repeat.
+
+What promotion cannot do is group. Which orphaned rows share a root cause is not derivable from the tracker. One row to one item is the whole scope; deciding an orphaned row should be chased, closed, given a new owner or merged into a neighbor is still yours to judge.
+
+### How far a row travels
+
+**One hop.** A prompt carries the issues owned by the item itself plus those owned by each id on its own `deps:` line, and nothing further. A row on item 1 reaches an item declaring `deps: 1`; it does not reach that item's dependents. Carrying every ancestor's open gaps would bury the ones its author can act on.
+
+`unaudited` is the exception and walks the graph transitively, so an item can rank high on blast radius while carrying none of its ancestors' rows into its run.
+
+Check what a run will actually see:
+
+```bash
+drover run 20a --dry-run | grep -A20 'Open follow-ups'
+```
+
+## Blast radius
+
+`unaudited` ranks merged-but-uninspected items by how many items transitively depend on them, because that is how much rework a defect there would cost: a defect in something twenty items were built on costs twenty items of rework, while the same defect in a leaf costs one PR.
+
+Ties break on the severity of what the item already admits it left open, read rank by rank from Critical down: one Critical outranks any number of Highs, and the first rank where two items differ decides it. Counts are never summed into a single score, because a score has to weigh a Critical against some number of Highs and there is no defensible exchange rate. Row severity uses the same vocabulary as an item's own, so a `severity:critical` label and `severity: C` in frontmatter are one rank.
+
+## Validation
+
+`drover check` exits 2 on any finding, which is what makes it the command to put in CI. Exit 1 is reserved for drover being unable to run the validation at all, so a wrapper can tell a project that failed its own checks from a tool that broke. `--json` carries the same findings with a stable `kind` token; see [Automation](automation.md). Every class it reports:
+
+| Finding               | Means                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NO BACKLOG`          | `paths.backlog` names a directory that does not exist.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `NO SHELF`            | `paths.shelf` is set and names a directory that does not exist.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `SHELF IS BACKLOG`    | `paths.shelf` and `paths.backlog` resolve to the same directory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `NO VERIFY`           | `[verify] default` is empty.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `UNDECLARED KEY`      | `[severity] key`, `[run] runner_key`, or a `[frontmatter] shape` entry, names a key `[frontmatter]` does not declare. Each fires only for a project that set the key itself: both default on everywhere, so an undeclared default is the ordinary state of a project that ranks nothing or pins no runner. `runner_key` is the quietest of the three: no item can carry the key, so `run` falls back to `[run] default_runner` and reports nothing about the pin it ignored.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `NO REQUIREMENTS`     | An accepted item's body carries no top-level `N.` lines, so `report --save` will build no checklist and nobody will ever confirm it. Scaffolds are exempt: the stop marker is what says the list is not written yet. Merged items are exempt: their work is either confirmed or never will be, and a list written afterward is a contract nobody checked, so shelve the body instead.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `UNREADABLE`          | A file in the backlog directory did not parse.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `BAD VALUE`           | An item's value fails the type `[frontmatter] shape` declares for that key.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `BAD RUNNER`          | A `[runners]` entry names a binary that is on PATH, and its `headless` argv is one that binary cannot use: the prompt ends up where the binary ignores it, or nothing in the argv asks for the JSONL stream drover reads back. The finding carries the argv that works. Only for the binaries drover ships knowledge of; a wrapper it knows nothing about is silent here, and `drover drive` reports that one from the log it wrote.                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `BAD LEDGER`          | A ledger line is not valid JSON.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `ORPHAN ROW`          | The ledger records an id whose body is missing, or on disk and unreadable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `SHELF CLASH`         | One id holds a body in both the backlog and the shelf.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `MISSING DEP`         | An item depends on an id whose body is missing, unreadable or shelved.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `BAD DEPS`            | A `deps:` line is written as a YAML list (`deps: [F1]`, `deps: ["F1", "F2"]`), which drover does not read: the line stays ids separated by spaces. The finding names the file, the line and the correction (`deps: F1 F2`). An id the list names with no body is also `MISSING DEP`, under its stripped form.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `MISSING REPORT`      | A ledger row names a saved report that does not exist.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `PROTECTED UNMATCHED` | A `[drive] protected_paths` entry the project wrote matches no tracked file, read the way the merge hold reads it, so it holds no merge. Usually a path written relative to the project rather than the repository root, or a directory named without its trailing `/`. The built-in set is exempt.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `SEQUENCE CLASH`      | Two tracked files share a number in a [`[numbered_files]`](configuration.md#numbered_files) glob. git merges them without a conflict, and `drive` refuses a branch that would add one, so the usual cause is a hand merge. Rename the later file above the trunk's highest and change what refers to its old number; drover never renumbers.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `BAD REGISTER`        | `[register] backend = "file"` and the file at `paths.register` is on disk and will not read: bad permissions, or a line that is not a register row. Correct the path, the mode or the line; the finding carries the reader's own error, which names the file and the line. An absent file is an empty register and is never this.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `NO LABEL`            | The follow-up read returned nothing and `[github] follow_up_label` names a label the repository does not define, so the query it made could not have matched anything. Create the label, or correct the key. A zero under a label that exists is an empty follow-up list and is never this.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `NO REGISTER`         | `[register] backend = "file"` and `[paths] register` names no file drover can ever have read: the directory it points into does not exist, or the file is absent while a file holding register rows sits beside it. `register.Append` creates what it writes to, so both states are a path that changed under the project. Create the directory, point the key at the file the rows are in, or rename the file. A missing file beside a directory holding no register is where every project starts and is never this.                                                                                                                                                                                                                                                                                                                                             |
+| `DUPLICATE ISSUE`     | An open follow-up is also the issue an _open_ backlog item was taken in from. `intake` drops the follow-up label as it promotes, so this is a removal that did not happen: the row reads as work no run carries while the item that carries it is open. Drop the label from the issue, or clear the item's `issue:` key. An item the ledger records as merged carries nothing and is never this. Tracker backend only: a file register numbers its own rows, so a matching number there is chance.                                                                                                                                                                                                                                                                                                                                                                 |
+| `ORPHANED FOLLOW-UP`  | Open follow-ups whose every owner has merged, so nothing is scheduled to carry them. Discharge one by declaring an owner id on a new item's `deps:` line, which inherits the row; `drover follow-ups --live` shows what still reaches a run. Judging whether an orphaned row should instead be chased or closed stays yours.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `NO CLOSES KEY`       | Issues are owned by items and `[frontmatter]` declares no `closes` key. The frontmatter schema is closed, so no item can name what it resolves: `drover link` exits 3, `drover resolve` has no key to record against, and `finish` writes nothing to any of them. Add `closes` to `required` or `optional`. A hand-written `[frontmatter]` that leaves it out reaches this state without anyone deciding to. It suppresses `UNLINKED`, which would otherwise fire once per issue naming a command that cannot run here.                                                                                                                                                                                                                                                                                                                                            |
+| `UNLINKED`            | An open issue is owned by an item, through its sub-issue parent or an `Owner:` line, the item has run and not merged, and its `closes` key does not name it. `finish` reads that key and nothing else, so the merge ahead closes nothing and whoever filed the report gets silence. Two readings are legitimate and only the branch can settle which: if this run fixed it, `drover link <id> <issue>` and then resolve it; if a later run owes the work, leave the key alone. `ORPHANED FOLLOW-UP` takes the same issue once every owner has merged, where the branch is gone and the remedy is a `deps:` line instead.                                                                                                                                                                                                                                           |
+| `UNMIRRORED`          | `[backlog] mirror = "github"` and an accepted item the ledger does not record as merged names no issue: a publish failed at `accept`, or the mirror was turned on after the item was accepted. `drover accept <id>` publishes it. Merged items are exempt, so turning the mirror on does not fail CI for every item already merged. See [The mirror](#the-mirror).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `MIRROR DRIFT`        | A mirrored issue's requirements, between its `drover:requirements` fences, differ from the item's numbered list, or the fences are gone. The file is the contract and drover never reads the issue back, so `drover accept <id>` rewrites the issue from the file.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `MIRROR STALE`        | A mirrored issue lags the backlog: its `drover:<state>` label is not the item's state, it is open though the item merged or closed though it has not, or GitHub does not record it blocked by a dep's issue. An unaccepted item's issue is compared too, on everything but its requirements. Each is a tracker write `accept`, `unaccept`, `split`, `run`, `drive`, `finish`, `mark-merged`, `unmark-merged` or `unshelve` reported it could not make, for the item or for one depending on it, or a change no command wrote through: `finish --no-tracker`, or a `deps:` line edited by hand. `drover accept <id>` writes them, or `drover unaccept <id>` for a scaffold.                                                                                                                                                                                         |
+| `MIRROR SHELVED`      | A body on the shelf names, in its `issue:` key, a mirrored issue that is still open or lacks the `drover:deferred` label: the tracker write `shelve` reported it could not make. Only the frontmatter is read, and a shelved body whose frontmatter will not parse is skipped. `drover unshelve <id>`, then `drover shelve <id>`, repeats the write.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `NO DISPOSITION`      | An item the ledger records as merged names an issue on its `closes` key that nobody judged, so `finish` wrote nothing to the tracker and whoever filed it got silence. Record one with `drover resolve`; the issue itself is closed or commented only by a later `finish`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `STALE CONFIG`        | `.drover.toml` does not declare a key `drover init` would write today, so the project is taking a default it never chose rather than one it decided. `drover config --diff` names each one at the value drover resolves it to, and reports the wider set this build reads besides. The comparison is on keys and never on text: a config carries hand-written comments recording why each value is what it is, and comparing the rendered text would report every project that wrote one. A `schema_version` this build does not read reaches here too, through the same inspection path `drover config` uses, because ordinary loading refuses it first: that report is the finding alone, and `check` says on a `stopped` line that the counts beside it are unread rather than zero. A key this build does not read never reaches here: it is an error at load. |
+| `BAD TEMPLATE`        | A template the project names in `[prompts] implement`, `[prompts] draft` or `[prompts] review` cannot be read, or will not render against a sample prompt in which every field is set, every list holds one element, `.Meta` holds every key `[frontmatter]` declares and `.VerifyCommands` holds the project's own verify commands. The finding's `path` is the key's value and `detail` is the error `run`, `draft` or `review` would stop on. The usual cause is a field this build does not have, or a `.Meta` key or `.VerifyCommands` name the project does not declare, which only the command using the template would otherwise reach, and only at launch. A key left unset uses the built-in template and is not checked here.                                                                                                                                             |
+| `STALE BLOCK`         | A markdown file at the root carries the generated agent-instruction block, and the block does not match what this binary and this config would produce. Regenerate with `drover agents --write <file>`. The comparison is on the rendered text, so a config change goes stale the same way a binary upgrade does, and so does an edit to the `[agents] addendum` file.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `STALE POLICY`        | A generated block's `<!-- drover policy: ... -->` line records a [`[supervise]`](configuration.md#supervise) policy the config does not hold, so the sessions reading that file are told permissions drover does not enforce. The finding names each action and whether it widened or narrowed, and stands in for `STALE BLOCK` on that file. Regenerate with `drover agents --write <file>`, adding `--yes` when any action widened. A block with no policy line compares as the shipped defaults.                                                                                                                                                                                                                                                                                                                                                                |
+| `BAD ADDENDUM`        | The file `[agents] addendum` names is missing, unreadable or a directory, or holds a drover marker line or an unclosed code fence that would end the generated block early. `drover agents` exits 1 rather than render a block without it, and no block is compared for `STALE BLOCK` until it renders, though `BAD MARKERS` and `NO POINTER` still report; the refusal every other command makes over a stale block skips the comparison too, so this finding is the one place the defect shows. `detail` names the resolved path and the error. Fix the path, restore the file, or remove the marker or close the fence.                                                                                                                                                                                                                                         |
+| `NO POINTER`          | The block lives somewhere other than `AGENTS.md`, and `AGENTS.md` never names the file holding it. An agent tool that loads only `AGENTS.md` never reaches the instructions, including which commands refuse inside a launched session. Paste `drover agents --pointer <file>` into `AGENTS.md`. A project with no `AGENTS.md` at all is not this: it told its agents some other way.                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `BAD MARKERS`         | A file's `<!-- BEGIN drover -->` and `<!-- END drover -->` are unclosed or inverted, so `agents --write` refuses to regenerate in place rather than guess which half to keep. Fix them by hand.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+
+`NO BACKLOG` is reported rather than fatal on purpose. A command that died on a missing backlog directory could not diagnose the one fault it exists to catch, and the absence stays distinct from an empty directory because a misspelled `paths.backlog` and a project nobody has filed against need different fixes.
+
+`NO CLOSES KEY` is reported once against the config rather than once per issue, and it takes `UNLINKED`'s place while it stands. Both name the same gap between a merge and the report it resolved; only one of them names a fix the project can currently run.
+
+`ORPHANED FOLLOW-UP`, `NO CLOSES KEY` and `UNLINKED` are the findings that read anything but local files, so they degrade in three directions rather than failing. A follow-up list drover cannot reach produces no finding and a note saying so, because a zero from a read that did not happen would report a project clean on the strength of an outage. A project declaring `[register] backend = "none"` is silent: it has failed nothing. A read cut short at the page limit counts what it got and says the count is a floor. `--json` carries `register_state` for all three, so a wrapper can tell "no orphaned rows" from "nobody asked" without running a second command.
+
+`BAD REGISTER` is the other half of that unreachable read, and the two are separate tokens because they have separate fixes: a tracker that did not answer is an outage to wait out, a register file that will not read is a path in this repository to correct. It fires only under `[register] backend = "file"`, since the other two backends never open the path. Absence is not the finding: a register file that does not exist reads as an empty register, which is the state every project is in before it files anything, and reporting it would fail CI for each one on the day it declared the backend. A file on disk that will not open, or one carrying a line that is not a register row, is what reaches it.
+
+`NO LABEL` and `NO REGISTER` are the same separation on a read that succeeded. A query matching nothing and a query nobody could have an answer to return the same zero, so neither finding is computed from the count: each consults a second fact instead. For the tracker, whether the repository defines the label at all, which is one `gh label list` call and degrades to a note when it fails. For the file, whether the path can ever have been the one rows were appended under, read twice: the directory the path names, and, when the file itself is absent, whether a file beside it parses as a register file. That second read is what catches a misspelled filename, which is otherwise indistinguishable from a project that has filed nothing. Both leave the state every project starts in silent (a label that exists and holds nothing, a directory that exists and holds no register file at all), and neither message says the follow-up list is empty, because that is the one statement drover could not check. `--json` carries the same answer as `register_state`, whose members are `read`, `truncated`, `unreachable`, `unresolved` and `off`. [Automation](automation.md) says what each one licenses a wrapper to conclude.
+
+`DUPLICATE ISSUE` is the third disagreement between what drover reads and what the tracker holds, and the only one with a row on both sides. `intake` promotes a follow-up to a backlog item and drops the follow-up label as it goes, so nothing sits in both sets; a label write that failed leaves the row traveling as work nothing is scheduled to carry, while the item drover just wrote is carrying it. The follow-up list sees a labeled row and the backlog sees an ordinary item, so neither reports it alone.
+
+The ledger's state is half of that sentence, so it is half of the key. A merged item carries nothing, and the finding fired against one would tell the reader the row is being carried by something that closed. The leftover label is real either way, but it stops being two records of one issue: what the merge left behind is counted by `ORPHANED FOLLOW-UP` once the row's own owners have merged too, with a next step that discharges it.
+
+`NO VERIFY` is a finding rather than a config error because an item run without a verify command hands its agent no way to verify the work: the run then reports success on the agent's word alone. `drover init` writes an empty verify command deliberately, so a generated project fails its own validation until somebody names the command.
+
+`ORPHAN ROW` and `MISSING DEP` name the file when there is one. A body that fails frontmatter parsing keeps its id (the filename is where it was authored), so the fix is repairing the fence, not writing an item that already exists. Both report the path so the reader can tell the two apart without checking the directory. `intake` allocates above these ids for the same reason.
+
+`NO SHELF` fires only for a project that set `paths.shelf`. An unset key is the ordinary state, and the failure it catches is silent in the other direction: a shelf drover cannot open behaves like a project that never configured one, so `ORPHAN ROW` reappears for every shelved id and `intake` reissues them. `SHELF IS BACKLOG` is the same key pointed at the bodies directory, where every live body reads as shelved and the clash below would name one file as two. Identity is decided by comparing the two directories on disk rather than the configured strings, so a symlinked shelf and, on a case-insensitive filesystem, `shelf = "Work"` against `backlog = "work"` are both one directory. A shelf that does not exist has no stat and is `NO SHELF`, never this.
+
+`SHELF CLASH` is the one duplicate the backlog read cannot see: it checks for duplicates within one directory, so two bodies holding the same id in different directories both parse clean. Reviving the shelved one would then take over the live item's branch, log names and report path without a word. See [Lifecycle](lifecycle.md#retiring-an-item-nobody-will-do) for what the shelf is.
+
+`UNDECLARED KEY` fires only for a project that wrote a `[severity]` block. The block defaults on everywhere, so an undeclared key is the ordinary state of a project that does not rank its work and a finding there would fail CI for every one of them. Configured but undeclared is a different thing: no item can carry the key, so nothing ever colors and nothing says why. A `[frontmatter] shape` entry keyed on an undeclared key is the same mistake and reports the same way. Fix either by adding the key to `optional`, or by correcting the spelling.
+
+`BAD VALUE` names the item, the key, the value as written and the declared type it failed; the second line names what is wrong with the value. Fix the value, or widen the type in [`[frontmatter] shape`](configuration.md#frontmatter-shape). It is a finding against the project and never against the body: the frontmatter parsed, so `status` still shows the item in its real state and `run` still launches it. `UNREADABLE` is for a fence that is broken, and widening it to cover a mistyped rank would take an item out of the backlog over one letter. A project that declares no `[frontmatter] shape` table never sees this finding.
+
+## Degradation
+
+Every follow-up read degrades rather than fails, and the distinction it preserves is deliberate: **"nobody filed one" and "nobody could ask" rank the same item very differently.**
+
+| Without `gh`            | Behavior                                                                                                 |
+| ----------------------- | -------------------------------------------------------------------------------------------------------- |
+| `status`                | Full table; the follow-up counter is omitted, and the footer cannot name an issue for an unowned branch. |
+| `unaudited`             | Full ranking on blast radius; the follow-ups column prints `?`, never `0`.                               |
+| `run`                   | Assembles and runs; carries no inherited-work note.                                                      |
+| `follow-ups` / `intake` | Refuse with a message.                                                                                   |
+
+## Intake
+
+Work that arrives after the plan closed enters from the tracker:
+
+```bash
+drover intake 42                     # namespace from the issue's labels
+drover intake 42 --kind enhancement  # override
+```
+
+That reads the issue, allocates the next free id in the matching namespace, writes a body with the frontmatter filled and the issue quoted as raw material, and records the number in the body's `issue` key, which is the link back. A follow-up also loses its follow-up label. Re-running on the same issue writes nothing new; idempotency keys on the body file's `issue` value, not on a label, because a label write can fail after the file is written.
+
+An issue carrying no label matching a namespace is **refused**, not defaulted. Guessing produces an item whose definition of done is wrong in a way nobody notices.
+
+Severity comes from the issue's own `severity_prefix` label when it carries one, so an assessment made on the tracker survives the trip into the backlog. A bug with no such label scaffolds as `M`, which is a placeholder rather than a judgment; anything else scaffolds with the key empty. Both are the author's to correct before `drover accept`.
+
+**It does not write the requirements.** The scaffold carries a stop marker and drover refuses to launch, or even preview, while it is present. Those numbered requirements become the audit checklist, so one lifted mechanically from a bug report is a checkbox nobody can falsify. A human writes them, then runs `drover accept`, which deletes the marker.
