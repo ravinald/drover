@@ -3,6 +3,9 @@
 # drover
 
 [![CI](https://github.com/ravinald/drover/actions/workflows/ci.yml/badge.svg)](https://github.com/ravinald/drover/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ravinald/drover?sort=semver)](https://github.com/ravinald/drover/releases)
+[![Go](https://img.shields.io/github/go-mod/go-version/ravinald/drover)](go.mod)
+[![License](https://img.shields.io/github/license/ravinald/drover)](LICENSE)
 
 Drive AI coding agents from Markdown requirements to reviewed code, with an audit trail for every work item.
 
