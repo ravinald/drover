@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/ravinald/drover/internal/backlog"
+	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/gh"
 	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/sev"
@@ -911,6 +912,41 @@ func TestStatusOnACheckoutWithNoGitHubRemoteHasNoPRColumn(t *testing.T) {
 	}
 	if out := table(noHost, "show", "B1", "--json"); strings.Contains(out, `"pr"`) {
 		t.Errorf("show B1 --json carries a pr:\n%s", out)
+	}
+}
+
+// A drive renders offline so a ledger row never waits on the forge, and offline
+// alone builds no link. The renderer asks gh for the repository once and every
+// render after it links each pull request from that answer.
+func TestADrivesRenderLinksPullRequestsAskingTheForgeOnce(t *testing.T) {
+	s, _ := prProject(t, "[]")
+	if err := s.record(ledger.Row{ID: "1", Branch: "first", PR: 236}); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("DROVER_TEST_GH_LOG", calls)
+	stub(t, filepath.Join(bin, "gh"), "#!/bin/sh\necho \"$*\" >> \"$DROVER_TEST_GH_LOG\"\n"+
+		"case \"$1 $2\" in\n"+
+		"'repo view') printf '{\"url\":\"https://github.com/owner/name/\"}' ;;\n"+
+		"*) echo \"stub gh: unexpected $*\" >&2; exit 1 ;;\n"+
+		"esac\n")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	write(t, filepath.Join(s.cfg.Root, "links.tmpl"), "{{range .items}}{{with .pr}}{{pr .number}}{{end}}{{end}}")
+
+	r := &driveRenderer{targets: []config.Render{{Template: "links.tmpl", Path: "links.out"}}}
+	for range 2 {
+		r.render()
+		raw, err := os.ReadFile(filepath.Join(s.cfg.Root, "links.out")) // #nosec G304 -- the fixture's own render
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, want := string(raw), "https://github.com/owner/name/pull/236"; got != want {
+			t.Errorf("render = %q, want %q", got, want)
+		}
+	}
+	if got := ghCalls(t, calls); len(got) != 1 || !strings.HasPrefix(got[0], "repo view") {
+		t.Errorf("two renders made gh calls %q, want one repo view", got)
 	}
 }
 
