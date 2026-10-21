@@ -913,10 +913,16 @@ func (s *session) renderAll(targets []config.Render, tracker bool) []error {
 // driveRenderer keeps a drive's [status] render files current. One per drive,
 // called from every goroutine that appends a row, so renders are serialized
 // and a slow one delays the next rather than racing it to the rename.
+//
+// forgeURL is asked of gh once, on the first render, and handed to every render
+// after it. Rendering offline keeps a ledger row from waiting on the forge, but
+// offline alone also builds no links, so every pull request and issue number in
+// the file would print bare.
 type driveRenderer struct {
-	mu      sync.Mutex
-	targets []config.Render
-	warned  bool
+	mu       sync.Mutex
+	targets  []config.Render
+	warned   bool
+	forgeURL *string
 }
 
 // activeRender is the running drive's renderer, nil everywhere else. Package
@@ -945,6 +951,11 @@ func (r *driveRenderer) render() {
 	if err != nil {
 		errs = []error{fmt.Errorf("status render: %w", err)}
 	} else {
+		if r.forgeURL == nil {
+			u := s.repoURL()
+			r.forgeURL = &u
+		}
+		s.forgeURL = r.forgeURL
 		s.offline = true
 		errs = s.renderAll(r.targets, false)
 	}
