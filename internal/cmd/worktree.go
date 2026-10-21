@@ -250,7 +250,25 @@ func (s *session) contextLinks() []contextLink {
 // through DROVER_ROOT either way; a path the project asked for refuses the
 // item, before any session is paid for, naming the fix.
 func (s *session) linkContext(tree string) error {
+	return s.linkPaths(tree, s.contextLinks())
+}
+
+// relinkAsked is linkContext for the paths the project named in [drive]
+// worktree_links alone, run before every session in a tree already open. The
+// record directories drover links unasked were settled when the tree opened,
+// and judging them again would repeat their note at every launch.
+func (s *session) relinkAsked(tree string) error {
+	var asked []contextLink
 	for _, l := range s.contextLinks() {
+		if l.Asked {
+			asked = append(asked, l)
+		}
+	}
+	return s.linkPaths(tree, asked)
+}
+
+func (s *session) linkPaths(tree string, links []contextLink) error {
+	for _, l := range links {
 		src := filepath.Join(s.cfg.Root, l.Rel)
 		if _, err := os.Stat(src); err != nil {
 			continue

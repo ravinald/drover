@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,6 +142,53 @@ func TestATreeLinkGitWouldSeeParksBeforeALaunch(t *testing.T) {
 	}
 	if b, err := os.ReadFile(filepath.Join(tree.Path, "notes", "context.md")); err != nil || string(b) != "for the agent\n" {
 		t.Errorf("the linked path did not reach the worktree: %q %v", b, err)
+	}
+	if st := git(t, tree.Path, "status", "--porcelain"); st != "" {
+		t.Errorf("the link dirtied the worktree: %q", st)
+	}
+}
+
+// A trunk that stops tracking a linked file deletes the branch's copy when the
+// branch next merges it, after the tree was opened and linked. The session
+// launched after that update still gets the file, from the operator's checkout.
+func TestALinkedFileTheTrunkStopsTrackingReachesTheNextSession(t *testing.T) {
+	s, _ := treeProject(t)
+	dir := s.cfg.Root
+	write(t, filepath.Join(dir, "CLAUDE.md"), "tracked\n")
+	git(t, dir, "add", "CLAUDE.md")
+	git(t, dir, "commit", "-q", "-m", "track CLAUDE.md")
+	s.cfg.Loop.TreeLinks = []string{"CLAUDE.md"}
+	it, err := s.item("1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := s.openItemTree(it, "first", "main")
+	defer tree.close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	git(t, dir, "rm", "-q", "--cached", "CLAUDE.md")
+	b, err := os.ReadFile(filepath.Join(dir, ".gitignore")) // #nosec G304 -- the fixture's own file
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, ".gitignore"), string(b)+"CLAUDE.md\n")
+	git(t, dir, "add", ".gitignore")
+	git(t, dir, "commit", "-q", "-m", "CLAUDE.md leaves git")
+	write(t, filepath.Join(dir, "CLAUDE.md"), "operator's copy\n")
+	git(t, tree.Path, "merge", "-q", "--no-edit", "main")
+	if _, err := os.Lstat(filepath.Join(tree.Path, "CLAUDE.md")); !os.IsNotExist(err) {
+		t.Fatalf("the merge left CLAUDE.md in the tree (%v); the case under test never arose", err)
+	}
+
+	s.tree = tree.Path
+	defer func() { s.tree = "" }()
+	if _, err := s.launch(context.Background(), it, ledger.StageImplement, "impl", "relink", "body", launchInfo{}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(tree.Path, "CLAUDE.md")); err != nil || string(got) != "operator's copy\n" {
+		t.Errorf("the session's tree has CLAUDE.md %q (%v), want the operator's copy", got, err)
 	}
 	if st := git(t, tree.Path, "status", "--porcelain"); st != "" {
 		t.Errorf("the link dirtied the worktree: %q", st)

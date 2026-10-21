@@ -264,6 +264,15 @@ func (s *session) launch(ctx context.Context, it backlog.Item, stage, name, logB
 	// say nothing about the second round, which is the one whose prompt differs.
 	banner.Log = displayPath(s.cfg.Root, logPath)
 	banner.from(name, spec, runner.Headless).write(os.Stderr)
+	// Linked again before every session, not only when the tree opens: a branch
+	// update that merges a trunk which stopped tracking a linked path (a
+	// CLAUDE.md moved out of git) deletes the branch's copy, and the next session
+	// would otherwise run without the file at all.
+	if s.tree != "" {
+		if err := s.relinkAsked(s.tree); err != nil {
+			return runner.Outcome{Exit: -1}, err
+		}
+	}
 	at, err := s.launched(it, stage, name)
 	if err != nil {
 		return runner.Outcome{Exit: -1}, err
