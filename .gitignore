@@ -9,3 +9,5 @@
 /.claude/settings.local.json
 # Finder metadata.
 .DS_Store
+# JetBrains project files.
+/.idea/
