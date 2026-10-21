@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.1.1
+
+- **A path in `[drive] worktree_links` reaches every session.** drive linked it only when it opened a worktree, so a branch update that merged a trunk which had stopped tracking the path (a `CLAUDE.md` moved out of git) deleted the branch's copy, and the sessions after it ran without the file. drive now links those paths again before each session.
+
 ## v0.1.0
 
 The first public release.
