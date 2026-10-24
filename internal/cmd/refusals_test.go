@@ -64,7 +64,7 @@ type refusalCase struct {
 // added to the tree belongs in exactly one of this list and the case table, and
 // the tree walk below refuses to guess which.
 var neverRefuses = []string{
-	"attach", "check", "drives", "report", "follow-ups", "schema", "show", "unaudited", "usage", "version",
+	"attach", "check", "drives", "notify", "report", "follow-ups", "schema", "show", "unaudited", "usage", "version",
 }
 
 // One case per refusing command. Not one per documented refusal: what the doc

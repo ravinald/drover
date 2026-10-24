@@ -1002,7 +1002,7 @@ A `push_failed` park with `push_hook` belongs to `push_refused_by_hook`, which s
 
 ### `drive --events`
 
-`drive --json --events` writes, beside each item's report, one event object per line as things happen. Every event carries `event`, which no item report has, so a reader splits the stream on that key. Every event also carries `ts` (RFC 3339, UTC), `drive` (the drive's id, taken with the lease; absent only on the `exit` of a drive whose id would not allocate because the ledger would not open), `seq` (the event's line in the drive's event file, from 1, and the cursor [`watch --after`](#detaching-from-a-drive) takes; absent where `drive` is), `id` where one item is meant, and `action` where a [`[supervise]`](configuration.md#supervise) catalog action produced it. `--events` without `--json` refuses with exit `3`. The same objects go to the drive's event file whatever the flags; see [Detaching from a drive](#detaching-from-a-drive).
+`drive --json --events` writes, beside each item's report, one event object per line as things happen. Every event carries `event`, which no item report has, so a reader splits the stream on that key. Every event also carries `ts` (RFC 3339, UTC), `drive` (the drive's id, taken with the lease; absent only on the `exit` of a drive whose id would not allocate because the ledger would not open), `seq` (the event's line in the drive's event file, from 1, and the cursor [`watch --after`](#detaching-from-a-drive) takes; absent where `drive` is), `project` (the project's name as [`drover projects`](#projects---json) lists it, so a notifier serving several projects reads it rather than working it out from its directory), `id` where one item is meant, and `action` where a [`[supervise]`](configuration.md#supervise) catalog action produced it. `--events` without `--json` refuses with exit `3`. The same objects go to the drive's event file whatever the flags; see [Detaching from a drive](#detaching-from-a-drive).
 
 `queued`: an id `drive --enqueue` appended to this drive was taken into its queue. `position` is its place among the items waiting, from 1. `action` is `enqueue`.
 
@@ -1105,12 +1105,13 @@ The branch update drive makes before an item's own implement session, or its `--
 {"event":"needs_operator","ts":"2026-10-16T22:31:00Z","id":"E43","action":"triage_finding","reason":"follow-up #846, filed by E43, is orphaned: every owner has merged, so no run is left to carry it","policy":"operator","run":"read follow-up #846 (drover follow-ups --coverage), then give it an owner a run will reach, or close it","kind":"follow-up","ref":"846","filed_by":["E43"],"owners":["E35"],"coverage":"orphaned"}
 ```
 
-`needs_operator`: an action at `operator` policy stopped, after its `parked` or `filed` event. `run` is what the operator has to do. `[supervise] notify` runs once per `needs_operator` with this object on stdin, with or without `--events`.
+`needs_operator`: an action at `operator` policy stopped, after its `parked` or `filed` event. `run` is what the operator has to do. `[supervise] notify` runs once per `needs_operator` with this object on stdin, with or without `--events`, and [`[supervise.ntfy]`](configuration.md#supervisentfy) posts it, and any other event its `events` names.
 
 ```json
 {
   "event": "needs_operator",
   "ts": "2026-10-16T22:41:00Z",
+  "project": "example.app",
   "id": "E38",
   "action": "merge_protected_paths",
   "reason": "this branch changes Makefile, which decides what every later item tonight is measured by; merge it by hand",

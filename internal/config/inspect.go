@@ -104,10 +104,12 @@ func Inspect(dir string) (*Inspection, error) {
 	if err != nil {
 		return nil, err
 	}
+	globalNtfy := c.Supervise[SuperviseNtfyKey]
 	md, err := toml.Decode(string(data), c)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	c.layerNtfy(globalNtfy)
 	ownMD, err := toml.Decode(string(data), in.own)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
@@ -128,7 +130,7 @@ func Inspect(dir string) (*Inspection, error) {
 // reads.
 func (in *Inspection) absorb(md toml.MetaData, path string, own bool) {
 	in.Config.absorbDeclared(md, path, own)
-	for _, k := range md.Undecoded() {
+	for _, k := range undecoded(md) {
 		in.Retired = append(in.Retired, Retired{Key: k.String(), Path: path})
 	}
 	if !own {

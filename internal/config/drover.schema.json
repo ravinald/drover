@@ -515,6 +515,35 @@
           "items": { "type": "string" },
           "minItems": 1,
           "description": "Argv run once per needs_operator event, with the event JSON on stdin. A failing or missing notifier is reported once per drive and never stops it."
+        },
+        "ntfy": {
+          "type": "object",
+          "description": "An ntfy topic each named drive event is POSTed to, bounded at 10 seconds. The project's table wins over the per-user one key by key. A failed send is reported once per drive and never stops it.",
+          "properties": {
+            "url": {
+              "type": "string",
+              "description": "The topic URL, such as https://ntfy.sh/<topic>. Must be https:// unless the host is a loopback address."
+            },
+            "token_file": {
+              "type": "string",
+              "description": "A file holding the bearer token, starting with / or ~/, read at each send. Unset sends no Authorization header."
+            },
+            "events": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["needs_operator", "needs_supervisor", "parked", "exit"] },
+              "minItems": 1,
+              "default": ["needs_operator"],
+              "description": "The drive events that send."
+            },
+            "priority": {
+              "type": "string",
+              "enum": ["min", "low", "default", "high", "urgent"],
+              "default": "high",
+              "description": "The ntfy priority every send carries."
+            }
+          },
+          "required": ["url"],
+          "additionalProperties": false
         }
       },
       "additionalProperties": {

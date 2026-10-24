@@ -36,6 +36,7 @@ Each command, as typed after `drover`.
 | `link`                  | Adds an issue number to the item's `closes` key, so `finish` answers whoever filed it.                       |
 | `mark-merged`           | Appends the completion row alone, for a merge recorded by hand.                                              |
 | `new`                   | Writes a scaffolded item with no tracker issue behind it.                                                    |
+| `notify`                | Sends a test event through `[supervise] notify` and `[supervise.ntfy]` and prints what each answered.        |
 | `open-pr`               | Runs the merge gate and opens the pull request for a branch the review passed.                               |
 | `projects`              | Lists every project drover has been pointed at on this machine.                                              |
 | `report`                | Prints the run's self-report beside a requirements checklist; `--save` writes it under `[paths] reports`.    |

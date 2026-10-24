@@ -65,9 +65,9 @@ type Config struct {
 	Backlog     Backlog                `toml:"backlog"`
 	Run         Run                    `toml:"run"`
 	Runners     map[string]runner.Spec `toml:"runners"`
-	// Supervise maps supervised action keys to policies, beside the two keys
-	// that are not actions: template and notify. Read it through Policy,
-	// SuperviseTemplate and Notify.
+	// Supervise maps supervised action keys to policies, beside the three keys
+	// that are not actions: template, notify and the ntfy table. Read it
+	// through Policy, SuperviseTemplate, Notify and Ntfy.
 	//
 	// A map rather than a struct because the action keys are a catalog the cmd
 	// package owns (RegisterActions), and walking it as an open table keeps a
@@ -984,10 +984,12 @@ func loadRoot(root string) (*Config, error) {
 	}
 	c.sources = append(c.sources, path)
 
+	globalNtfy := c.Supervise[SuperviseNtfyKey]
 	md, err := toml.DecodeFile(path, c)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	c.layerNtfy(globalNtfy)
 	c.absorbDeclared(md, path, true)
 	// Checked before unknown keys, because the keys a stale config carries are
 	// unknown *as a consequence of* the version being old. Reporting
@@ -1181,12 +1183,7 @@ func (e *VersionError) Error() string { return e.msg }
 // Naming the project file for a version the per-user file declared sends the
 // reader to edit a file that says nothing about it.
 func (c *Config) versionPath(project string) string {
-	for i := len(c.layers) - 1; i >= 0; i-- {
-		if c.layers[i].declares("schema_version") {
-			return c.layers[i].path
-		}
-	}
-	return project
+	return c.writer("schema_version", project)
 }
 
 // versionMatches refuses a config this build cannot read. An older one is named
@@ -1353,7 +1350,8 @@ type ActionBounds struct {
 	Ceiling Policy
 }
 
-// The two [supervise] keys that are settings rather than action keys.
+// Two of the [supervise] keys that are settings rather than action keys; the
+// third is SuperviseNtfyKey.
 const (
 	SuperviseTemplateKey = "template"
 	SuperviseNotifyKey   = "notify"
@@ -1415,6 +1413,11 @@ func (c *Config) validateSupervise(path string) error {
 		case SuperviseTemplateKey:
 			if _, ok := v.(string); !ok {
 				return fmt.Errorf("%s: supervise.template is %v: name a template file", path, v)
+			}
+			continue
+		case SuperviseNtfyKey:
+			if err := c.validateNtfy(path, v); err != nil {
+				return err
 			}
 			continue
 		case SuperviseNotifyKey:
