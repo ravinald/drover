@@ -49,3 +49,11 @@
 .drover-needs-operator {
   color: var(--drover-red);
 }
+
+.drover-warning {
+  color: var(--drover-orange);
+}
+
+.drover-critical {
+  color: var(--drover-red);
+}

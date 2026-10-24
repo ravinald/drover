@@ -557,3 +557,10 @@ func TestReadResultWithoutUsageLeavesItNil(t *testing.T) {
 		t.Errorf("session = %q", rd.Result.SessionID)
 	}
 }
+
+func TestWeightedCountsACacheReadAtItsWeight(t *testing.T) {
+	u := Usage{Input: 1, Output: 20, CacheCreate: 300, CacheRead: 4000}
+	if got := Weighted(u); got != 721 {
+		t.Errorf("Weighted(%+v) = %v, want 1 + 20 + 300 + 0.1*4000", u, got)
+	}
+}

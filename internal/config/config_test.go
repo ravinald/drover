@@ -755,3 +755,45 @@ func TestStatusRefreshIsValidatedAtLoad(t *testing.T) {
 		}
 	}
 }
+
+// [usage] reads from either file, defaults its thresholds, and refuses a value
+// that would measure nothing.
+func TestUsageTableLayersAndRefusesWhatMeasuresNothing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	root := write(t, map[string]string{FileName: minimal, "go.mod": "module x\n"})
+	c, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UsageSessionMaxHours() != DefaultSessionMaxHours || c.UsageContextWarn() != DefaultContextWarn || c.Usage.WeeklyBudget != 0 {
+		t.Errorf("an undeclared [usage] resolved to %+v", c.Usage)
+	}
+
+	global := filepath.Join(home, "drover", GlobalFileName)
+	if err := os.MkdirAll(filepath.Dir(global), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte("[usage]\nweekly_budget = 600000000\nreset = \"Sat 20:00 America/Los_Angeles\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, err = Load(root); err != nil || c.Usage.WeeklyBudget != 600000000 || c.Usage.Reset == "" {
+		t.Errorf("the per-user [usage] did not reach the project: %+v, %v", c.Usage, err)
+	}
+	if err := os.Remove(global); err != nil {
+		t.Fatal(err)
+	}
+
+	for body, want := range map[string]string{
+		"weekly_budget = 0\nreset = \"Sat 20:00 UTC\"": "usage.weekly_budget is 0",
+		"weekly_budget = 100":                          "usage.reset is unset",
+		"reset = \"Caturday 20:00 UTC\"":               "not a weekday",
+		"session_max_hours = 0":                        "usage.session_max_hours is 0",
+		"context_warn = -1":                            "usage.context_warn is -1",
+	} {
+		root := write(t, map[string]string{FileName: minimal + "\n[usage]\n" + body + "\n", "go.mod": "module x\n"})
+		if _, err := Load(root); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("[usage] %s: err = %v, want one naming %q", body, err, want)
+		}
+	}
+}

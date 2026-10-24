@@ -201,34 +201,35 @@ What one item came to, on drive's end row and in `drive --json` `outcome`.
 
 Ledger stage rows, drive event stages, and the events `drive --events`, `attach` and `watch` emit.
 
-| Term               | Meaning                                                                                 |
-| ------------------ | --------------------------------------------------------------------------------------- |
-| `implement`        | Ledger stage: `run` handed the prompt to a runner.                                      |
-| `review`           | Ledger and event stage: a review session launched.                                      |
-| `update_branch`    | Event stage: drive merged the trunk into the branch and ran the verify command.         |
-| `gate`             | Event stage: the merge gate read the branch head, or a resume reran the verify command. |
-| `pr`               | Event stage: drive opened the pull request.                                             |
-| `merge`            | Event stage: drive asked the forge to merge.                                            |
-| `finish`           | Ledger and event stage: the finish step after a merge.                                  |
-| `queued`           | Event: an item joined the queue.                                                        |
-| `dispatched`       | Event: an item left the queue for a session.                                            |
-| `preflight`        | Event: a check drive runs before launching, such as `stale_citations`.                  |
-| `stage`            | Event: an item reached one of the stages in this table.                                 |
-| `check`            | Event: drive classified a red forge check on a pushed head.                             |
-| `parked`           | Event: an item parked.                                                                  |
-| `filed`            | Event: a session filed a follow-up, with its coverage.                                  |
-| `needs_operator`   | Event: an action stopped at operator policy and waits on a person.                      |
-| `needs_supervisor` | Event: an action waits on the supervising session.                                      |
-| `merged`           | Event: an item's pull request merged.                                                   |
-| `paused`           | Event: the drive paused.                                                                |
-| `resumed`          | Event: the drive resumed, naming what changed.                                          |
-| `exit`             | Event: the drive ended.                                                                 |
-| round              | One implement session and the review that reads it.                                     |
-| `infra`            | Check class: a red check blamed on the forge's infrastructure.                          |
-| `trunk`            | Check class: a red check the trunk fails too.                                           |
-| `code`             | Check class: a red check blamed on the diff.                                            |
-| `none`             | Check class: no workflow reported on the head.                                          |
-| `green`            | Check class: every check passed.                                                        |
+| Term               | Meaning                                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `implement`        | Ledger stage: `run` handed the prompt to a runner.                                                                 |
+| `review`           | Ledger and event stage: a review session launched.                                                                 |
+| `interactive`      | `status` usage key: the `by_stage` entry for usage rows no stage launched, a Claude Code session the operator ran. |
+| `update_branch`    | Event stage: drive merged the trunk into the branch and ran the verify command.                                    |
+| `gate`             | Event stage: the merge gate read the branch head, or a resume reran the verify command.                            |
+| `pr`               | Event stage: drive opened the pull request.                                                                        |
+| `merge`            | Event stage: drive asked the forge to merge.                                                                       |
+| `finish`           | Ledger and event stage: the finish step after a merge.                                                             |
+| `queued`           | Event: an item joined the queue.                                                                                   |
+| `dispatched`       | Event: an item left the queue for a session.                                                                       |
+| `preflight`        | Event: a check drive runs before launching, such as `stale_citations`.                                             |
+| `stage`            | Event: an item reached one of the stages in this table.                                                            |
+| `check`            | Event: drive classified a red forge check on a pushed head.                                                        |
+| `parked`           | Event: an item parked.                                                                                             |
+| `filed`            | Event: a session filed a follow-up, with its coverage.                                                             |
+| `needs_operator`   | Event: an action stopped at operator policy and waits on a person.                                                 |
+| `needs_supervisor` | Event: an action waits on the supervising session.                                                                 |
+| `merged`           | Event: an item's pull request merged.                                                                              |
+| `paused`           | Event: the drive paused.                                                                                           |
+| `resumed`          | Event: the drive resumed, naming what changed.                                                                     |
+| `exit`             | Event: the drive ended.                                                                                            |
+| round              | One implement session and the review that reads it.                                                                |
+| `infra`            | Check class: a red check blamed on the forge's infrastructure.                                                     |
+| `trunk`            | Check class: a red check the trunk fails too.                                                                      |
+| `code`             | Check class: a red check blamed on the diff.                                                                       |
+| `none`             | Check class: no workflow reported on the head.                                                                     |
+| `green`            | Check class: every check passed.                                                                                   |
 
 ## Update-branch results
 
@@ -423,6 +424,7 @@ The `.drover.toml` sections, with the keys whose names carry drover vocabulary. 
 | `[numbered_files]`           | Globs of numbered files that must not share a number.                                               |
 | `[github]`                   | `repo`, `follow_up_label`, `severity_prefix` and `page_limit`.                                      |
 | `[forge]`                    | How drive reads forge checks: `infra_patterns`, `reruns` and `checks_wait`.                         |
+| `[usage]`                    | How status reads usage rows: `weekly_budget`, `reset`, `session_max_hours` and `context_warn`.      |
 | `[register]`                 | Where the follow-up list lives: `backend`.                                                          |
 | `[backlog]`                  | `mirror`, which publishes items as tracker issues.                                                  |
 | `[supervise]`                | One policy per supervise action, plus `template` and `notify`.                                      |

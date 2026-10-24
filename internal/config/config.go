@@ -60,6 +60,7 @@ type Config struct {
 	Sequences   map[string]string      `toml:"numbered_files"`
 	GitHub      GitHub                 `toml:"github"`
 	Forge       Forge                  `toml:"forge"`
+	Usage       Usage                  `toml:"usage"`
 	Register    Register               `toml:"register"`
 	Backlog     Backlog                `toml:"backlog"`
 	Run         Run                    `toml:"run"`
@@ -633,6 +634,125 @@ func (c *Config) validateForge(path string) error {
 	return nil
 }
 
+// Usage is how status reads the usage rows: the window its report-level totals
+// cover, the budget it measures them against, and when a session has run long
+// enough to name. Read SessionMaxHours and ContextWarn through
+// UsageSessionMaxHours and UsageContextWarn, which resolve an undeclared key to
+// its default.
+type Usage struct {
+	// WeeklyBudget is the operator's estimate of the weekly limit in weighted
+	// tokens. The service publishes no such figure, so this is a guess, and 0
+	// means none was made.
+	WeeklyBudget int64 `toml:"weekly_budget"`
+	// Reset is when the weekly limit starts over, as "Sat 20:00
+	// America/Los_Angeles". Empty means the window is the last 7 days.
+	Reset string `toml:"reset"`
+	// SessionMaxHours is how long a session may run, first row to last, before
+	// status names it.
+	SessionMaxHours int `toml:"session_max_hours"`
+	// ContextWarn is the largest context, in tokens, a session may reach before
+	// status names it.
+	ContextWarn int64 `toml:"context_warn"`
+}
+
+// The [usage] defaults, applied where the key is read.
+const (
+	DefaultSessionMaxHours = 24
+	DefaultContextWarn     = 400000
+)
+
+// UsageSessionMaxHours is [usage] session_max_hours, or its default.
+func (c *Config) UsageSessionMaxHours() int {
+	if c.Usage.SessionMaxHours <= 0 {
+		return DefaultSessionMaxHours
+	}
+	return c.Usage.SessionMaxHours
+}
+
+// UsageContextWarn is [usage] context_warn, or its default.
+func (c *Config) UsageContextWarn() int64 {
+	if c.Usage.ContextWarn <= 0 {
+		return DefaultContextWarn
+	}
+	return c.Usage.ContextWarn
+}
+
+func (c *Config) validateUsage(path string) error {
+	if c.Declared("usage.weekly_budget") && c.Usage.WeeklyBudget <= 0 {
+		return fmt.Errorf("%s: usage.weekly_budget is %d: give a positive count of weighted tokens, or leave it unset for no budget", path, c.Usage.WeeklyBudget)
+	}
+	if c.Usage.WeeklyBudget > 0 && c.Usage.Reset == "" {
+		return fmt.Errorf("%s: usage.weekly_budget is measured from the limit's weekly reset, and usage.reset is unset: "+
+			"add one, as reset = \"Sat 20:00 America/Los_Angeles\"", path)
+	}
+	if c.Usage.Reset != "" {
+		if _, err := ParseReset(c.Usage.Reset); err != nil {
+			return fmt.Errorf("%s: usage.reset: %v", path, err)
+		}
+	}
+	if c.Declared("usage.session_max_hours") && c.Usage.SessionMaxHours <= 0 {
+		return fmt.Errorf("%s: usage.session_max_hours is %d: give a positive number of hours", path, c.Usage.SessionMaxHours)
+	}
+	if c.Declared("usage.context_warn") && c.Usage.ContextWarn <= 0 {
+		return fmt.Errorf("%s: usage.context_warn is %d: give a positive count of tokens", path, c.Usage.ContextWarn)
+	}
+	return nil
+}
+
+// Reset is a weekly instant: a weekday and a wall-clock time in a zone.
+type Reset struct {
+	Day          time.Weekday
+	Hour, Minute int
+	Zone         *time.Location
+}
+
+// ParseReset reads "<weekday> <HH:MM> <IANA zone>", as "Sat 20:00
+// America/Los_Angeles". The weekday takes its three-letter or full English
+// name, in any case.
+func ParseReset(v string) (Reset, error) {
+	f := strings.Fields(v)
+	if len(f) != 3 {
+		return Reset{}, fmt.Errorf("%q is not a weekday, a 24-hour time and a zone, as \"Sat 20:00 America/Los_Angeles\"", v)
+	}
+	var r Reset
+	day, ok := weekdays[strings.ToLower(f[0])]
+	if !ok {
+		return Reset{}, fmt.Errorf("%q: %q is not a weekday (Sun, Mon, Tue, Wed, Thu, Fri, Sat)", v, f[0])
+	}
+	r.Day = day
+	t, err := time.Parse("15:04", f[1])
+	if err != nil {
+		return Reset{}, fmt.Errorf("%q: %q is not a 24-hour time such as 20:00", v, f[1])
+	}
+	r.Hour, r.Minute = t.Hour(), t.Minute()
+	if r.Zone, err = time.LoadLocation(f[2]); err != nil || strings.EqualFold(f[2], "local") {
+		return Reset{}, fmt.Errorf("%q: %q is not an IANA zone such as America/Los_Angeles", v, f[2])
+	}
+	return r, nil
+}
+
+var weekdays = func() map[string]time.Weekday {
+	m := map[string]time.Weekday{}
+	for d := time.Sunday; d <= time.Saturday; d++ {
+		m[strings.ToLower(d.String())] = d
+		m[strings.ToLower(d.String()[:3])] = d
+	}
+	return m
+}()
+
+// Last is the most recent reset at or before now. It is computed on the zone's
+// own calendar, so a reset at 20:00 stays at 20:00 across a daylight-saving
+// change.
+func (r Reset) Last(now time.Time) time.Time {
+	local := now.In(r.Zone)
+	back := (int(local.Weekday()) - int(r.Day) + 7) % 7
+	at := time.Date(local.Year(), local.Month(), local.Day()-back, r.Hour, r.Minute, 0, 0, r.Zone)
+	if at.After(now) {
+		at = time.Date(local.Year(), local.Month(), local.Day()-back-7, r.Hour, r.Minute, 0, 0, r.Zone)
+	}
+	return at
+}
+
 // The register sources. A project picks exactly one: the read path is a single
 // call, and everything above it ranks, routes and counts one gh.Index.
 const (
@@ -1128,6 +1248,9 @@ func (c *Config) validate(path string) error {
 		return fmt.Errorf("%s: drive.max_load is %g: give a load average above 0, or leave it unset for the CPU count", path, c.Loop.MaxLoad)
 	}
 	if err := c.validateForge(path); err != nil {
+		return err
+	}
+	if err := c.validateUsage(path); err != nil {
 		return err
 	}
 	if _, err := ParseZone(c.Status.Timezone); err != nil {
