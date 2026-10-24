@@ -505,3 +505,55 @@ func equal(a, b []string) bool {
 	}
 	return true
 }
+
+func TestReadResultCarriesUsage(t *testing.T) {
+	rd, err := ReadResult(filepath.Join("testdata", "claude-usage.jsonl"))
+	if err != nil || !rd.Found {
+		t.Fatalf("found=%v err=%v", rd.Found, err)
+	}
+	r := rd.Result
+	want := Usage{Input: 6, Output: 60, CacheCreate: 1700, CacheRead: 2500}
+	if r.Usage == nil || *r.Usage != want {
+		t.Fatalf("usage = %+v, want %+v", r.Usage, want)
+	}
+	if r.Model != "claude-opus-5-5[1m]" {
+		t.Errorf("model = %q, want the first key of modelUsage", r.Model)
+	}
+	if r.SessionID != "5f0c1a7e-0000-4000-8000-000000000001" || r.DurationMS != 61234 {
+		t.Errorf("session %q duration %d", r.SessionID, r.DurationMS)
+	}
+	// The messages grow 1003, 1502, 1701: the last is the fullest, and the
+	// repeated msg_b event cannot count twice toward a maximum.
+	if r.ContextMax != 1701 {
+		t.Errorf("context_max = %d, want 1701", r.ContextMax)
+	}
+}
+
+func TestReadResultZeroUsageIsNotNoUsage(t *testing.T) {
+	rd, err := ReadResult(filepath.Join("testdata", "claude-usage-limit.jsonl"))
+	if err != nil || !rd.Found {
+		t.Fatalf("found=%v err=%v", rd.Found, err)
+	}
+	if rd.Result.Usage == nil {
+		t.Fatal("a result reporting zero tokens must carry a zero Usage, not nil")
+	}
+	if *rd.Result.Usage != (Usage{}) {
+		t.Errorf("usage = %+v, want zeros", *rd.Result.Usage)
+	}
+	if rd.Result.Model != "" {
+		t.Errorf("an empty modelUsage names no model, got %q", rd.Result.Model)
+	}
+}
+
+func TestReadResultWithoutUsageLeavesItNil(t *testing.T) {
+	rd, err := ReadResult(filepath.Join("testdata", "claude-no-usage.jsonl"))
+	if err != nil || !rd.Found {
+		t.Fatalf("found=%v err=%v", rd.Found, err)
+	}
+	if rd.Result.Usage != nil {
+		t.Errorf("usage = %+v, want nil", *rd.Result.Usage)
+	}
+	if rd.Result.SessionID != "5f0c1a7e-0000-4000-8000-000000000003" {
+		t.Errorf("session = %q", rd.Result.SessionID)
+	}
+}

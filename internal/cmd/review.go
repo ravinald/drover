@@ -145,6 +145,7 @@ authority that a branch may merge.`,
 		}
 
 		oc, runErr := runner.Run(c.Context(), at, spec, mode, out, logPath, os.Stdout)
+		s.recordUsage(it.ID.Bare(), ledger.StageReview, at.Session, oc)
 		// An interactive session writes no log, so there is no terminal event to
 		// read and every pass would report as died. The operator watched it; the
 		// runner's own exit is the whole answer.

@@ -1465,6 +1465,30 @@ A row `drive` appends carries `drive`, the drive's id, and a row written outside
 }
 ```
 
+A usage row records one session's tokens, and a set `usage` object is what makes a row one. A headless session gets one when its runner exits, written by `run --headless`, `review --headless`, `draft --headless` and `drive`, whenever the log's result event carries usage, a failed or interrupted session included. `drover usage --backfill` writes the same rows from logs already on disk, and `drover usage --sync` backfills first and then writes `"source":"interactive"` rows from Claude Code's transcripts, one per session per local day, with `first_ts` and `ts` the day's first and last message, `started` the session's first message on any day, and `id` empty. `session` is the drover session id the stage row carries and `log` the log's basename; a backfilled row has no `session`, since a log does not record one. `context_max` is the largest `input + cache_read + cache_create` of any one message, how full the context window got. `session_id` is the runner's own id. A headless session has one usage row; an interactive one has one per local day, and a session any run log names is never recorded as interactive. Claude Code writes a transcript for every headless session as well, so `--sync` backfills before it reads a transcript, and `drive` runs the same step before it reads its queue and after its end row. Write a usage row only when no usage row names its `session_id` yet, or the session counts twice.
+
+```json
+{
+  "id": "16",
+  "stage": "implement",
+  "session": "8f2c41d09a7e",
+  "log": "16-cache.20261017-021409.512003000.jsonl",
+  "usage": { "input": 140, "output": 57264, "cache_create": 1261852, "cache_read": 11419637 },
+  "model": "claude-opus-5-5[1m]",
+  "session_id": "ad34e1d2-b659-4b2b-be96-29cfd8220613",
+  "cost_usd": 9.8969774,
+  "duration_ms": 3669375,
+  "turns": 72,
+  "source": "headless",
+  "context_max": 412880,
+  "drive": "D3",
+  "date": "2026-10-17",
+  "ts": "2026-10-17T03:15:18-07:00"
+}
+```
+
+The counts are tokens as the API reported them, not the subscription's quota accounting, and `cost_usd` is list price, not what a subscription charged. drover's other readers ignore usage rows: no stage, pass or run count changes because one is there, and `check` reads one with an empty `id` as a usage row rather than a malformed line.
+
 Every row type resolves last-row-wins, and `status` and `show` also count the rows a fold discards: `runs`, `audits` and, in `show`, the length of the `audits` array. A disposition carries `settled` once two independent passes recorded the same answer in a row with nothing since disagreeing.
 
 A withdrawal is an append (`"merged":false`), never a rewrite, which keeps the file append-only for every reader and stops a withdrawal from destroying that item's audit history as a side effect.
