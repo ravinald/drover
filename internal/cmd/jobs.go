@@ -301,7 +301,11 @@ type heldApart struct {
 // operator, with its park. An item depending on one stays pending at its place,
 // since the operator can merge the dep while the drive runs other work, and
 // later items that do not depend on it overtake it. Any other park is left out
-// of it: nothing will merge that dep in this drive.
+// of it: nothing will merge that dep in this drive. An item waiting on the
+// operator, directly or through a pending dep that does, holds back only the
+// items depending on it and none that merely cite a path it cites: it is not
+// running, so nothing can run beside it, and once its dep merges the running
+// items it overlaps hold it in turn.
 //
 // A dep in none of these is left alone: it already finished, or it is not in
 // this drive, and driveItem reads its state when the item starts, as it does at
@@ -313,24 +317,36 @@ func dispatchable(pending []queued, running map[int]queued, operator map[string]
 		slots = append(slots, n)
 	}
 	slices.Sort(slots)
+	ahead := make([]queued, 0, len(slots)+len(pending))
+	for _, n := range slots {
+		ahead = append(ahead, running[n])
+	}
 	var held []heldApart
+	var stalled []queued
 	for i, q := range pending {
 		if dep := operatorDep(q, operator); dep != "" {
 			held = append(held, heldApart{q.it.ID.Bare(), dep, "parked " + operator[dep] + " for the operator"})
+			stalled = append(stalled, q)
 			continue
 		}
-		ahead := make([]queued, 0, len(slots)+i)
-		for _, n := range slots {
-			ahead = append(ahead, running[n])
+		h, waits := waitsOn(q, ahead, stalled)
+		if !waits {
+			return i, held
 		}
-		ahead = append(ahead, pending[:i]...)
-		if h, waits := waitsOn(q, ahead); waits {
-			held = append(held, h)
-			continue
+		held = append(held, h)
+		if dependsOnAny(q, stalled) {
+			stalled = append(stalled, q)
+		} else {
+			ahead = append(ahead, q)
 		}
-		return i, held
 	}
 	return -1, held
+}
+
+// dependsOnAny reports whether q depends on one of items.
+func dependsOnAny(q queued, items []queued) bool {
+	deps := q.it.Deps()
+	return slices.ContainsFunc(items, func(e queued) bool { return slices.Contains(deps, e.it.ID.Bare()) })
 }
 
 // operatorDep is the first of q's deps held for the operator, empty for none.
@@ -343,12 +359,13 @@ func operatorDep(q queued, operator map[string]string) string {
 	return ""
 }
 
-// waitsOn is the first item in ahead that q must not run beside: one q depends
-// on, before one that shares a cited path, since the dependency is the hold
-// that would still apply were the paths disjoint.
-func waitsOn(q queued, ahead []queued) (heldApart, bool) {
+// waitsOn is the first item in ahead or stalled that q must not run beside:
+// one q depends on, before one in ahead that shares a cited path, since the
+// dependency is the hold that would still apply were the paths disjoint.
+// stalled holds q only through a dependency.
+func waitsOn(q queued, ahead, stalled []queued) (heldApart, bool) {
 	deps := q.it.Deps()
-	for _, e := range ahead {
+	for _, e := range slices.Concat(ahead, stalled) {
 		if slices.Contains(deps, e.it.ID.Bare()) {
 			return heldApart{q.it.ID.Bare(), e.it.ID.Bare(), "depends on it"}, true
 		}
@@ -391,7 +408,7 @@ func heldPairs(items []queued) []heldApart {
 	var held []heldApart
 	for i, q := range items {
 		for j := range i {
-			if h, waits := waitsOn(q, items[j:j+1]); waits {
+			if h, waits := waitsOn(q, items[j:j+1], nil); waits {
 				held = append(held, h)
 			}
 		}

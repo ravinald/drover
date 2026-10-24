@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/lease"
 	"github.com/ravinald/drover/internal/ledger"
@@ -227,13 +228,13 @@ func TestAHeldDependentSkipsWhenNothingElseIsLeftToRun(t *testing.T) {
 			exit = i + 1
 		}
 	}
-	for _, r := range rows {
-		if r.ID == "3" {
-			threeEnd = 1
+	for i, e := range evs {
+		if e.ID == "3" && e.Event != evSkipped {
+			threeEnd = i + 1
 		}
 	}
-	if skip == 0 || threeEnd == 0 || exit == 0 || skip > exit {
-		t.Errorf("events %+v: want item 2 skipped before the exit, after item 3 ended", evs)
+	if skip == 0 || threeEnd == 0 || exit == 0 || skip > exit || skip < threeEnd {
+		t.Errorf("events %+v: want item 2 skipped before the exit, after item 3's last event", evs)
 	}
 
 	s, err := open()
@@ -298,5 +299,70 @@ func TestADependentOfAnOtherwiseParkedDepSkipsWithAnEvent(t *testing.T) {
 	drivesRunning(ds, l, true)
 	if ds[0].Items[1] != (ledger.Outcome{ID: "2", Outcome: outcomeSkipped, Reason: "blocked by 1"}) {
 		t.Errorf("drives --json mid-drive reads item 2 as %+v, want skipped blocked by 1", ds[0].Items[1])
+	}
+}
+
+// An item held for the operator is not running, so an item that only cites a
+// path it cites overtakes it, while one depending on it, directly or through
+// another held item, stays behind.
+func TestAnItemOnlyOverlappingAnOperatorHeldOneIsNotHeldByIt(t *testing.T) {
+	q := func(num int, deps string) queued {
+		return newQueued(backlog.Item{ID: backlog.ID{Num: num}, Meta: map[string]string{backlog.KeyDeps: deps},
+			Body: "1. Change `internal/cmd/drive.go:10`.\n"}, true)
+	}
+	operator := map[string]string{"1": "protected_paths"}
+	cases := []struct {
+		name    string
+		pending []queued
+		want    int
+	}{
+		{"overlaps the held item", []queued{q(2, "1"), q(3, "")}, 1},
+		{"overlaps an item held through a held dep", []queued{q(2, "1"), q(4, "2"), q(3, "")}, 2},
+		{"depends on the held item", []queued{q(2, "1"), q(3, "2")}, -1},
+	}
+	for _, c := range cases {
+		if i, held := dispatchable(c.pending, map[int]queued{}, operator); i != c.want {
+			t.Errorf("%s: dispatchable = %d (held %+v), want %d", c.name, i, held, c.want)
+		}
+	}
+	running := map[int]queued{1: q(5, "")}
+	if i, held := dispatchable([]queued{q(2, "1"), q(3, "")}, running, operator); i != -1 {
+		t.Errorf("an item overlapping a running one dispatched at %d (held %+v)", i, held)
+	}
+	delete(operator, "1")
+	if i, held := dispatchable([]queued{q(2, "1"), q(3, "")}, map[int]queued{}, operator); i != 0 {
+		t.Errorf("released item 2 is not first to dispatch: %d (held %+v)", i, held)
+	}
+}
+
+// At --jobs 3, an item citing a path only the held dependent cites starts
+// beside the item still running, rather than waiting behind the hold.
+func TestAnOverlappingItemOvertakesAHeldDependent(t *testing.T) {
+	log, _ := holdProject(t)
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "work", "02-second.md"), "---\ntitle: Second\ndeps: 1\n---\n\n1. Change `internal/shared.go:1`.\n")
+	write(t, filepath.Join(dir, "work", "04-fourth.md"), "---\ntitle: Fourth\ndeps:\n---\n\n1. Change `internal/shared.go:2`.\n")
+
+	rows, _, err := driveWithEvents(t, "1", "2", "3", "4", "--jobs", "3")
+	if err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	got := map[string]DriveItem{}
+	for _, r := range rows {
+		got[r.ID] = r
+	}
+	if got["1"].Park != "protected_paths" || got["2"].Outcome != outcomeSkipped {
+		t.Fatalf("rows %+v: want 1 parked protected_paths and 2 skipped", rows)
+	}
+	starts := jobsStarts(t, log)
+	four := treeName(t, "4")
+	if _, ran := starts[four]; !ran {
+		t.Fatalf("item 4 never started: %v", starts)
+	}
+	if !slices.Contains(starts[four], treeName(t, "3")) {
+		t.Errorf("item 4 waited for item 3 to end behind held item 2: %v", starts)
 	}
 }
