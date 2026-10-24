@@ -223,7 +223,9 @@ type Row struct {
 	DurationMS int64         `json:"duration_ms,omitempty"`
 	Turns      int           `json:"turns,omitempty"`
 	Source     string        `json:"source,omitempty"`
-	ContextMax int64         `json:"context_max,omitempty"`
+	// ContextMax is a pointer so a usage row carries it at zero, a 429's or a
+	// log with no assistant event, while every other row omits it.
+	ContextMax *int64 `json:"context_max,omitempty"`
 	// FirstTS is the first message of an interactive row's day, beside TS for
 	// the last, and Started the session's first message on any day.
 	FirstTS string `json:"first_ts,omitempty"`

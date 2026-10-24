@@ -26,11 +26,11 @@ func usageRow(id, stage, logPath string, res runlog.Result) (ledger.Row, bool) {
 	if res.Usage == nil {
 		return ledger.Row{}, false
 	}
-	u := *res.Usage
+	u, ctx := *res.Usage, res.ContextMax
 	return ledger.Row{
 		ID: id, Stage: stage, Log: filepath.Base(logPath), Usage: &u, Model: res.Model,
 		SessionID: res.SessionID, CostUSD: res.Cost, DurationMS: res.DurationMS, Turns: res.NumTurns,
-		Source: ledger.SourceHeadless, ContextMax: res.ContextMax,
+		Source: ledger.SourceHeadless, ContextMax: &ctx,
 	}, true
 }
 
@@ -82,7 +82,7 @@ const (
 	skipNoUsage   = "no usage object"
 	skipNoSession = "no session id"
 	skipRecorded  = "already recorded"
-	skipHeadless  = "a headless row names the session"
+	skipHeadless  = "a run log names the session"
 )
 
 func (t usageTally) write(w io.Writer, what string, dry bool) {
@@ -121,26 +121,44 @@ func (t usageTally) write(w io.Writer, what string, dry bool) {
 // backfill records a usage row for every log in the log directory whose
 // result carries usage and whose session no usage row names yet.
 func (s *session) backfill(dry bool) (usageTally, error) {
+	t, _, err := s.backfillLogs(dry)
+	return t, err
+}
+
+// backfillLogs is backfill, and also returns every session id a log names
+// whether or not it wrote a row for it: a killed session's log has no result
+// and gets no row, but its transcript is still not an interactive session's.
+func (s *session) backfillLogs(dry bool) (usageTally, map[string]bool, error) {
 	t := newTally()
+	logged := map[string]bool{}
 	dir := s.cfg.LogDir()
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return t, nil
+		return t, logged, nil
 	}
 	if err != nil {
-		return t, fmt.Errorf("read the log directory %s: %w", dir, err)
+		return t, logged, fmt.Errorf("read the log directory %s: %w", dir, err)
 	}
 	path := s.cfg.Abs(s.cfg.Paths.Ledger)
-	seen := map[string]bool{}
+	seen, logs := map[string]bool{}, map[string]bool{}
 	for _, r := range s.ledger.Usage {
 		seen[r.SessionID] = true
+		if r.Log != "" {
+			logs[r.Log] = true
+		}
 	}
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
 			continue
 		}
 		t.Read++
-		row, why := s.backfillRow(dir, e.Name())
+		// A log a usage row already names is not reopened: one is one session,
+		// and the row already says which.
+		if logs[e.Name()] {
+			t.Skipped[skipRecorded]++
+			continue
+		}
+		row, why := s.backfillRow(dir, e.Name(), logged)
 		if why == "" && seen[row.SessionID] {
 			why = skipRecorded
 		}
@@ -155,7 +173,7 @@ func (s *session) backfill(dry bool) (usageTally, error) {
 		}
 		wrote, err := ledger.AppendUnless(path, row, func(l *ledger.Ledger) bool { return l.HasSession("", row.SessionID) })
 		if err != nil {
-			return t, err
+			return t, logged, err
 		}
 		if !wrote {
 			t.Skipped[skipRecorded]++
@@ -164,13 +182,14 @@ func (s *session) backfill(dry bool) (usageTally, error) {
 		s.ledger.Usage = append(s.ledger.Usage, row)
 		t.Wrote++
 	}
-	return t, nil
+	return t, logged, nil
 }
 
 // backfillRow reads one log into the row it would write, or names why it
-// writes none. The name is read as runlog.Name wrote it: the prefix, the base
-// a stage chose, and the writer's local clock.
-func (s *session) backfillRow(dir, name string) (ledger.Row, string) {
+// writes none, adding the session id the log names to logged. The name is
+// read as runlog.Name wrote it: the prefix, the base a stage chose, and the
+// writer's local clock.
+func (s *session) backfillRow(dir, name string, logged map[string]bool) (ledger.Row, string) {
 	base, at, ok := runlog.ParseName(name, time.Local)
 	if !ok {
 		return ledger.Row{}, skipName
@@ -189,6 +208,14 @@ func (s *session) backfillRow(dir, name string) (ledger.Row, string) {
 		stage, base = ledger.StageDraft, rest
 	}
 	rd, err := runlog.ReadResult(filepath.Join(dir, name))
+	if err == nil {
+		if rd.SessionID != "" {
+			logged[rd.SessionID] = true
+		}
+		if rd.Result.SessionID != "" {
+			logged[rd.Result.SessionID] = true
+		}
+	}
 	switch {
 	case err != nil:
 		return ledger.Row{}, skipUnread
@@ -340,20 +367,30 @@ func (s *session) transcriptDirs() ([]string, error) {
 	return out, nil
 }
 
-// syncUsage records the interactive sessions the transcripts hold, one row per
-// session per local day before now's. dry reads the same bytes and writes
-// neither a row nor the state file.
-func (s *session) syncUsage(dry bool, now time.Time) (usageTally, error) {
-	t := newTally()
+// syncUsage backfills, then records the interactive sessions the transcripts
+// hold, one row per session per local day before now's. dry reads the same
+// bytes and writes neither a row nor the state file.
+//
+// The backfill is not optional. Claude Code writes a transcript for every
+// headless session too, and a session no headless row names yet would be
+// recorded here as interactive with no item, a row the append-only ledger never
+// takes back and that backfill's dedupe then keeps out for good. A backfill
+// that fails records nothing interactive for the same reason.
+func (s *session) syncUsage(dry bool, now time.Time) (backfilled, t usageTally, err error) {
+	t = newTally()
+	backfilled, logged, err := s.backfillLogs(dry)
+	if err != nil {
+		return backfilled, t, fmt.Errorf("backfill before the sync: %w", err)
+	}
 	ledgerPath := s.cfg.Abs(s.cfg.Paths.Ledger)
 	statePath := filepath.Join(filepath.Dir(ledgerPath), usageSyncName)
 	st, err := loadUsageSync(statePath)
 	if err != nil {
-		return t, err
+		return backfilled, t, err
 	}
 	dirs, err := s.transcriptDirs()
 	if err != nil {
-		return t, err
+		return backfilled, t, err
 	}
 	changed := false
 	for _, dir := range dirs {
@@ -387,7 +424,7 @@ func (s *session) syncUsage(dry bool, now time.Time) (usageTally, error) {
 			return nil
 		})
 		if err != nil {
-			return t, fmt.Errorf("read transcripts under %s: %w", dir, err)
+			return backfilled, t, fmt.Errorf("read transcripts under %s: %w", dir, err)
 		}
 	}
 
@@ -412,7 +449,7 @@ func (s *session) syncUsage(dry bool, now time.Time) (usageTally, error) {
 		var why string
 		skip := func(l *ledger.Ledger) bool {
 			switch {
-			case l.HasSession(ledger.SourceHeadless, day.Session):
+			case logged[day.Session] || l.HasSession(ledger.SourceHeadless, day.Session):
 				why = skipHeadless
 			case l.HasSessionDay(day.Session, day.Date):
 				why = skipRecorded
@@ -426,7 +463,7 @@ func (s *session) syncUsage(dry bool, now time.Time) (usageTally, error) {
 		} else {
 			wrote, err := ledger.AppendUnless(ledgerPath, row, skip)
 			if err != nil {
-				return t, err
+				return backfilled, t, err
 			}
 			if wrote {
 				s.ledger.Usage = append(s.ledger.Usage, row)
@@ -438,9 +475,9 @@ func (s *session) syncUsage(dry bool, now time.Time) (usageTally, error) {
 		}
 	}
 	if dry || !changed {
-		return t, nil
+		return backfilled, t, nil
 	}
-	return t, st.save(statePath)
+	return backfilled, t, st.save(statePath)
 }
 
 // read folds the whole lines of one transcript from offset from into the
@@ -549,9 +586,10 @@ func (st *usageSync) row(day *sessionDay) ledger.Row {
 	for _, m := range day.Messages {
 		u.Add(m)
 	}
+	ctx := day.ContextMax
 	row := ledger.Row{
 		Usage: &u, Model: day.Model, SessionID: day.Session, Source: ledger.SourceInteractive,
-		ContextMax: day.ContextMax, Date: day.Date,
+		ContextMax: &ctx, Date: day.Date,
 		FirstTS: day.First.In(time.Local).Format(time.RFC3339),
 		TS:      day.Last.In(time.Local).Format(time.RFC3339),
 	}
@@ -565,7 +603,10 @@ func (st *usageSync) row(day *sessionDay) ledger.Row {
 // about the work, and a transcript drover cannot read is no reason to leave
 // the queue undriven.
 func (s *session) driveSync(when string) {
-	t, err := s.syncUsage(false, time.Now())
+	b, t, err := s.syncUsage(false, time.Now())
+	if b.Wrote > 0 {
+		b.write(os.Stderr, "· usage backfill "+when, false)
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "· usage sync %s: %v; the drive continues\n", when, err)
 		return
@@ -594,17 +635,19 @@ names yet. The filename says which item and stage the log was for, and when.
 --sync reads Claude Code's transcripts for the project root and for every
 worktree drive made for this project, and appends one interactive usage row per
 session per local day. A day is recorded once it is over, so today's sessions
-wait for the first --sync after midnight. A session a headless row already names
-is skipped. Each transcript is read from where the last --sync stopped, kept in
-` + usageSyncName + ` beside the ledger. drive runs --sync before it reads its queue
-and after its end row.
+wait for the first --sync after midnight. --sync always backfills first, because
+Claude Code writes a transcript for every headless session too, and a session
+any run log names is skipped rather than recorded as interactive. Each
+transcript is read from where the last --sync stopped, kept in
+` + usageSyncName + ` beside the ledger. drive runs the same step, backfill and
+sync, before it reads its queue and after its end row.
 
 Run either twice and the second writes nothing. The counts are tokens as the API
 reported them, not the subscription's quota, and cost_usd is list price.`,
 	Example: `  drover usage --backfill --dry-run   # what a backfill would write
   drover usage --backfill             # one row per log not yet recorded
   drover usage --sync                 # interactive sessions, per day
-  drover usage --backfill --sync      # both, backfill first`,
+  drover usage --sync                 # backfill, then interactive sessions per day`,
 	Args: cobra.NoArgs,
 	RunE: func(c *cobra.Command, _ []string) error {
 		if !usageBackfill && !usageSyncFlag {
@@ -614,29 +657,27 @@ reported them, not the subscription's quota, and cost_usd is list price.`,
 		if err != nil {
 			return err
 		}
-		// Backfill first, so a session a log records is named before --sync
-		// asks whether a headless row covers it.
-		if usageBackfill {
+		if !usageSyncFlag {
 			t, err := s.backfill(usageDry)
 			if err != nil {
 				return err
 			}
 			t.write(os.Stdout, "backfill: logs", usageDry)
+			return nil
 		}
-		if usageSyncFlag {
-			t, err := s.syncUsage(usageDry, time.Now())
-			if err != nil {
-				return err
-			}
-			t.write(os.Stdout, "sync: transcripts", usageDry)
+		b, t, err := s.syncUsage(usageDry, time.Now())
+		b.write(os.Stdout, "backfill: logs", usageDry)
+		if err != nil {
+			return err
 		}
+		t.write(os.Stdout, "sync: transcripts", usageDry)
 		return nil
 	},
 }
 
 func init() {
 	usageCmd.Flags().BoolVar(&usageBackfill, "backfill", false, "record usage from every run log not yet in the ledger")
-	usageCmd.Flags().BoolVar(&usageSyncFlag, "sync", false, "record interactive sessions from Claude Code's transcripts")
+	usageCmd.Flags().BoolVar(&usageSyncFlag, "sync", false, "backfill, then record interactive sessions from Claude Code's transcripts")
 	usageCmd.Flags().BoolVar(&usageDry, "dry-run", false, "print the counts and write nothing")
 	root.AddCommand(usageCmd)
 }

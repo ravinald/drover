@@ -504,6 +504,9 @@ type Read struct {
 	// anything, so every case arrived wearing the words of a session that died.
 	Events int
 	Known  int
+	// SessionID is the first session_id any event carried, which a killed
+	// session's log names from its first line though it never reached a result.
+	SessionID string
 }
 
 // ReadResult returns what one log carries: its terminal event under whichever
@@ -541,6 +544,11 @@ func ReadResult(path string) (Read, error) {
 			continue
 		}
 		rd.Events++
+		if rd.SessionID == "" {
+			if raw, ok := ev["session_id"]; ok {
+				_ = json.Unmarshal(raw, &rd.SessionID)
+			}
+		}
 		for _, s := range schemas {
 			kind, ok := eventKind(ev, s.Key)
 			if !ok || !s.claims(kind) {

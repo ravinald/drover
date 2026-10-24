@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -309,7 +310,7 @@ func TestSyncRecordsInteractiveSessionsPerDay(t *testing.T) {
 	}
 	s = reload(t, s)
 
-	first, err := s.syncUsage(false, time.Now())
+	_, first, err := s.syncUsage(false, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +328,7 @@ func TestSyncRecordsInteractiveSessionsPerDay(t *testing.T) {
 		t.Fatalf("interactive rows by date = %v", byDate)
 	}
 	d1 := byDate["2026-10-01"]
-	if *d1.Usage != (runlog.Usage{Input: 30, Output: 11, CacheRead: 300}) || d1.ContextMax != 220 || d1.ID != "" || d1.SessionID != "long" {
+	if *d1.Usage != (runlog.Usage{Input: 30, Output: 11, CacheRead: 300}) || d1.ContextMax == nil || *d1.ContextMax != 220 || d1.ID != "" || d1.SessionID != "long" {
 		t.Errorf("day 1 = %+v usage %+v", d1, *d1.Usage)
 	}
 	if d1.FirstTS != day1.Format(time.RFC3339) || d1.TS != day1.Add(2*time.Minute).Format(time.RFC3339) || d1.Started != day1.Format(time.RFC3339) {
@@ -339,7 +340,7 @@ func TestSyncRecordsInteractiveSessionsPerDay(t *testing.T) {
 	}
 
 	s = reload(t, s)
-	second, err := s.syncUsage(false, time.Now())
+	_, second, err := s.syncUsage(false, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +350,7 @@ func TestSyncRecordsInteractiveSessionsPerDay(t *testing.T) {
 
 	// Tomorrow, the held day is over and lands without rereading a byte.
 	s = reload(t, s)
-	third, err := s.syncUsage(false, time.Now().AddDate(0, 0, 1))
+	_, third, err := s.syncUsage(false, time.Now().AddDate(0, 0, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +369,7 @@ func TestSyncDryRunWritesNothing(t *testing.T) {
 	}
 	write(t, filepath.Join(dir, "x.jsonl"), transcriptLine("assistant", "x", "m", time.Date(2026, 10, 1, 9, 0, 0, 0, time.Local), 1, 1, 1)+"\n")
 
-	tally, err := s.syncUsage(true, time.Now())
+	_, tally, err := s.syncUsage(true, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,5 +378,137 @@ func TestSyncDryRunWritesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.cfg.Root, usageSyncName)); err == nil {
 		t.Error("dry run wrote the state file")
+	}
+}
+
+// syncFixture is a project whose log directory and root transcript directory
+// both exist, with Claude Code's config and the log cache in temp dirs.
+func syncFixture(t *testing.T) (s *session, logs, transcripts string) {
+	t.Helper()
+	claude := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	s = fixture(t, "")
+	logs = s.cfg.LogDir()
+	transcripts = filepath.Join(claude, "projects", transcriptSlug(s.cfg.Root))
+	for _, d := range []string{logs, transcripts} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return s, logs, transcripts
+}
+
+// Claude Code writes a transcript for a headless session too. The sync step
+// alone, which is what drive runs before its queue, must record that session
+// from its log, with its item and stage, and never as an interactive row that
+// backfill's dedupe would then keep out for good.
+func TestSyncAloneRecordsALoggedSessionAsHeadless(t *testing.T) {
+	s, logs, transcripts := syncFixture(t)
+	day := time.Date(2026, 10, 1, 9, 30, 0, 0, time.Local)
+	logAt(t, logs, "01-first-review.20261001-093000.000000000.jsonl", fmt.Sprintf(usageResult, "sess-h")+"\n")
+	write(t, filepath.Join(transcripts, "sess-h.jsonl"), transcriptLine("assistant", "sess-h", "m1", day, 11, 44, 22)+"\n")
+
+	s.driveSync("before the queue")
+
+	rows := usageRows(t, s.cfg.Root)
+	if len(rows) != 1 {
+		t.Fatalf("usage rows = %+v, want exactly one for sess-h", rows)
+	}
+	r := rows[0]
+	if r.SessionID != "sess-h" || r.Source != ledger.SourceHeadless || r.ID != "1" || r.Stage != ledger.StageReview ||
+		r.Log != "01-first-review.20261001-093000.000000000.jsonl" {
+		t.Errorf("row = %+v, want the log's headless review row for item 1", r)
+	}
+
+	// A second pass reopens neither the log nor the transcript's day.
+	s = reload(t, s)
+	b, sy, err := s.syncUsage(false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Wrote != 0 || sy.Wrote != 0 || b.Skipped[skipRecorded] != 1 || len(usageRows(t, s.cfg.Root)) != 1 {
+		t.Errorf("second pass: backfill %+v sync %+v", b, sy)
+	}
+}
+
+// A killed headless session leaves a log with no result event, so it gets no
+// row; its transcript is still not an interactive session's.
+func TestSyncSkipsASessionAKilledLogNames(t *testing.T) {
+	s, logs, transcripts := syncFixture(t)
+	day := time.Date(2026, 10, 1, 9, 30, 0, 0, time.Local)
+	logAt(t, logs, "01-first.20261001-093000.000000000.jsonl", `{"type":"system","subtype":"init","session_id":"sess-k"}`+"\n")
+	write(t, filepath.Join(transcripts, "sess-k.jsonl"), transcriptLine("assistant", "sess-k", "m1", day, 1, 1, 1)+"\n")
+
+	dryB, dryS, err := s.syncUsage(true, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dryB.Wrote != 0 || dryS.Wrote != 0 || dryS.Skipped[skipHeadless] != 1 {
+		t.Errorf("dry run: backfill %+v sync %+v, want nothing counted", dryB, dryS)
+	}
+	b, sy, err := s.syncUsage(false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Skipped[skipNoResult] != 1 || sy.Wrote != 0 || sy.Skipped[skipHeadless] != 1 || len(usageRows(t, s.cfg.Root)) != 0 {
+		t.Errorf("backfill %+v sync %+v, rows %+v", b, sy, usageRows(t, s.cfg.Root))
+	}
+}
+
+// The dry run counts what the real one writes: a session a log names is not
+// counted as interactive just because nothing was written for it yet.
+func TestSyncDryRunCountsALoggedSessionOnce(t *testing.T) {
+	s, logs, transcripts := syncFixture(t)
+	day := time.Date(2026, 10, 1, 9, 30, 0, 0, time.Local)
+	logAt(t, logs, "01-first.20261001-093000.000000000.jsonl", fmt.Sprintf(usageResult, "sess-h")+"\n")
+	write(t, filepath.Join(transcripts, "sess-h.jsonl"), transcriptLine("assistant", "sess-h", "m1", day, 1, 1, 1)+"\n")
+
+	b, sy, err := s.syncUsage(true, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Wrote != 1 || sy.Wrote != 0 || len(usageRows(t, s.cfg.Root)) != 0 {
+		t.Errorf("dry run: backfill %+v sync %+v", b, sy)
+	}
+}
+
+// A usage row carries context_max even at zero, and no other row carries it.
+func TestUsageRowCarriesContextMaxAtZero(t *testing.T) {
+	rd, err := runlog.ReadResult(filepath.Join("..", "runlog", "testdata", "claude-usage-limit.jsonl"))
+	if err != nil || !rd.Found {
+		t.Fatalf("found=%v err=%v", rd.Found, err)
+	}
+	row, ok := usageRow("1", ledger.StageImplement, "x.jsonl", rd.Result)
+	if !ok {
+		t.Fatal("a zero usage object is still a usage row")
+	}
+	b, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"context_max":0`) {
+		t.Errorf("usage row %s lacks context_max at zero", b)
+	}
+	b, err = json.Marshal(ledger.Row{ID: "1", Stage: ledger.StageImplement})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "context_max") {
+		t.Errorf("stage row %s carries context_max", b)
+	}
+}
+
+// A backfill that read the log first leaves the launch nothing to write.
+func TestRecordWritesOneUsageRowPerSession(t *testing.T) {
+	s := fixture(t, "")
+	u := runlog.Usage{Input: 1}
+	for range 2 {
+		if err := s.record(ledger.Row{ID: "1", Usage: &u, SessionID: "dup", Source: ledger.SourceHeadless}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rows := usageRows(t, s.cfg.Root); len(rows) != 1 {
+		t.Errorf("usage rows = %d, want 1", len(rows))
 	}
 }

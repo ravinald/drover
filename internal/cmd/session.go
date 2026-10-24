@@ -136,12 +136,22 @@ func (s *session) record(row ledger.Row) error {
 		row = s.verifyStamp(row)
 	}
 	row = ledger.Stamp(driveStamp(row))
-	if err := ledger.Append(s.cfg.Abs(s.cfg.Paths.Ledger), row); err != nil {
-		return err
-	}
+	path := s.cfg.Abs(s.cfg.Paths.Ledger)
 	if row.Usage != nil {
+		// A usage backfill in another process may have read this session's
+		// log the moment its result landed. One session is one row, whoever
+		// wrote it, or the session counts twice.
+		wrote, err := ledger.AppendUnless(path, row, func(l *ledger.Ledger) bool {
+			return row.SessionID != "" && l.HasSession("", row.SessionID)
+		})
+		if err != nil || !wrote {
+			return err
+		}
 		s.ledger.Usage = append(s.ledger.Usage, row)
 		return nil
+	}
+	if err := ledger.Append(path, row); err != nil {
+		return err
 	}
 	s.ledger.Rows = append(s.ledger.Rows, row)
 	appended()
