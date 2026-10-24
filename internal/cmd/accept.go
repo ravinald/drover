@@ -12,6 +12,9 @@ import (
 	"github.com/ravinald/drover/internal/backlog"
 )
 
+// acceptYes overrides the refusals accept makes about what a body says.
+var acceptYes bool
+
 var acceptCmd = &cobra.Command{
 	Use:   "accept <id>...",
 	Short: "Delete the stop marker, making a scaffolded item runnable.",
@@ -32,6 +35,15 @@ A body that cites a directory in the project tree, as a path dispatch reads,
 gets one note per directory: under drive --jobs the item waits for any item
 citing a path below it. The note changes nothing and the exit stays 0.
 
+An item another unmerged item waits on is read against that item's branch:
+every path it cites with a line part, and every backticked name that looks like
+a function or type, that the trunk lacks and the waiting item's branch has. The
+accepted item runs from the trunk and cannot change that code, and the item
+waiting on it cannot merge first, so the two would deadlock. accept refuses
+it, names each citation, and changes nothing. --yes overrides that refusal,
+which is the one accept makes about the body's content. It never overrides the
+stop-marker or actor checks, or a deps line drover would misread.
+
 Idempotent. An item with no marker is already accepted: that is reported and
 exits 0, because the operator named a state rather than a transition.
 
@@ -50,6 +62,7 @@ the last line lists the ids that were not accepted.`,
 	Example: `  drover accept B1                  # the requirements are the contract; run may launch
   drover accept B1                  # again: already accepted, exit 0
   drover accept B45 B46 E28         # each in turn; a bad id is named and skipped
+  drover accept B59 --yes           # past the deadlock refusal, having read it
 
   The three steps around it:
 
@@ -112,6 +125,11 @@ func (s *session) acceptOne(bare string) error {
 		fmt.Printf("already accepted: %s carries no stop marker (%s)\n",
 			it.ID.Bare(), rel(s.cfg.Root, it.Path))
 		return s.publish(it)
+	}
+	if found := s.deadlocksOf(it); len(found) > 0 && !acceptYes {
+		return Refusal{fmt.Errorf("%s\nNothing was accepted. Point the dependency the other way (drop %s from the waiting item's deps and name that item in %s's),\n"+
+			"rewrite the body so it stands on the trunk alone, or accept anyway: drover accept %s --yes",
+			strings.Join(found, "\n"), it.ID.Bare(), it.ID.Bare(), it.ID.Bare())}
 	}
 	n := stopBlockLen(lines, at, s.cfg.Intake.StopMarker)
 	// Three-index slice: appending onto lines[:at] would otherwise write
@@ -308,5 +326,7 @@ func bodyStart(lines []string) int {
 }
 
 func init() {
+	acceptCmd.Flags().BoolVar(&acceptYes, "yes", false,
+		"accept past a refusal about the body's content (a citation only a waiting item's branch has); never past the stop-marker or actor checks")
 	root.AddCommand(acceptCmd, unacceptCmd)
 }

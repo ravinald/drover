@@ -43,6 +43,39 @@ type ShowOperator struct {
 	SignedOff bool   `json:"signed_off"`
 }
 
+// ShowSplit is one split: the item split, the item it wrote, and which
+// direction the dependency between them runs, "--after" when From waits on
+// Into and "--before" when Into waits on From.
+type ShowSplit struct {
+	From      string `json:"from"`
+	Into      string `json:"into"`
+	Direction string `json:"direction"`
+}
+
+// line is the split as show prints it.
+func (sp ShowSplit) line() string {
+	if sp.Direction == "--before" {
+		return fmt.Sprintf("%s split out of %s, --before: %s waits on %s", sp.Into, sp.From, sp.Into, sp.From)
+	}
+	return fmt.Sprintf("%s split out of %s, --after: %s waits on %s", sp.Into, sp.From, sp.From, sp.Into)
+}
+
+// splitsOf reads the split record from the item's own body and from every body
+// split out of it.
+func (s *session) splitsOf(it backlog.Item) []ShowSplit {
+	id := it.ID.Bare()
+	var out []ShowSplit
+	if m := splitLine.FindStringSubmatch(it.Body); m != nil {
+		out = append(out, ShowSplit{From: m[1], Into: id, Direction: "--" + m[2]})
+	}
+	for _, other := range s.backlog.Items {
+		if m := splitLine.FindStringSubmatch(other.Body); m != nil && m[1] == id && other.ID.Bare() != id {
+			out = append(out, ShowSplit{From: id, Into: other.ID.Bare(), Direction: "--" + m[2]})
+		}
+	}
+	return out
+}
+
 // Show is everything drover knows about one item, and the unit of --json.
 type Show struct {
 	ID     string            `json:"id"`
@@ -52,7 +85,11 @@ type Show struct {
 	Branch string            `json:"branch"`
 	Meta   map[string]string `json:"meta,omitempty"`
 	Deps   []ShowDep         `json:"deps,omitempty"`
-	Reqs   int               `json:"requirements"`
+	// Splits is every split this item took part in, from the line split
+	// writes into the new item's body: the one it came out of, and each one
+	// split out of it.
+	Splits []ShowSplit `json:"splits,omitempty"`
+	Reqs   int         `json:"requirements"`
 	// Operator is every [operator] requirement, each saying whether the
 	// operator has attested it. A pending one holds the merge.
 	Operator []ShowOperator `json:"operator,omitempty"`
@@ -278,6 +315,7 @@ the same text as body.`,
 				Weak: state == idReadable && weakFoundation(ds),
 			})
 		}
+		sh.Splits = s.splitsOf(it)
 		for _, r := range s.ledger.Rows {
 			if r.ID == id && r.Level != "" {
 				sh.Audits = append(sh.Audits, r)
@@ -370,6 +408,14 @@ func (sh Show) print(cfg *config.Config) {
 			}
 			fmt.Printf("  %-10s %s\n", k, v)
 		}
+	}
+
+	for i, sp := range sh.Splits {
+		label := "  split      "
+		if i > 0 {
+			label = "             "
+		}
+		fmt.Printf("%s%s\n", label, sp.line())
 	}
 
 	if len(sh.Deps) > 0 {

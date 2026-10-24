@@ -267,6 +267,7 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `SHELF CLASH`         | One id has a body in both the backlog and the shelf.                                  |
 | `MISSING DEP`         | A dep names an id whose body is missing, unreadable or shelved.                       |
 | `BAD DEPS`            | A `deps:` line is written as a YAML list.                                             |
+| `BRANCH CYCLE`        | A dep cites code only the dependent's unmerged branch has.                            |
 | `MISSING REPORT`      | A ledger row names a saved report that does not exist.                                |
 | `PROTECTED UNMATCHED` | A `[drive] protected_paths` glob matches no tracked file.                             |
 | `SEQUENCE CLASH`      | Two tracked files share a number in a `[numbered_files]` glob.                        |

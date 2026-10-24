@@ -118,15 +118,15 @@ func (s *session) driftRef() string {
 func (s *session) refDrift(it backlog.Item, ref string) []string {
 	var out []string
 	for _, r := range citedRefs(it.Body) {
-		kind, err := gitcmd.Command(s.cfg.Root, "cat-file", "-t", ref+":"+r.Path).Output()
+		kind, err := s.objectType(ref, r.Path)
 		rooted := !strings.Contains(r.Path, "/")
 		switch {
-		case rooted && (err != nil || strings.TrimSpace(string(kind)) != "blob"):
+		case rooted && (err != nil || kind != "blob"):
 			continue
 		case err != nil:
 			out = append(out, fmt.Sprintf("%s names a file %s does not have", r.Text, ref))
 			continue
-		case strings.TrimSpace(string(kind)) != "blob":
+		case kind != "blob":
 			out = append(out, fmt.Sprintf("%s names a directory on %s, which has no lines", r.Text, ref))
 			continue
 		}
@@ -144,6 +144,13 @@ func (s *session) refDrift(it backlog.Item, ref string) []string {
 		}
 	}
 	return out
+}
+
+// objectType is what git holds at path on ref: blob, tree, or an error for
+// nothing at all.
+func (s *session) objectType(ref, path string) (string, error) {
+	kind, err := gitcmd.Command(s.cfg.Root, "cat-file", "-t", ref+":"+path).Output()
+	return strings.TrimSpace(string(kind)), err
 }
 
 // checkRefDrift reports an item's drifted citations as it is dispatched, and
