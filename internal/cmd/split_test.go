@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -236,6 +238,7 @@ func TestSplitDirection(t *testing.T) {
 		flags    []string
 		cites    string
 		deadlock []string // what split and accept name; empty is no deadlock
+		yes      bool     // override the refusal rather than run the printed remedy
 	}{
 		{
 			name:  "trunk citations write --after as today",
@@ -250,6 +253,12 @@ func TestSplitDirection(t *testing.T) {
 			name:     "a function only the original's branch has, in a file the trunk has",
 			cites:    "Fix `pkg/store.go:3`, where `insertWidget` writes the row.",
 			deadlock: []string{"B2 cites `insertWidget`, which only 1's branch has; with --after these items deadlock"},
+		},
+		{
+			name:     "accept --yes overrides the refusal",
+			cites:    "Fix `pkg/store.go:3`, where `insertWidget` writes the row.",
+			deadlock: []string{"B2 cites `insertWidget`, which only 1's branch has; with --after these items deadlock"},
+			yes:      true,
 		},
 		{
 			name:  "--before reverses the deps and leaves the original runnable",
@@ -337,13 +346,179 @@ func TestSplitDirection(t *testing.T) {
 			if !strings.Contains(readItem(t, dir, "B02"), "STOP:") {
 				t.Fatal("the refused accept deleted the stop marker anyway")
 			}
-			if err := execute(t, "accept", "B2", "--yes"); err != nil {
-				t.Fatalf("accept --yes still refused: %v", err)
+			if c.yes {
+				if err := execute(t, "accept", "B2", "--yes"); err != nil {
+					t.Fatalf("accept --yes still refused: %v", err)
+				}
+				if strings.Contains(readItem(t, dir, "B02"), "STOP:") {
+					t.Error("accept --yes left the stop marker in place")
+				}
+				return
 			}
-			if strings.Contains(readItem(t, dir, "B02"), "STOP:") {
-				t.Error("accept --yes left the stop marker in place")
+
+			// The remedy split printed has to be one drover accepts: after it,
+			// check finds no cycle and accept goes through without --yes.
+			for _, text := range []string{stderr, err.Error()} {
+				runRemedy(t, dir, text)
+			}
+			s, err = open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, f := range s.checkReport().Findings {
+				if f.Kind == "BRANCH CYCLE" {
+					t.Errorf("check still reports the cycle after the printed remedy: %+v", f)
+				}
+			}
+			if err := execute(t, "accept", "B2"); err != nil {
+				t.Fatalf("accept refused after the printed remedy: %v", err)
 			}
 		})
+	}
+}
+
+// remedy is the dependency flip split, accept and check print.
+var remedy = regexp.MustCompile(`drop (\S+) from the deps line of (\S+), and add (\S+) to (\S+)'s`)
+
+// runRemedy applies the flip text names to the fixture's bodies, and fails
+// when text names none or names one no body carries.
+func runRemedy(t *testing.T, dir, text string) {
+	t.Helper()
+	m := remedy.FindStringSubmatch(text)
+	if m == nil {
+		t.Fatalf("no remedy drover can act on in:\n%s", text)
+	}
+	if strings.Contains(text, "Shelve") {
+		t.Errorf("the remedy still names shelve, which refuses a dep another item names:\n%s", text)
+	}
+	dep, waiter := m[1], m[2]
+	if m[3] != waiter || m[4] != dep {
+		t.Fatalf("the remedy does not flip one pair: %q", m[0])
+	}
+	setDeps(t, dir, waiter, func(deps []string) []string {
+		var kept []string
+		for _, d := range deps {
+			if d != dep {
+				kept = append(kept, d)
+			}
+		}
+		return kept
+	})
+	setDeps(t, dir, dep, func(deps []string) []string {
+		for _, d := range deps {
+			if d == waiter {
+				return deps
+			}
+		}
+		return append(deps, waiter)
+	})
+}
+
+var depsLine = regexp.MustCompile(`(?m)^deps:.*$`)
+
+// setDeps rewrites one fixture item's deps line by hand, the way an operator
+// following a remedy would.
+func setDeps(t *testing.T, dir, id string, edit func([]string) []string) {
+	t.Helper()
+	stem := id
+	if len(stem) < 2 || stem[0] < 'A' {
+		stem = "0" + stem
+	} else if len(stem) < 3 {
+		stem = stem[:1] + "0" + stem[1:]
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "work", stem+"-*.md"))
+	if len(matches) != 1 {
+		t.Fatalf("no single body for %s: %v", id, matches)
+	}
+	body := readItem(t, dir, stem)
+	line := depsLine.FindString(body)
+	deps := edit(strings.Fields(strings.TrimPrefix(line, "deps:")))
+	write(t, matches[0], strings.Replace(body, line, strings.TrimSpace("deps: "+strings.Join(deps, " ")), 1))
+}
+
+// --before leaves the original's deps alone, so an original something already
+// blocks is still blocked, and split must not call it runnable.
+func TestSplitBeforeOfABlockedItem(t *testing.T) {
+	dir := draftProject(t, "")
+	resetSplitFlags(t)
+	proposal := filepath.Join(dir, "proposal.md")
+	write(t, proposal, "Requirements:\n\n1. Reject duplicates.\n")
+	if err := execute(t, "split", "1", "first split", "--into", "bug", "-f", proposal); err != nil {
+		t.Fatal(err)
+	}
+	splitCmd.Flags().Lookup("after").Changed = false
+	var err error
+	out := capture(t, func() {
+		err = execute(t, "split", "1", "second split", "--into", "bug", "-f", proposal, "--before")
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "runnable") {
+		t.Errorf("split --before calls an item blocked by B2 runnable:\n%s", out)
+	}
+	if !strings.Contains(out, "unchanged, still blocked by B2; B3 waits on it") {
+		t.Errorf("split --before does not name what still blocks the original:\n%s", out)
+	}
+}
+
+// show takes the direction from the deps lines, so a pair flipped by hand
+// after an --after split reads --before on both items, and says the record
+// disagrees.
+func TestShowReadsTheDirectionFromTheDeps(t *testing.T) {
+	dir := draftProject(t, "")
+	resetSplitFlags(t)
+	t.Cleanup(func() { showJSON, showNoTracker = false, false })
+	proposal := filepath.Join(dir, "proposal.md")
+	write(t, proposal, "Requirements:\n\n1. Reject duplicates.\n")
+	if err := execute(t, "split", "1", "unique widgets", "--into", "bug", "-f", proposal); err != nil {
+		t.Fatal(err)
+	}
+	runRemedy(t, dir, "drop B2 from the deps line of 1, and add 1 to B2's")
+	for _, id := range []string{"1", "B2"} {
+		var err error
+		out := capture(t, func() { err = execute(t, "show", id, "--no-tracker") })
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "B2 split out of 1, --before: B2 waits on 1 (the split recorded --after"
+		if !strings.Contains(out, want) {
+			t.Errorf("show %s after a hand flip does not say %q:\n%s", id, want, out)
+		}
+		out = capture(t, func() { err = execute(t, "show", id, "--no-tracker", "--json") })
+		showJSON = false
+		if err != nil {
+			t.Fatal(err)
+		}
+		var sh Show
+		if err := json.Unmarshal([]byte(out), &sh); err != nil {
+			t.Fatalf("show --json: %v\n%s", err, out)
+		}
+		if len(sh.Splits) != 1 || sh.Splits[0].Direction != "--before" || sh.Splits[0].Recorded != "--after" {
+			t.Errorf("show %s --json splits = %+v, want direction --before recorded --after", id, sh.Splits)
+		}
+	}
+}
+
+// A pair whose deps lines name each other has no direction the graph can
+// give, so show keeps the record and says neither item can run.
+func TestShowFlagsSplitPairsThatWaitOnEachOther(t *testing.T) {
+	dir := draftProject(t, "")
+	resetSplitFlags(t)
+	t.Cleanup(func() { showJSON, showNoTracker = false, false })
+	proposal := filepath.Join(dir, "proposal.md")
+	write(t, proposal, "Requirements:\n\n1. Reject duplicates.\n")
+	if err := execute(t, "split", "1", "unique widgets", "--into", "bug", "-f", proposal); err != nil {
+		t.Fatal(err)
+	}
+	setDeps(t, dir, "B2", func(deps []string) []string { return append(deps, "1") })
+	var err error
+	out := capture(t, func() { err = execute(t, "show", "1", "--no-tracker") })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "--after: 1 waits on B2 (as recorded; both deps lines name the other") {
+		t.Errorf("show does not flag a pair waiting on each other:\n%s", out)
 	}
 }
 

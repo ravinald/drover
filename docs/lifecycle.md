@@ -272,7 +272,7 @@ Each round's evidence is kept beside the saved reports as `<stem>-<slug>.changes
 `drover split` writes the dependency between the two items, and `--after` and `--before` choose its direction.
 
 - **`--after`** (the default): the item split waits on the new one. Its `deps:` line gains the new id, and it stays blocked until the new item merges. Use it when the new item's work stands on the trunk alone, which is the usual case: a shared subsystem this item tripped over, fixable from a fresh checkout of the trunk.
-- **`--before`**: the new item waits on the item split. The scaffold's own `deps:` line names the original, which is left untouched, stays runnable and merges first. Use it when the new item's fix reaches code only the original's branch has written, such as call sites of a function the original added.
+- **`--before`**: the new item waits on the item split. The scaffold's own `deps:` line names the original, which gains no dep and may merge first; whatever already blocked it still does, and `split` says so. Use it when the new item's fix reaches code only the original's branch has written, such as call sites of a function the original added.
 
 Choose wrong and the two deadlock. The new item runs from the trunk, so it cannot change code that exists only on the original's branch, and the original cannot merge until the new item does. So drover reads the new item's citations against the trunk and against the original's branch: every path cited with a line part (the same citations `stale_citations` reads), and every backticked name that looks like a function or type, found with a whole-word `git grep` over those cited files on each ref. The names are a heuristic: a definition in a file the body never cites is missed, and a word spelled like a name can match.
 
@@ -284,7 +284,9 @@ Each citation only the branch has is reported as `B cites X, which only A's bran
 | `accept` of the split | A refusal, and nothing is accepted. `drover accept <id> --yes` overrides it, and only it: never the stop marker or the actor check. |
 | `check`               | A `BRANCH CYCLE` finding for any unmerged dependency, split or not, so a pair written before this check existed is still found.     |
 
-The scaffold records the direction in a line under the stop marker (`Split from 1 with --after: 1 waits on this item.`), and `drover show` names it on both items.
+Every one of the three prints the same remedy, naming the ids: `drop B2 from the deps line of 1, and add 1 to B2's`. That is a hand edit of two `deps:` lines. Shelving the new item and splitting again is not a remedy, because `shelve` refuses an id another item's `deps:` line names, and under `--after` the original names it.
+
+The scaffold records the direction in a line under the stop marker (`Split from 1 with --after: 1 waits on this item.`), and `drover show` names it on both items. `show` takes the direction from the two `deps:` lines rather than that record, so a pair flipped by hand reads `--before` and notes that the split recorded `--after`.
 
 ### A block the branch closed is closed, not sent back
 

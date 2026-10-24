@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -45,35 +46,70 @@ type ShowOperator struct {
 
 // ShowSplit is one split: the item split, the item it wrote, and which
 // direction the dependency between them runs, "--after" when From waits on
-// Into and "--before" when Into waits on From.
+// Into and "--before" when Into waits on From. Direction is read from the deps
+// lines, which are what status and drive obey; Recorded is what the split
+// wrote, which a hand edit reversing the deps leaves behind. Direction falls
+// back to Recorded when neither deps line names the other, or both do.
 type ShowSplit struct {
 	From      string `json:"from"`
 	Into      string `json:"into"`
 	Direction string `json:"direction"`
+	Recorded  string `json:"recorded"`
+	unlinked  bool
+	mutual    bool
 }
 
 // line is the split as show prints it.
 func (sp ShowSplit) line() string {
+	out := fmt.Sprintf("%s split out of %s, --after: %s waits on %s", sp.Into, sp.From, sp.From, sp.Into)
 	if sp.Direction == "--before" {
-		return fmt.Sprintf("%s split out of %s, --before: %s waits on %s", sp.Into, sp.From, sp.Into, sp.From)
+		out = fmt.Sprintf("%s split out of %s, --before: %s waits on %s", sp.Into, sp.From, sp.Into, sp.From)
 	}
-	return fmt.Sprintf("%s split out of %s, --after: %s waits on %s", sp.Into, sp.From, sp.From, sp.Into)
+	switch {
+	case sp.unlinked:
+		out += " (as recorded; neither deps line names the other)"
+	case sp.mutual:
+		out += " (as recorded; both deps lines name the other, so neither can run)"
+	case sp.Direction != sp.Recorded:
+		out += fmt.Sprintf(" (the split recorded %s; the deps lines have since been reversed)", sp.Recorded)
+	}
+	return out
 }
 
 // splitsOf reads the split record from the item's own body and from every body
-// split out of it.
+// split out of it, and takes each pair's direction from their deps lines.
 func (s *session) splitsOf(it backlog.Item) []ShowSplit {
 	id := it.ID.Bare()
 	var out []ShowSplit
 	if m := splitLine.FindStringSubmatch(it.Body); m != nil {
-		out = append(out, ShowSplit{From: m[1], Into: id, Direction: "--" + m[2]})
+		out = append(out, s.splitPair(m[1], id, "--"+m[2]))
 	}
 	for _, other := range s.backlog.Items {
 		if m := splitLine.FindStringSubmatch(other.Body); m != nil && m[1] == id && other.ID.Bare() != id {
-			out = append(out, ShowSplit{From: id, Into: other.ID.Bare(), Direction: "--" + m[2]})
+			out = append(out, s.splitPair(id, other.ID.Bare(), "--"+m[2]))
 		}
 	}
 	return out
+}
+
+func (s *session) splitPair(from, into, recorded string) ShowSplit {
+	sp := ShowSplit{From: from, Into: into, Direction: recorded, Recorded: recorded}
+	names := func(id, dep string) bool {
+		it, err := s.item(id)
+		return err == nil && slices.Contains(it.Deps(), dep)
+	}
+	after, before := names(from, into), names(into, from)
+	switch {
+	case after && !before:
+		sp.Direction = "--after"
+	case before && !after:
+		sp.Direction = "--before"
+	case !after && !before:
+		sp.unlinked = true
+	default:
+		sp.mutual = true
+	}
+	return sp
 }
 
 // Show is everything drover knows about one item, and the unit of --json.

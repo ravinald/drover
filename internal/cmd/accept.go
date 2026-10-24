@@ -126,10 +126,10 @@ func (s *session) acceptOne(bare string) error {
 			it.ID.Bare(), rel(s.cfg.Root, it.Path))
 		return s.publish(it)
 	}
-	if found := s.deadlocksOf(it); len(found) > 0 && !acceptYes {
-		return Refusal{fmt.Errorf("%s\nNothing was accepted. Point the dependency the other way (drop %s from the waiting item's deps and name that item in %s's),\n"+
+	if found, waiters := s.deadlocksOf(it); len(found) > 0 && !acceptYes {
+		return Refusal{fmt.Errorf("%s\nNothing was accepted. Point the dependency the other way (%s),\n"+
 			"rewrite the body so it stands on the trunk alone, or accept anyway: drover accept %s --yes",
-			strings.Join(found, "\n"), it.ID.Bare(), it.ID.Bare(), it.ID.Bare())}
+			strings.Join(found, "\n"), flipDeps(it.ID.Bare(), waiters), it.ID.Bare())}
 	}
 	n := stopBlockLen(lines, at, s.cfg.Intake.StopMarker)
 	// Three-index slice: appending onto lines[:at] would otherwise write

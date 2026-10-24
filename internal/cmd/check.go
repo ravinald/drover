@@ -848,8 +848,8 @@ func (s *session) checkReport() CheckReport {
 				add(Finding{
 					Kind:    "BRANCH CYCLE",
 					Message: msg,
-					Detail: fmt.Sprintf("%s runs from the trunk and %s cannot merge before it: make %s wait on %s instead, or rewrite %s to stand on the trunk alone",
-						d, it.ID.Bare(), d, it.ID.Bare(), d),
+					Detail: fmt.Sprintf("%s runs from the trunk and %s cannot merge before it: %s, or rewrite %s to stand on the trunk alone",
+						d, it.ID.Bare(), flipDeps(d, []string{it.ID.Bare()}), d),
 					Path: rel(s.cfg.Root, dep.Path),
 					ID:   d,
 				})

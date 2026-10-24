@@ -42,7 +42,7 @@ directions:
             stands on the trunk alone, which is the usual case: a shared
             subsystem this item tripped over.
   --before  the new item waits on this one: the scaffold's deps line names this
-            item, which stays runnable and may merge first. Right when the new
+            item, which gains no dep and may merge first. Right when the new
             item's fix reaches code only this branch has written, because a run
             of the new item starts from the trunk and cannot touch it.
 
@@ -173,7 +173,13 @@ ledger. Reaches no tracker. Under [ids] allocator = "git" it first pushes refs/d
 		fmt.Printf("\nsplit %s -> %s  (%s, %s)\n\n", it.ID.Bare(), id.Bare(), splitInto, splitDirection(splitBefore))
 		fmt.Printf("  %s  the work, with your proposal as its body\n", rel(s.cfg.Root, path))
 		if splitBefore {
-			fmt.Printf("  %s  unchanged and runnable; %s waits on it\n\n", rel(s.cfg.Root, it.Path), id.Bare())
+			// The original's own deps are untouched, so whatever blocked it
+			// before the split still does.
+			blockers := ""
+			if state, missing := s.workState(it, s.cfg.LogDir()); state == stateBlocked {
+				blockers = ", still blocked by " + strings.Join(missing, " ")
+			}
+			fmt.Printf("  %s  unchanged%s; %s waits on it\n\n", rel(s.cfg.Root, it.Path), blockers, id.Bare())
 		} else {
 			// After the scaffold, never before. A deps line naming an item that
 			// does not exist blocks the original on nothing anybody can run, and
@@ -253,26 +259,37 @@ func (s *session) warnDeadlock(id string) {
 	if err != nil {
 		return
 	}
-	found := s.deadlocksOf(it)
+	found, waiters := s.deadlocksOf(it)
 	for _, d := range found {
 		fmt.Fprintf(os.Stderr, "warning: %s\n", d)
 	}
 	if len(found) > 0 {
-		fmt.Fprintf(os.Stderr, "  %s runs from the trunk, which cannot give it that code. Shelve %s and split again with --before,\n"+
-			"  or rewrite its proposal so it stands on the trunk alone; accept refuses it until then, or until --yes.\n\n", id, id)
+		fmt.Fprintf(os.Stderr, "  %s runs from the trunk, which cannot give it that code. Point the dependency the other way: %s,\n"+
+			"  or rewrite its proposal so it stands on the trunk alone; accept refuses it until then, or until --yes.\n\n", id, flipDeps(id, waiters))
 	}
 }
 
 // deadlocksOf is every branch-only citation in it, read against each unmerged
-// item that waits on it.
-func (s *session) deadlocksOf(it backlog.Item) []string {
-	var out []string
+// item that waits on it, and the ids of the waiting items whose branches
+// those citations came from.
+func (s *session) deadlocksOf(it backlog.Item) (found, waiters []string) {
 	for _, d := range s.backlog.Items {
 		if slices.Contains(d.Deps(), it.ID.Bare()) && !s.done(d.ID.Bare()) {
-			out = append(out, s.branchOnly(it, d)...)
+			if msgs := s.branchOnly(it, d); len(msgs) > 0 {
+				found = append(found, msgs...)
+				waiters = append(waiters, d.ID.Bare())
+			}
 		}
 	}
-	return out
+	return found, waiters
+}
+
+// flipDeps is the edit that reverses a deadlocked dependency, spelled out by
+// id. Not "shelve it and split again": shelve refuses an id another item's
+// deps line names, and under --after the waiting item names this one.
+func flipDeps(dep string, waiters []string) string {
+	return fmt.Sprintf("drop %s from the deps line of %s, and add %s to %s's",
+		dep, strings.Join(waiters, " and "), strings.Join(waiters, " "), dep)
 }
 
 // branchOnly is every citation in dep's body that the trunk lacks and the
@@ -445,7 +462,7 @@ func init() {
 	splitCmd.Flags().BoolVar(&splitAfter, "after", false,
 		"the item split waits on the new one (the default): the new item's work stands on the trunk alone")
 	splitCmd.Flags().BoolVar(&splitBefore, "before", false,
-		"the new item waits on the item split, which stays runnable: the new work needs code only its branch has")
+		"the new item waits on the item split, which gains no dep: the new work needs code only its branch has")
 	splitCmd.MarkFlagsMutuallyExclusive("after", "before")
 	localFlag(splitCmd)
 	root.AddCommand(splitCmd)
