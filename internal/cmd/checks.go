@@ -525,5 +525,5 @@ func (s *session) pickUp(ctx context.Context, d DriveItem, deadline time.Time) (
 		w.leaveItem(&d)
 		return d
 	}
-	return w.inTrunkStage(func() DriveItem { return w.finishAtHead(ctx, it, &d, park, w.trunk(), deadline, &settled{}) }, park)
+	return w.inTrunkStage(it, func() DriveItem { return w.finishAtHead(ctx, it, &d, park, w.trunk(), deadline, &settled{}) }, park)
 }

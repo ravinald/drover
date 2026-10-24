@@ -34,6 +34,9 @@ const (
 	evExit            = "exit"
 	evPaused          = "paused"
 	evResumed         = "resumed"
+	// evReexecWaiting is a resume onto a replaced binary that has waited past
+	// a minute for running items to hold, naming them.
+	evReexecWaiting = "reexec_waiting"
 )
 
 // The stages a stage event names. implement and review are ledger stages; the
@@ -107,9 +110,19 @@ type DriveEvent struct {
 	Coverage  string              `json:"coverage,omitempty"`
 	BlockedOn map[string][]string `json:"blocked_on,omitempty"`
 	Ambiguous bool                `json:"ambiguous,omitempty"`
+	// Waiting is each running item a re-exec still waits on to hold, with the
+	// stage it was last seen in, on reexec_waiting alone.
+	Waiting []WaitingItem `json:"waiting,omitempty"`
 	// DriveTotals is the drive's findings, on exit alone, and absent on the
 	// exit of a drive that never reached its queue.
 	*DriveTotals
+}
+
+// WaitingItem is one running item a re-exec waits on, and the stage its last
+// stage event named: empty when it has emitted none since its dispatch.
+type WaitingItem struct {
+	ID    string `json:"id"`
+	Stage string `json:"stage,omitempty"`
 }
 
 // eventSink is where a drive's events go: stdout under --events, and the
@@ -138,6 +151,9 @@ type eventSink struct {
 	// totals is what the exit event reports about findings, set once the
 	// drive's queue is done.
 	totals *DriveTotals
+	// stages is the stage each item's last stage event named since its
+	// dispatch, which is where a re-exec reports an item it waits on.
+	stages map[string]string
 }
 
 // events is the running drive's sink, nil outside a drive that launches.
@@ -168,6 +184,7 @@ func (es *eventSink) emit(e DriveEvent) {
 	}
 	es.mu.Lock()
 	defer es.mu.Unlock()
+	es.track(e)
 	if e.Drive != "" {
 		es.openLocked(e.Drive, false)
 		es.seq++
@@ -271,6 +288,32 @@ func (es *eventSink) reconfigure(cfg *config.Config) {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 	es.cfg, es.notify = cfg, cfg.Notify()
+}
+
+// track keeps the stage each item is in. An update_branch carrying a result is
+// a catch-up of another item's open pull request, not a step that item took.
+// Called with mu held.
+func (es *eventSink) track(e DriveEvent) {
+	switch {
+	case e.ID == "":
+	case e.Event == evDispatched:
+		delete(es.stages, e.ID)
+	case e.Event == evStage && e.Result == "":
+		if es.stages == nil {
+			es.stages = map[string]string{}
+		}
+		es.stages[e.ID] = e.Stage
+	}
+}
+
+// stageOf is the stage id's last stage event named, empty when it named none.
+func (es *eventSink) stageOf(id string) string {
+	if es == nil {
+		return ""
+	}
+	es.mu.Lock()
+	defer es.mu.Unlock()
+	return es.stages[id]
 }
 
 // stage is the event for an item reaching one step.

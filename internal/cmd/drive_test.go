@@ -6153,7 +6153,7 @@ func TestTheTrunkStageSkipsItemsThatNeverEnterIt(t *testing.T) {
 	q := newDriveSched()
 	q.retire(0)
 	done := make(chan error, 1)
-	go func() { done <- q.enter(1) }()
+	go func() { done <- q.enter(1, lease.Hold{ID: "1"}) }()
 	select {
 	case err := <-done:
 		if err != nil {
@@ -6163,7 +6163,7 @@ func TestTheTrunkStageSkipsItemsThatNeverEnterIt(t *testing.T) {
 		t.Fatal("item 1 waited for a turn item 0 retired")
 	}
 	waiting := make(chan error, 1)
-	go func() { waiting <- q.enter(2) }()
+	go func() { waiting <- q.enter(2, lease.Hold{ID: "2"}) }()
 	q.drain(errTrunkRed)
 	q.leave(1)
 	if err := <-waiting; !errors.Is(err, errTrunkRed) {

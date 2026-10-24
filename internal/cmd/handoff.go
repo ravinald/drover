@@ -168,6 +168,77 @@ func (q *driveSched) reexecReady(running int) bool {
 	return false
 }
 
+// reexecPatience is how long a re-exec waits on running items that do not hold
+// before the drive says which, and how often it says so again.
+var reexecPatience = time.Minute
+
+// bySeq is the running items in the order they were dispatched.
+func bySeq(running map[int]queued) []queued {
+	return slices.SortedFunc(maps.Values(running), func(a, b queued) int { return a.seq - b.seq })
+}
+
+// reexecWaiting is each running item a re-exec has waited on for reexecPatience
+// without it holding, with the stage it was last seen in, when the drive is due
+// to say so: once the wait passes reexecPatience and once per reexecPatience
+// after. retract reports that an earlier report no longer stands.
+func (q *driveSched) reexecWaiting(running map[int]queued, now time.Time) (waiting []WaitingItem, waited time.Duration, retract bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	waited = now.Sub(q.reexecSince)
+	if !q.paused || q.reexec == "" || q.stop != nil || len(q.holds) >= len(running) || waited < reexecPatience {
+		retract, q.reexecSaid = !q.reexecSaid.IsZero(), time.Time{}
+		return nil, 0, retract
+	}
+	if !q.reexecSaid.IsZero() && now.Sub(q.reexecSaid) < reexecPatience {
+		return nil, 0, false
+	}
+	q.reexecSaid = now
+	for _, r := range bySeq(running) {
+		id := r.it.ID.Bare()
+		if _, ok := q.holds[id]; !ok {
+			waiting = append(waiting, WaitingItem{ID: id, Stage: events.stageOf(id)})
+		}
+	}
+	return waiting, waited, false
+}
+
+// sayReexecWaiting reports a re-exec that is not progressing, on stderr, as a
+// reexec_waiting event and in the lease, where status reads it; and takes the
+// lease's line down once the condition no longer holds.
+func sayReexecWaiting(q *driveSched, running map[int]queued, now time.Time) {
+	waiting, waited, retract := q.reexecWaiting(running, now)
+	if retract && held != nil {
+		_ = held.Update(func(l *lease.Lease) { l.ReexecWaiting = "" })
+	}
+	if len(waiting) == 0 {
+		return
+	}
+	q.mu.Lock()
+	to := q.reexec
+	q.mu.Unlock()
+	line := reexecWaitingLine(to, waited, waiting)
+	fmt.Fprintf(os.Stderr, "· %s\n", line)
+	events.emit(DriveEvent{Event: evReexecWaiting, Reason: line, Waiting: waiting})
+	if held != nil {
+		_ = held.Update(func(l *lease.Lease) { l.ReexecWaiting = line })
+	}
+}
+
+// reexecWaitingLine names the items a re-exec waits on and the stage each is in.
+func reexecWaitingLine(to string, waited time.Duration, waiting []WaitingItem) string {
+	names := make([]string, 0, len(waiting))
+	for _, w := range waiting {
+		stage := w.Stage
+		if stage == "" {
+			stage = "dispatched, no stage yet"
+		}
+		names = append(names, fmt.Sprintf("%s (in %s)", w.ID, stage))
+	}
+	return fmt.Sprintf("the re-exec onto %s has waited %s for %s to hold at a stage boundary; "+
+		"it goes on once each does, and drive --stop parks them instead",
+		to, waited.Truncate(time.Second), strings.Join(names, ", "))
+}
+
 // reexec replaces this process with the binary now on disk, over its own
 // arguments plus its drive id and the descriptor its lease is open on. The
 // lease stays locked through the exec, so no other drive can take the tree in
@@ -199,9 +270,11 @@ func (s *session) reexec(q *driveSched, pending []queued, running map[int]queued
 		failed(err)
 		return
 	}
+	// In dispatch order, which the new process dispatches them in again, so
+	// each trunk turn still follows every item dispatched before it.
 	var holds []lease.Hold
-	for _, n := range slices.Sorted(maps.Keys(running)) {
-		holds = append(holds, q.holds[running[n].it.ID.Bare()])
+	for _, r := range bySeq(running) {
+		holds = append(holds, q.holds[r.it.ID.Bare()])
 	}
 	queue := make([]string, 0, len(pending))
 	for _, p := range pending {
@@ -282,7 +355,7 @@ func (s *session) driveTakeoverRun(ctx context.Context, reviewer string) error {
 		return err
 	}
 	if err := held.Update(func(l *lease.Lease) {
-		l.Paused, l.Reexec, l.Handoff, l.Holds, l.Running = false, "", nil, nil, nil
+		l.Paused, l.Reexec, l.ReexecWaiting, l.Handoff, l.Holds, l.Running = false, "", "", nil, nil, nil
 	}); err != nil {
 		return err
 	}

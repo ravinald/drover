@@ -102,6 +102,10 @@ type Lease struct {
 	// once every running item holds, empty when it resumes where it is.
 	Holds  []Hold `json:"holds,omitempty"`
 	Reexec string `json:"reexec,omitempty"`
+	// ReexecWaiting is the line a drive writes when its re-exec has waited past
+	// a minute on running items that do not hold, naming each and its stage,
+	// and empty otherwise.
+	ReexecWaiting string `json:"reexec_waiting,omitempty"`
 	// Handoff is what a drive re-executing itself leaves for the process that
 	// takes its place, opaque here and cleared once that process has read it.
 	Handoff json.RawMessage `json:"handoff,omitempty"`

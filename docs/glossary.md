@@ -221,6 +221,7 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `merged`           | Event: an item's pull request merged.                                                   |
 | `paused`           | Event: the drive paused.                                                                |
 | `resumed`          | Event: the drive resumed, naming what changed.                                          |
+| `reexec_waiting`   | Event: a re-exec has waited past a minute on running items that do not hold.            |
 | `exit`             | Event: the drive ended.                                                                 |
 | round              | One implement session and the review that reads it.                                     |
 | `infra`            | Check class: a red check blamed on the forge's infrastructure.                          |

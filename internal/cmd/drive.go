@@ -1074,7 +1074,7 @@ func init() {
 	driveCmd.Flags().BoolVar(&driveDry, "dry-run", false, "resolve every step and launch nothing")
 	driveCmd.Flags().BoolVar(&driveJSON, "json", false, "one object per line on stdout, flushed as each item ends")
 	driveCmd.Flags().BoolVar(&driveEvents, "events", false,
-		"with --json, also write one event object per line as things happen: queued, dispatched, preflight, stage, check, parked, filed, needs_operator, needs_supervisor, merged, paused, resumed, exit")
+		"with --json, also write one event object per line as things happen: queued, dispatched, preflight, stage, check, parked, filed, needs_operator, needs_supervisor, merged, paused, resumed, reexec_waiting, exit")
 	driveCmd.Flags().BoolVar(&driveNoMerge, "no-merge", false,
 		"drive the queue and merge nothing, leaving each item green-and-reviewed on its branch; the exception, not the norm")
 	driveCmd.Flags().BoolVar(&driveFollow, "follow", false,
@@ -1411,6 +1411,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		if !stopped && sched.reexecReady(len(running)) {
 			s.reexec(sched, pending, running, dispatched, deadline, watch)
 		}
+		sayReexecWaiting(sched, running, time.Now())
 		reviewer = s.inputs.reviewer
 		paused := sched.isPaused()
 		if paused && !stopped && ctx.Err() != nil {
@@ -1449,6 +1450,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 				break
 			}
 			q := pending[i]
+			q.seq = seq
 			pending = append(pending[:i:i], pending[i+1:]...)
 			slot := 1
 			for _, busy := running[slot]; busy; _, busy = running[slot] {
@@ -1821,7 +1823,7 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 		}
 	}
 	if land {
-		return s.inTrunkStage(func() DriveItem { return s.driveFinish(ctx, it, &d, park, deadline) }, park)
+		return s.inTrunkStage(it, func() DriveItem { return s.driveFinish(ctx, it, &d, park, deadline) }, park)
 	}
 	for {
 		if !reviewOnly {
@@ -1920,7 +1922,7 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 			} else if again {
 				continue
 			}
-			return s.inTrunkStage(func() DriveItem { return s.driveFinish(ctx, it, &d, park, deadline) }, park)
+			return s.inTrunkStage(it, func() DriveItem { return s.driveFinish(ctx, it, &d, park, deadline) }, park)
 		case passChangesRequested:
 			d.Rounds++
 			if ctx.Err() != nil {
