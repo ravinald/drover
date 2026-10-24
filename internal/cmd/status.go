@@ -1137,6 +1137,9 @@ func (r Row) note() string {
 	}
 	if r.Queued != nil {
 		queued = fmt.Sprintf("queued %d", r.Queued.Position)
+		if r.Queued.WaitsFor != "" {
+			queued += ", waits for " + r.Queued.WaitsFor + "'s merge"
+		}
 	}
 	return join(" · ", r.stateNote(), pending, queued)
 }

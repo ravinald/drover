@@ -28,6 +28,9 @@ import (
 type Queued struct {
 	PID      int `json:"pid"`
 	Position int `json:"position"`
+	// WaitsFor is the dep that parked for the operator which the drive holds
+	// this item for, absent when the item waits only for a slot.
+	WaitsFor string `json:"waits_for,omitempty"`
 }
 
 // etaSamples is how many timed runs of a stage an estimate needs. Below it a
@@ -71,9 +74,13 @@ func (s *session) attachDrive(rows []Row, l lease.Lease, now time.Time) {
 	for i := range rows {
 		byID[rows[i].ID] = &rows[i]
 	}
+	waits := make(map[string]string, len(l.Waiting))
+	for _, w := range l.Waiting {
+		waits[w.ID] = w.On
+	}
 	for n, id := range l.Queue {
 		if r := byID[id]; r != nil && r.State != stateDone {
-			r.Queued = &Queued{PID: l.PID, Position: n + 1}
+			r.Queued = &Queued{PID: l.PID, Position: n + 1, WaitsFor: waits[id]}
 		}
 	}
 

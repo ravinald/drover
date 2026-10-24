@@ -291,16 +291,23 @@ type heldApart struct {
 }
 
 // dispatchable is the index of the first pending item that waits on no running
-// item and no earlier pending one, and -1 when every one of them waits. An item
-// waits on another it depends on or that cites a path it cites. The earlier
-// pending items count too, so an item held behind a running one is never
-// overtaken by a later item that overlaps it or depends on it.
+// item, no earlier pending one and no dep held for the operator, and -1 when
+// every one of them waits. An item waits on another it depends on or that
+// cites a path it cites. The earlier pending items count too, so an item held
+// behind a running one is never overtaken by a later item that overlaps it or
+// depends on it.
 //
-// A dep in neither list is left alone: it already finished, or it is not in
+// operator is each dep that parked earlier in this drive waiting on the
+// operator, with its park. An item depending on one stays pending at its place,
+// since the operator can merge the dep while the drive runs other work, and
+// later items that do not depend on it overtake it. Any other park is left out
+// of it: nothing will merge that dep in this drive.
+//
+// A dep in none of these is left alone: it already finished, or it is not in
 // this drive, and driveItem reads its state when the item starts, as it does at
 // --jobs 1. A dep pending behind the item is left alone for the same reason, so
 // an item named before its own dep skips as blocked whatever --jobs is.
-func dispatchable(pending []queued, running map[int]queued) (int, []heldApart) { //nolint:unparam // the holds name why each skipped item waits, kept for a caller that reports them
+func dispatchable(pending []queued, running map[int]queued, operator map[string]string) (int, []heldApart) { //nolint:unparam // the holds name why each skipped item waits, kept for a caller that reports them
 	slots := make([]int, 0, len(running))
 	for n := range running {
 		slots = append(slots, n)
@@ -308,6 +315,10 @@ func dispatchable(pending []queued, running map[int]queued) (int, []heldApart) {
 	slices.Sort(slots)
 	var held []heldApart
 	for i, q := range pending {
+		if dep := operatorDep(q, operator); dep != "" {
+			held = append(held, heldApart{q.it.ID.Bare(), dep, "parked " + operator[dep] + " for the operator"})
+			continue
+		}
 		ahead := make([]queued, 0, len(slots)+i)
 		for _, n := range slots {
 			ahead = append(ahead, running[n])
@@ -320,6 +331,16 @@ func dispatchable(pending []queued, running map[int]queued) (int, []heldApart) {
 		return i, held
 	}
 	return -1, held
+}
+
+// operatorDep is the first of q's deps held for the operator, empty for none.
+func operatorDep(q queued, operator map[string]string) string {
+	for _, dep := range q.it.Deps() {
+		if _, ok := operator[dep]; ok {
+			return dep
+		}
+	}
+	return ""
 }
 
 // waitsOn is the first item in ahead that q must not run beside: one q depends
@@ -349,7 +370,7 @@ func planWaves(items []queued, jobs int) (waves [][]string, held []heldApart) {
 		running := map[int]queued{}
 		var wave []string
 		for len(running) < jobs {
-			i, _ := dispatchable(pending, running)
+			i, _ := dispatchable(pending, running, nil)
 			if i < 0 {
 				break
 			}

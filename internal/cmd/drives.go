@@ -41,9 +41,29 @@ func (d *runningDrive) note(item DriveItem) {
 	if d == nil {
 		return
 	}
+	o := ledger.Outcome{ID: item.ID, Outcome: item.Outcome}
+	if item.Outcome == outcomeSkipped {
+		o.Reason = item.Reason
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.outcomes = append(d.outcomes, ledger.Outcome{ID: item.ID, Outcome: item.Outcome})
+	d.outcomes = append(d.outcomes, o)
+}
+
+// skipped is every item this drive skipped so far, as its lease publishes them.
+func (d *runningDrive) skipped() []lease.Skip {
+	if d == nil {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []lease.Skip
+	for _, o := range d.outcomes {
+		if o.Outcome == outcomeSkipped {
+			out = append(out, lease.Skip{ID: o.ID, Reason: o.Reason})
+		}
+	}
+	return out
 }
 
 // revise replaces the outcome noted for item's id with the one it has now,
@@ -178,11 +198,24 @@ func (s *session) ledgerNames(id string) bool {
 }
 
 // drivesRunning marks the drive the lease names as running, and as paused
-// when the lease reads paused.
+// when the lease reads paused. The running drive has no end row yet, so each
+// item its lease names skipped takes that outcome here rather than reading as
+// one nobody has heard back from.
 func drivesRunning(ds []ledger.Drive, l lease.Lease, busy bool) {
 	for i := range ds {
 		ds[i].Running = busy && l.Drive != "" && ds[i].ID == l.Drive
 		ds[i].Paused = ds[i].Running && l.Paused
+		if !ds[i].Running || ds[i].Exit != nil {
+			continue
+		}
+		for _, sk := range l.Skipped {
+			o := ledger.Outcome{ID: sk.ID, Outcome: outcomeSkipped, Reason: sk.Reason}
+			if n := slices.IndexFunc(ds[i].Items, func(it ledger.Outcome) bool { return it.ID == sk.ID && it.Outcome == "" }); n >= 0 {
+				ds[i].Items[n] = o
+			} else {
+				ds[i].Items = append(ds[i].Items, o)
+			}
+		}
 	}
 }
 
@@ -217,7 +250,8 @@ read says why and the rest still answer.`,
   drover drives --all               # every registered project's
   drover drives --json              # an array, one object per drive:
     [{"id":"D2","label":"night run","started":"2026-10-17T01:00:00-07:00",
-      "queued":["4","5"],"jobs":2,"items":[{"id":"4","outcome":""},{"id":"5","outcome":""}],
+      "queued":["4","5"],"jobs":2,"items":[{"id":"4","outcome":""},
+        {"id":"5","outcome":"skipped","reason":"blocked by 4, which parked protected_paths for the operator"}],
       "running":true,"paused":true},
      {"id":"D1","started":"2026-10-16T22:00:00-07:00","queued":["1","2"],
       "ended":"2026-10-16T23:10:00-07:00","exit":0,
@@ -227,7 +261,8 @@ read says why and the rest still answer.`,
 
   ended and exit are absent until the drive wrote its end row. items is each
   item's outcome from that row, and the ids queued at launch with an empty
-  outcome until then. running is true while this checkout's lease names the
+  outcome until then, save one the drive already skipped, which its lease
+  publishes as skipped with a reason. running is true while this checkout's lease names the
   drive, and paused while that lease reads paused (drive --pause).`,
 	Args: cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {

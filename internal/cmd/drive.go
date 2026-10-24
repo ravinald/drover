@@ -782,7 +782,7 @@ neither unless reconciliation already wrote a row naming it. drover drives
 lists them. --dry-run takes no id.
 
 --events, beside --json, also writes one event object per line as things
-happen: queued, dispatched, preflight, stage, check, parked, filed,
+happen: queued, dispatched, skipped, preflight, stage, check, parked, filed,
 needs_operator, needs_supervisor, merged, paused, resumed and exit. Each carries "event", which is how a reader tells it from an item's
 report, "ts", "drive", "id" where one item is meant, and "action" where a [supervise]
 catalog action produced it. A park whose action is at operator policy emits needs_operator,
@@ -1074,7 +1074,7 @@ func init() {
 	driveCmd.Flags().BoolVar(&driveDry, "dry-run", false, "resolve every step and launch nothing")
 	driveCmd.Flags().BoolVar(&driveJSON, "json", false, "one object per line on stdout, flushed as each item ends")
 	driveCmd.Flags().BoolVar(&driveEvents, "events", false,
-		"with --json, also write one event object per line as things happen: queued, dispatched, preflight, stage, check, parked, filed, needs_operator, needs_supervisor, merged, paused, resumed, exit")
+		"with --json, also write one event object per line as things happen: queued, dispatched, skipped, preflight, stage, check, parked, filed, needs_operator, needs_supervisor, merged, paused, resumed, exit")
 	driveCmd.Flags().BoolVar(&driveNoMerge, "no-merge", false,
 		"drive the queue and merge nothing, leaving each item green-and-reviewed on its branch; the exception, not the norm")
 	driveCmd.Flags().BoolVar(&driveFollow, "follow", false,
@@ -1341,7 +1341,7 @@ func (s *session) drive(ctx context.Context, ids []string, reviewer string, dead
 	for _, it := range items {
 		pending = append(pending, newQueued(it, named))
 	}
-	return s.driveQueued(ctx, pending, reviewer, deadline, 0, s.newFindingWatch())
+	return s.driveQueued(ctx, pending, reviewer, deadline, 0, s.newFindingWatch(), nil)
 }
 
 // finished is one item's account and the slot it ran in, sent back to the
@@ -1364,10 +1364,16 @@ type finished struct {
 // and is dispatched into the next free slot nothing earlier can take, rather
 // than after a wave the list was cut into at the start.
 //
+// An item whose dep parked for the operator earlier in the drive stays pending
+// while the drive has other work, and dispatches once the ledger records the
+// dep merged. With nothing left running it skips, since no merge the drive
+// could see would arrive before an idle drive exits.
+//
 // dispatched is how many items count against --max-items already: those a
 // drive dispatched before it re-executed itself, zero for any other. watch is
-// what that drive knew of the findings its sessions filed, new for any other.
-func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer string, deadline time.Time, dispatched int, watch *findingWatch) error {
+// what that drive knew of the findings its sessions filed, new for any other,
+// and operator the deps it held for the operator, nil for any other.
+func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer string, deadline time.Time, dispatched int, watch *findingWatch, operator map[string]string) error {
 	enc := json.NewEncoder(os.Stdout)
 	var done []DriveItem
 	seen := make(map[string]bool, len(pending))
@@ -1392,6 +1398,9 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 	var published []string
 	var admit admission
 	loadHeld := false
+	if operator == nil {
+		operator = map[string]string{}
+	}
 
 	holds := func(id string) bool {
 		for _, q := range running {
@@ -1402,6 +1411,45 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		return slices.ContainsFunc(pending, func(q queued) bool { return q.it.ID.Bare() == id })
 	}
 
+	// account reports one item the drive is done with, run or skipped.
+	account := func(d DriveItem) error {
+		// Each item ran on a session of its own, so what it recorded reaches this
+		// one only through the files.
+		if err := s.reload(); err != nil {
+			fmt.Fprintf(os.Stderr, "· the backlog and ledger would not reload after %s: %v\n", d.ID, err)
+		}
+		events.itemEvents(d)
+		watch.finished(s, &d, running, queuedIDs(pending, running))
+		done = append(done, d)
+		activeDrive.Load().note(d)
+		if heldForOperator(s.cfg, d) {
+			operator[d.ID] = d.Park
+			for _, q := range pending {
+				if operatorDep(q, operator) == d.ID {
+					fmt.Fprintf(os.Stderr, "· %s waits for %s, which parked %s for the operator; it dispatches once %s is recorded merged\n",
+						q.it.ID.Bare(), d.ID, d.Park, d.ID)
+				}
+			}
+		}
+		if driveFollow && d.Finished && stop == nil {
+			for _, next := range s.unblockedBy(d.ID, seen) {
+				fmt.Fprintf(os.Stderr, "· --follow: %s finished, so %s is ready; appended\n", d.ID, next.ID.Bare())
+				pending = append(pending, newQueued(next, false))
+			}
+		}
+		if driveJSON {
+			if err := enc.Encode(d); err != nil {
+				return err
+			}
+		}
+		if d.stop != nil && stop == nil {
+			fmt.Fprintf(os.Stderr, "· %v; stopping the drive\n", d.stop)
+			stop, stopped = d.stop, true
+			sched.drain(d.stop)
+		}
+		return nil
+	}
+
 	closed := false
 	for {
 		s.answerControl(sched)
@@ -1409,7 +1457,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			stopped = true
 		}
 		if !stopped && sched.reexecReady(len(running)) {
-			s.reexec(sched, pending, running, dispatched, deadline, watch)
+			s.reexec(sched, pending, running, dispatched, deadline, watch, operator)
 		}
 		reviewer = s.inputs.reviewer
 		paused := sched.isPaused()
@@ -1420,9 +1468,12 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		if !stopped {
 			pending = append(pending, s.takeAppended(false, seen, holds, len(pending))...)
 		}
+		if !stopped {
+			s.releaseMerged(pending, operator)
+		}
 		loadHeld = false
 		for !stopped && !paused && len(running) < driveJobs && len(pending) > 0 {
-			i, _ := dispatchable(pending, running)
+			i, _ := dispatchable(pending, running, operator)
 			// An item a re-exec carried over was started under the bounds
 			// already, and the process it ran in would have let it finish.
 			carried := i >= 0 && pending[i].hold != nil
@@ -1475,7 +1526,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			closed = true
 			closeQueue("the drive is stopping")
 		}
-		published = publishQueue(published, pending, running, stopped)
+		published = publishQueue(published, pending, running, operator, stopped)
 		if len(running) == 0 {
 			// Taken and closed in one step, so an id appended now is either
 			// run by this drive or refused as closed, and never left waiting.
@@ -1493,6 +1544,19 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 				}
 				sleepFor(ctx, wait)
 				continue
+			}
+			// Nothing runs and nothing pending could dispatch, so every one of
+			// them waits on a dep held for the operator, directly or behind an
+			// item that does. Those waiting directly skip; the rest then
+			// dispatch and read their own state.
+			if len(pending) > 0 {
+				skipped, err := s.skipHeld(&pending, operator, account)
+				if err != nil {
+					return err
+				}
+				if skipped {
+					continue
+				}
 			}
 			if more := s.takeAppended(true, seen, holds, 0); len(more) > 0 {
 				pending = append(pending, more...)
@@ -1517,30 +1581,8 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		if driveJobs > 1 {
 			d.Slot = r.slot
 		}
-		// Each item ran on a session of its own, so what it recorded reaches this
-		// one only through the files.
-		if err := s.reload(); err != nil {
-			fmt.Fprintf(os.Stderr, "· the backlog and ledger would not reload after %s: %v\n", d.ID, err)
-		}
-		events.itemEvents(d)
-		watch.finished(s, &d, running, queuedIDs(pending, running))
-		done = append(done, d)
-		activeDrive.Load().note(d)
-		if driveFollow && d.Finished && stop == nil {
-			for _, next := range s.unblockedBy(d.ID, seen) {
-				fmt.Fprintf(os.Stderr, "· --follow: %s finished, so %s is ready; appended\n", d.ID, next.ID.Bare())
-				pending = append(pending, newQueued(next, false))
-			}
-		}
-		if driveJSON {
-			if err := enc.Encode(d); err != nil {
-				return err
-			}
-		}
-		if d.stop != nil && stop == nil {
-			fmt.Fprintf(os.Stderr, "· %v; stopping the drive\n", d.stop)
-			stop, stopped = d.stop, true
-			sched.drain(d.stop)
+		if err := account(d); err != nil {
+			return err
 		}
 	}
 	// A drive stopping on a fault stops on a cause the re-check would walk
@@ -1559,6 +1601,51 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 	}
 	s.driveSummary(done, totals)
 	return stop
+}
+
+// releaseMerged drops from operator each dep the ledger now records merged, a
+// finish or mark-merged the operator ran while the drive runs, so its
+// dependents dispatch at the place they held. The ledger is reread only while
+// some pending item waits on one.
+func (s *session) releaseMerged(pending []queued, operator map[string]string) {
+	if !slices.ContainsFunc(pending, func(q queued) bool { return operatorDep(q, operator) != "" }) {
+		return
+	}
+	if err := s.reload(); err != nil {
+		fmt.Fprintf(os.Stderr, "· the ledger would not reload to read the deps held for the operator: %v\n", err)
+		return
+	}
+	for dep := range operator {
+		if s.ledger.State(dep).Merged {
+			delete(operator, dep)
+			fmt.Fprintf(os.Stderr, "· %s is recorded merged, so what waited for it dispatches\n", dep)
+		}
+	}
+}
+
+// skipHeld skips each pending item waiting directly on a dep held for the
+// operator, through account, and reports whether it skipped any.
+func (s *session) skipHeld(pending *[]queued, operator map[string]string, account func(DriveItem) error) (bool, error) {
+	var skipped bool
+	for i := 0; i < len(*pending); {
+		q := (*pending)[i]
+		dep := operatorDep(q, operator)
+		if dep == "" {
+			i++
+			continue
+		}
+		*pending = append((*pending)[:i:i], (*pending)[i+1:]...)
+		now := time.Now().Format(time.RFC3339)
+		why := fmt.Sprintf("blocked by %s, which parked %s for the operator", dep, operator[dep])
+		fmt.Fprintf(os.Stderr, "· %s: %s, and nothing else is left to run, so it is skipped\n", q.it.ID.Bare(), why)
+		d := DriveItem{ID: q.it.ID.Bare(), Title: q.it.Title(), Outcome: outcomeSkipped, Park: stateBlocked,
+			Reason: why, Started: now, Ended: now}
+		if err := account(d); err != nil {
+			return skipped, err
+		}
+		skipped = true
+	}
+	return skipped, nil
 }
 
 // queuedIDs is every id the drive holds waiting or running.
@@ -1589,25 +1676,38 @@ func (s *session) backlogIDs() map[string]bool {
 //
 // A lease that will not rewrite costs the view and never the drive: the
 // account a status reads goes stale, and the queue itself is in memory.
-func publishQueue(last []string, pending []queued, running map[int]queued, stopped bool) []string {
+func publishQueue(last []string, pending []queued, running map[int]queued, operator map[string]string, stopped bool) []string {
 	if held == nil {
 		return last
 	}
 	var queue, now []string
+	var waiting []lease.Wait
 	if !stopped {
 		for _, q := range pending {
 			queue = append(queue, q.it.ID.Bare())
+			if dep := operatorDep(q, operator); dep != "" {
+				waiting = append(waiting, lease.Wait{ID: q.it.ID.Bare(), On: dep})
+			}
 		}
 	}
 	slots := slices.Sorted(maps.Keys(running))
 	for _, n := range slots {
 		now = append(now, running[n].it.ID.Bare())
 	}
+	skipped := activeDrive.Load().skipped()
 	key := append(append(slices.Clone(queue), "|"), now...)
+	for _, w := range waiting {
+		key = append(key, "w:"+w.ID+"<"+w.On)
+	}
+	for _, sk := range skipped {
+		key = append(key, "s:"+sk.ID)
+	}
 	if slices.Equal(key, last) {
 		return last
 	}
-	_ = held.Update(func(l *lease.Lease) { l.Queue, l.Running, l.Jobs = queue, now, driveJobs })
+	_ = held.Update(func(l *lease.Lease) {
+		l.Queue, l.Running, l.Jobs, l.Waiting, l.Skipped = queue, now, driveJobs, waiting, skipped
+	})
 	appended()
 	return key
 }
@@ -2440,7 +2540,8 @@ func (s *session) drivePlan(items []backlog.Item, reviewer string, named bool) e
 			}
 		}
 		if waits {
-			fmt.Printf("%-6s %-9s runs once %s finishes earlier in this drive, and skips as blocked if not\n",
+			fmt.Printf("%-6s %-9s runs once %s finishes earlier in this drive. A dep parked for the operator holds it, while other items run, "+
+				"until the ledger records that dep merged; any other park, or that hold with nothing left to run, skips it as blocked\n",
 				"", "", strings.Join(missing, " "))
 		}
 	}

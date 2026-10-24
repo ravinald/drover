@@ -211,6 +211,7 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `finish`           | Ledger and event stage: the finish step after a merge.                                  |
 | `queued`           | Event: an item joined the queue.                                                        |
 | `dispatched`       | Event: an item left the queue for a session.                                            |
+| `skipped`          | Event: an item left the queue without being attempted, with the state and the reason.   |
 | `preflight`        | Event: a check drive runs before launching, such as `stale_citations`.                  |
 | `stage`            | Event: an item reached one of the stages in this table.                                 |
 | `check`            | Event: drive classified a red forge check on a pushed head.                             |
