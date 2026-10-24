@@ -646,7 +646,6 @@ Run either twice and the second writes nothing. The counts are tokens as the API
 reported them, not the subscription's quota, and cost_usd is list price.`,
 	Example: `  drover usage --backfill --dry-run   # what a backfill would write
   drover usage --backfill             # one row per log not yet recorded
-  drover usage --sync                 # interactive sessions, per day
   drover usage --sync                 # backfill, then interactive sessions per day`,
 	Args: cobra.NoArgs,
 	RunE: func(c *cobra.Command, _ []string) error {
