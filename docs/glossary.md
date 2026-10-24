@@ -55,6 +55,7 @@ Each command, as typed after `drover`.
 | `unaudited`             | Lists merged items nobody audited, worst blast radius first.                                                 |
 | `unmark-merged`         | Appends a tombstone withdrawing a completion.                                                                |
 | `unshelve`              | Brings a shelved body back into the backlog.                                                                 |
+| `usage`                 | Records session token usage in the ledger, from run logs (`--backfill`) or transcripts (`--sync`).           |
 | `version`               | Prints the version, commit and build date.                                                                   |
 | `watch`                 | Blocks until a drive emits one of the named events, then prints it.                                          |
 

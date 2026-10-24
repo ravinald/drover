@@ -197,6 +197,8 @@ var classified = map[string]classification{
 		effect: "Reads {ledger}, the dependency graph and the tracker."},
 	"follow-ups": {group: groupAudit, class: readOnly, who: either,
 		effect: "Reads the follow-up list: the tracker through gh, or {register}." + linkRead},
+	"usage": {group: groupAudit, class: localWrite, who: either,
+		effect: "With no flag prints its help and writes nothing. --backfill reads every run log in the log directory and appends one usage row to {ledger} per log whose result carries usage and whose session no usage row names. --sync reads Claude Code's transcripts for the project root and for every worktree drive made for it, appends one interactive usage row to {ledger} per session per finished local day, and rewrites " + usageSyncName + " beside {ledger}, the offset it read each transcript to and the days it holds until they end. --dry-run reads the same and writes neither."},
 	"follow-up": {group: groupAudit, class: localWrite, who: either,
 		effect: "Appends one row to {register}. Refuses under any [register] backend but file, where the tracker or nothing at all owns the write."},
 
@@ -209,7 +211,7 @@ var classified = map[string]classification{
 // command's default. They live beside the classification so that --help and the
 // safety table `drover agents` generates cannot disagree about what writes.
 var escalations = map[safety][]string{
-	readOnly:   {"run --dry-run", "intake --list"},
+	readOnly:   {"run --dry-run", "intake --list", "usage --dry-run"},
 	outward:    {"drive --detach", "drive --stop"},
 	localWrite: {"report --save", "agents --write", "config --stamp", "skills --from", "skills --prune", "status -o", "status --render"},
 }

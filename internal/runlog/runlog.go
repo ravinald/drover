@@ -7,6 +7,7 @@ package runlog
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -35,7 +36,28 @@ func DraftBase(stem, slug string) string { return Base(stem, slug) + "-draft" }
 // runs of one item started in the same second would otherwise collide, and the
 // second would append to the first's stream.
 func Name(base string, at time.Time) string {
-	return fmt.Sprintf("%s.%s.jsonl", base, at.Format("20060102-150405.000000000"))
+	return fmt.Sprintf("%s.%s.jsonl", base, at.Format(stampLayout))
+}
+
+const stampLayout = "20060102-150405.000000000"
+
+// ParseName is Name's inverse: the base and the instant a log filename
+// carries, the instant read in loc, since Name formats the writer's local
+// clock and records no zone. False for a name Name could not have produced.
+func ParseName(name string, loc *time.Location) (base string, at time.Time, ok bool) {
+	rest, found := strings.CutSuffix(name, ".jsonl")
+	if !found || len(rest) < len(stampLayout)+2 {
+		return "", time.Time{}, false
+	}
+	cut := len(rest) - len(stampLayout)
+	if rest[cut-1] != '.' {
+		return "", time.Time{}, false
+	}
+	at, err := time.ParseInLocation(stampLayout, rest[cut:], loc)
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	return rest[:cut-1], at, true
 }
 
 // Result is the terminal event of a run, normalized across every schema drover
@@ -70,7 +92,57 @@ type Result struct {
 	// every command took one turn, returned an empty response and exited
 	// SUCCESS.
 	Denied []string
+	// Usage is the session's token counts as the terminal event reported them,
+	// nil when it carried no usage object. A zero Usage is not a nil one: a
+	// result refused for an exhausted account reports zeros, and that session
+	// still happened.
+	Usage *Usage
+	// Model is the first model the terminal event's modelUsage names, and
+	// SessionID the runner's own id for the session, which is what a usage row
+	// is deduplicated by.
+	Model      string
+	SessionID  string
+	DurationMS int64
+	// ContextMax is the largest context any one assistant message carried:
+	// input, cache read and cache creation together. A session's total says
+	// what it spent and this says how full its window got, which is what a
+	// session left running for days gives away.
+	ContextMax int64
 }
+
+// Usage is one session's token counts, under the names a ledger usage row
+// carries them by.
+type Usage struct {
+	Input       int64 `json:"input"`
+	Output      int64 `json:"output"`
+	CacheCreate int64 `json:"cache_create"`
+	CacheRead   int64 `json:"cache_read"`
+}
+
+// Add sums o into u.
+func (u *Usage) Add(o Usage) {
+	u.Input += o.Input
+	u.Output += o.Output
+	u.CacheCreate += o.CacheCreate
+	u.CacheRead += o.CacheRead
+}
+
+// APIUsage is a usage object as the Anthropic API names its fields, the form
+// both a stream-json event and a Claude Code transcript carry.
+type APIUsage struct {
+	Input       int64 `json:"input_tokens"`
+	Output      int64 `json:"output_tokens"`
+	CacheCreate int64 `json:"cache_creation_input_tokens"`
+	CacheRead   int64 `json:"cache_read_input_tokens"`
+}
+
+// Usage renames the counts.
+func (a APIUsage) Usage() Usage {
+	return Usage(a)
+}
+
+// Context is how much of the window one message filled.
+func (a APIUsage) Context() int64 { return a.Input + a.CacheRead + a.CacheCreate }
 
 // Denials is the clause naming what the runner refused this session, and empty
 // when the terminal event named none. Rendered here rather than at the two call
@@ -174,6 +246,7 @@ func Schemas() []Schema {
 			Kinds:    []string{"system", "assistant", "user", "tool_progress", "rate_limit_event", "result"},
 			Terminal: []string{"result"},
 			Read:     readClaude,
+			Carry:    carryClaude,
 		},
 		{
 			Name: "agy", Key: "event",
@@ -221,6 +294,10 @@ func readClaude(line []byte) (Result, bool) {
 		Denials  []struct {
 			Tool string `json:"tool_name"`
 		} `json:"permission_denials"`
+		Usage      *APIUsage       `json:"usage"`
+		ModelUsage json.RawMessage `json:"modelUsage"`
+		SessionID  string          `json:"session_id"`
+		DurationMS int64           `json:"duration_ms"`
 	}
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return Result{}, false
@@ -229,11 +306,52 @@ func readClaude(line []byte) (Result, bool) {
 	for _, d := range ev.Denials {
 		names = append(names, d.Tool)
 	}
-	return Result{
+	r := Result{
 		Subtype: ev.Subtype, IsError: ev.IsError, NumTurns: ev.NumTurns,
 		Cost: ev.Cost, Text: ev.Text, Transport: ev.Terminal == "api_error",
-		Denied: distinct(names),
-	}, true
+		Denied: distinct(names), Model: firstKey(ev.ModelUsage),
+		SessionID: ev.SessionID, DurationMS: ev.DurationMS,
+	}
+	if ev.Usage != nil {
+		u := ev.Usage.Usage()
+		r.Usage = &u
+	}
+	return r, true
+}
+
+// carryClaude keeps the fullest context any assistant message reported. Each
+// content block of one message arrives as its own event carrying the same
+// usage, so the repeats cannot raise the maximum.
+func carryClaude(line []byte, r *Result) {
+	var ev struct {
+		Type    string `json:"type"`
+		Message struct {
+			Usage *APIUsage `json:"usage"`
+		} `json:"message"`
+	}
+	if json.Unmarshal(line, &ev) != nil || ev.Type != "assistant" || ev.Message.Usage == nil {
+		return
+	}
+	r.ContextMax = max(r.ContextMax, ev.Message.Usage.Context())
+}
+
+// firstKey is the first key of a JSON object as written, "" for anything else.
+// Decoded token by token because a Go map forgets the order, and the first
+// model modelUsage names is the one the session was launched on.
+func firstKey(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return ""
+	}
+	tok, err := dec.Token()
+	if err != nil {
+		return ""
+	}
+	key, _ := tok.(string)
+	return key
 }
 
 // readAgy reads agy's terminal event, which nests its payload under "result"
@@ -443,6 +561,9 @@ func ReadResult(path string) (Read, error) {
 	}
 	if err := sc.Err(); err != nil {
 		return Read{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	if rd.Found {
+		rd.Result.ContextMax = carried.ContextMax
 	}
 	// Classified again once the carried text lands: codex states a failure's
 	// reason on the terminal event and its report on an item event, so a

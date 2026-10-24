@@ -128,10 +128,20 @@ func openFrom(cfg *config.Config) (*session, error) {
 // reads the record back after writing it — `run` capturing a report, `finish`
 // resolving who to attribute the work to — sees what it just wrote rather than
 // the file as it stood when the process started.
+//
+// A usage row takes no waiting verify time, which belongs to the item's next
+// row of work, and lands in the loaded ledger's Usage where Load would put it.
 func (s *session) record(row ledger.Row) error {
-	row = ledger.Stamp(driveStamp(s.verifyStamp(row)))
+	if row.Usage == nil {
+		row = s.verifyStamp(row)
+	}
+	row = ledger.Stamp(driveStamp(row))
 	if err := ledger.Append(s.cfg.Abs(s.cfg.Paths.Ledger), row); err != nil {
 		return err
+	}
+	if row.Usage != nil {
+		s.ledger.Usage = append(s.ledger.Usage, row)
+		return nil
 	}
 	s.ledger.Rows = append(s.ledger.Rows, row)
 	appended()

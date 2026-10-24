@@ -54,12 +54,22 @@ func stateDir(name string) (string, error) {
 
 // treePath is where an item's worktree lives, whether or not it exists yet.
 func (s *session) treePath(it backlog.Item) (string, error) {
+	dir, err := s.projectTrees()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, strings.ToLower(it.ID.Stem())), nil
+}
+
+// projectTrees is the directory holding every worktree drive makes for this
+// project root.
+func (s *session) projectTrees() (string, error) {
 	dir, err := treesDir()
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256([]byte(s.cfg.Root))
-	return filepath.Join(dir, hex.EncodeToString(sum[:])[:16], strings.ToLower(it.ID.Stem())), nil
+	return filepath.Join(dir, hex.EncodeToString(sum[:])[:16]), nil
 }
 
 // openItemTree checks the item's branch out into its own worktree: the one a

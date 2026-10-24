@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ravinald/drover/internal/runlog"
 )
 
 // Row is one record. Every shape shares a struct so that field order — which
@@ -202,6 +204,30 @@ type Row struct {
 	Outcomes []Outcome `json:"outcomes,omitempty"`
 	Version  string    `json:"version,omitempty"`
 	Replaced string    `json:"replaced,omitempty"`
+	// Usage and the fields after it are the sixteenth shape: one row per
+	// session whose tokens drover read, a headless session's from its log and
+	// an interactive one's from Claude Code's transcript, one row per local day
+	// it ran. A set usage is what makes it this shape, and a usage row may name
+	// no item, which no other shape may. Load keeps these rows in
+	// Ledger.Usage rather than Rows, so a reader that folds stages, passes or
+	// launches cannot count a session twice.
+	//
+	// The counts are tokens as the API reported them, not the subscription's
+	// quota, and CostUSD is the runner's list-price figure. No weighted number
+	// is stored: the weights are a guess about the quota and will change, and a
+	// stored guess outlives the change.
+	Usage      *runlog.Usage `json:"usage,omitempty"`
+	Model      string        `json:"model,omitempty"`
+	SessionID  string        `json:"session_id,omitempty"`
+	CostUSD    float64       `json:"cost_usd,omitempty"`
+	DurationMS int64         `json:"duration_ms,omitempty"`
+	Turns      int           `json:"turns,omitempty"`
+	Source     string        `json:"source,omitempty"`
+	ContextMax int64         `json:"context_max,omitempty"`
+	// FirstTS is the first message of an interactive row's day, beside TS for
+	// the last, and Started the session's first message on any day.
+	FirstTS string `json:"first_ts,omitempty"`
+	Started string `json:"started,omitempty"`
 	// VerifyMS is the wall time in milliseconds of the verify command drive ran
 	// for this item, carried on the next row drive appended for the item
 	// through its own session after the verify command exited, whatever that
@@ -500,6 +526,13 @@ func (l *Ledger) Resolution(id string, issue int) (Resolution, bool) {
 const (
 	StageImplement = "implement" // `run` handed the prompt to a runner
 	StageReview    = "review"    // `review` handed the brief to a runner
+	StageDraft     = "draft"     // `draft` handed the drafting prompt to a runner
+)
+
+// Where a usage row's counts were read from.
+const (
+	SourceHeadless    = "headless"    // the stream-json log of a session drover launched
+	SourceInteractive = "interactive" // a Claude Code transcript
 )
 
 // Level levels, weakest first. Each subsumes the one before.
@@ -547,9 +580,33 @@ type Malformed struct {
 
 // Ledger is a parsed file.
 type Ledger struct {
-	Path      string
-	Rows      []Row
+	Path string
+	Rows []Row
+	// Usage is every usage row, in file order, and the only place they are.
+	Usage     []Row
 	Malformed []Malformed
+}
+
+// HasSession reports whether a usage row from source names the runner's
+// session id. An empty source matches either.
+func (l *Ledger) HasSession(source, sessionID string) bool {
+	for _, r := range l.Usage {
+		if r.SessionID == sessionID && (source == "" || r.Source == source) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSessionDay reports whether an interactive usage row already covers one
+// session on one local date.
+func (l *Ledger) HasSessionDay(sessionID, date string) bool {
+	for _, r := range l.Usage {
+		if r.Source == SourceInteractive && r.SessionID == sessionID && r.Date == date {
+			return true
+		}
+	}
+	return false
 }
 
 // State is what the rows resolve to for one id.
@@ -605,6 +662,10 @@ func Load(path string) (*Ledger, error) {
 		var r Row
 		if err := json.Unmarshal([]byte(text), &r); err != nil {
 			l.Malformed = append(l.Malformed, Malformed{Line: n, Text: text, Err: err})
+			continue
+		}
+		if r.Usage != nil {
+			l.Usage = append(l.Usage, r)
 			continue
 		}
 		if r.ID == "" {
@@ -988,7 +1049,7 @@ func Append(path string, r Row) error {
 // processes recording one fact can both read the file without it, then both
 // append. Under the lock the second one reads the first one's row.
 func AppendUnless(path string, r Row, skip func(*Ledger) bool) (bool, error) {
-	if r.ID == "" {
+	if r.ID == "" && r.Usage == nil {
 		return false, fmt.Errorf("row has no id")
 	}
 	return appendLocked(path, r, skip)

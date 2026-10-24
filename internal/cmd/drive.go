@@ -278,6 +278,7 @@ func (s *session) launch(ctx context.Context, it backlog.Item, stage, name, logB
 		return runner.Outcome{Exit: -1}, err
 	}
 	oc, err := runner.Run(ctx, at, spec, runner.Headless, body, logPath, os.Stderr)
+	s.recordUsage(it.ID.Bare(), stage, at.Session, oc)
 	if stage == ledger.StageImplement {
 		s.mirrorNow(it)
 	}
@@ -996,6 +997,7 @@ see what it reads.`,
 			events = newEventSink(s.cfg, driveEvents)
 			defer func() {
 				s.endDrive(err)
+				s.driveSync("after the drive")
 				events.exit(err)
 				events = nil
 				activeDrive.Store(nil)
@@ -1006,6 +1008,7 @@ see what it reads.`,
 			if err := s.allocDrive(); err != nil {
 				return err
 			}
+			s.driveSync("before the queue")
 			if p, _ := s.cfg.Policy("deps_lint"); p != polOff && !driveCatchUp {
 				events.preflight("", "deps_lint", reasonClean)
 			}
