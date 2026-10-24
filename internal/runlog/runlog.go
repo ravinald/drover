@@ -127,6 +127,19 @@ func (u *Usage) Add(o Usage) {
 	u.CacheRead += o.CacheRead
 }
 
+// CacheReadWeight is what one cache-read token counts for in Weighted, against
+// 1 for every other kind.
+const CacheReadWeight = 0.1
+
+// Weighted is u as one number, input + output + cache_create + CacheReadWeight
+// * cache_read, for ranking which session, item or project consumed the most.
+// It is not the subscription's accounting, which the service does not publish,
+// so it is computed where it is read and never stored: a weight that turns out
+// wrong is then one constant to change rather than a ledger to rewrite.
+func Weighted(u Usage) float64 {
+	return float64(u.Input+u.Output+u.CacheCreate) + CacheReadWeight*float64(u.CacheRead)
+}
+
 // APIUsage is a usage object as the Anthropic API names its fields, the form
 // both a stream-json event and a Claude Code transcript carry.
 type APIUsage struct {

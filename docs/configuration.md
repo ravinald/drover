@@ -723,6 +723,23 @@ A head with no check run at all after `checks_wait` is not red. `drive` reports 
 
 Each classification is a ledger row (`{"id","head","check","class","evidence","rerun","date"}`, with `rerun` on a check drive reran) and a `check` event under [`drive --events`](automation.md#drive---events). Whatever drive cannot read (the check runs, a job, its log, the trunk's run) leaves the merge gate to answer, as it did before any of this existed.
 
+## `[usage]`
+
+| Key                 | Default  | Meaning                                                                                                              |
+| ------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `weekly_budget`     | unset    | Your estimate of the weekly limit in weighted tokens, a positive integer. Needs `reset`.                             |
+| `reset`             | unset    | When the weekly limit starts over: a weekday, a 24-hour time and an IANA zone, as `"Sat 20:00 America/Los_Angeles"`. |
+| `session_max_hours` | `24`     | How many hours a session's usage rows may span before `status` lists it under `long_sessions`.                       |
+| `context_warn`      | `400000` | The largest context, in tokens, a session may reach before `status` lists it under `long_sessions`.                  |
+
+`status --json` and the built-in templates read the ledger's usage rows into a report-level [`usage`](automation.md#usage) object, which covers the last 7 days unless `reset` is set. With `reset`, the window runs from the most recent reset to now, so the total measures the same week the limit does. The weekday takes its three-letter or full English name in any case, and the time is computed on the zone's own calendar, so a 20:00 reset stays at 20:00 across a daylight-saving change.
+
+With `weekly_budget` as well, the report gains `budget` and `budget_used`, and both built-in templates show the fraction in their footer, in the warning color from 0.8 and the critical color from 1.0. The budget is your estimate of the limit in drover's weighting (`input + output + cache_create + 0.1 * cache_read`), not a figure the service publishes: the counts are tokens as the API reported them, not the subscription's quota accounting, so calibrate it against a week whose limit you hit. A good first value is the weighted total `status --json` shows for the week the limit last refused a run. `weekly_budget` without `reset` is refused at load, because a budget measured over a rolling window would never line up with the week the limit counts.
+
+The limit is per account, so `budget_used` sums every project in the [project registry](#the-project-registry), not only the one `status` runs in, counting each ledger once. A registered project whose config or ledger would not read is named in `budget_unread` and left out of the fraction, rather than counted as zero; a registered root that is gone is not a project and is skipped, as `status --all-projects` skips it. Set the table in the per-user file, where one budget serves every project, unless a project wants its own thresholds.
+
+`session_max_hours` and `context_warn` decide which sessions `status` names under [`long_sessions`](automation.md#usage), and both templates list them under "Needs you" with the reason each one qualified. A session open for days at a context near a million tokens is the opposite of the short, well-defined unit of work drover hands a run.
+
 ## `[register]`
 
 | Key       | Default  | Meaning                                                     |

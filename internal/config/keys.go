@@ -56,12 +56,14 @@ func Keys() []Key {
 // and resolves to the tracker (see Config.RegisterBackend), because unset had
 // to stay distinguishable from a project that named a backend.
 var resolved = map[string]string{
-	"register.backend":  strconv.Quote(BackendGitHub),
-	"backlog.mirror":    strconv.Quote(MirrorNone),
-	"ids.allocator":     strconv.Quote(AllocatorLocal),
-	"ids.remote":        strconv.Quote("origin"),
-	"forge.reruns":      strconv.Itoa(DefaultReruns),
-	"forge.checks_wait": strconv.Quote("10m"),
+	"register.backend":        strconv.Quote(BackendGitHub),
+	"backlog.mirror":          strconv.Quote(MirrorNone),
+	"ids.allocator":           strconv.Quote(AllocatorLocal),
+	"ids.remote":              strconv.Quote("origin"),
+	"forge.reruns":            strconv.Itoa(DefaultReruns),
+	"forge.checks_wait":       strconv.Quote("10m"),
+	"usage.session_max_hours": strconv.Itoa(DefaultSessionMaxHours),
+	"usage.context_warn":      strconv.Itoa(DefaultContextWarn),
 }
 
 // walkKeys collects one Key per toml-tagged field, descending into nested

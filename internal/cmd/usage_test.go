@@ -149,8 +149,8 @@ func TestUsageRowsChangeNoReader(t *testing.T) {
 	if Code(errBefore) != Code(errAfter) || checkBefore != checkAfter {
 		t.Errorf("check changed with usage rows in the ledger:\nbefore (%v) %s\nafter (%v) %s", errBefore, checkBefore, errAfter, checkAfter)
 	}
-	if statusBefore != statusAfter {
-		t.Errorf("status changed with usage rows in the ledger:\nbefore %s\nafter %s", statusBefore, statusAfter)
+	if a, b := withoutUsage(t, statusBefore), withoutUsage(t, statusAfter); a != b {
+		t.Errorf("status changed with usage rows in the ledger beyond its usage keys:\nbefore %s\nafter %s", a, b)
 	}
 	l, err := ledger.Load(path)
 	if err != nil {
@@ -162,6 +162,28 @@ func TestUsageRowsChangeNoReader(t *testing.T) {
 	if token, _, stale, _ := l.Pass("1"); token != "passed" || stale {
 		t.Errorf("pass %q stale %v: a usage row must not stale a pass", token, stale)
 	}
+}
+
+// withoutUsage is status --json with the keys that read usage rows removed:
+// the report's usage and long_sessions and each item's usage, which are the
+// only places a usage row may show.
+func withoutUsage(t *testing.T, status string) string {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(status), &doc); err != nil {
+		t.Fatalf("status --json: %v\n%s", err, status)
+	}
+	delete(doc, "usage")
+	delete(doc, "long_sessions")
+	items, _ := doc["items"].([]any)
+	for _, it := range items {
+		delete(it.(map[string]any), "usage")
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
 }
 
 func TestUsageWithNoFlagPrintsHelp(t *testing.T) {

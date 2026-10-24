@@ -447,6 +447,35 @@
         }
       }
     },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How status reads the usage rows: the window the report-level totals cover, the budget they are measured against, and when a session has run long enough to name. The budget sums every project in the per-user registry, because the limit is per account.",
+      "properties": {
+        "weekly_budget": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The operator's estimate of the weekly limit in weighted tokens (input + output + cache_create + 0.1 * cache_read). The service publishes no such figure. Unset means no budget."
+        },
+        "reset": {
+          "type": "string",
+          "pattern": "^\\S+ [0-9]{1,2}:[0-9]{2} \\S+$",
+          "description": "When the weekly limit starts over: a weekday, a 24-hour time and an IANA zone, as \"Sat 20:00 America/Los_Angeles\". Unset means the window is the last 7 days."
+        },
+        "session_max_hours": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 24,
+          "description": "How many hours a session's usage rows may span, started to the latest ts, before status lists it under long_sessions."
+        },
+        "context_warn": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 400000,
+          "description": "The largest context, in tokens, a session may reach before status lists it under long_sessions."
+        }
+      }
+    },
     "register": {
       "type": "object",
       "additionalProperties": false,

@@ -43,6 +43,8 @@ footer { margin-top: 2rem; color: var(--muted); font-size: 0.85em; }
 .drover-paused { color: var(--muted); }
 .drover-blocked, .drover-scaffold, .drover-unaudited { color: var(--orange); }
 .drover-parked, .drover-broken, .drover-needs-operator { color: var(--red); }
+.drover-warning { color: var(--orange); }
+.drover-critical { color: var(--red); }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 0.3rem 0.5rem 0.3rem 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
 th { font-weight: 600; }
@@ -95,8 +97,19 @@ th { font-weight: 600; }
 {{- end}}
 </tbody>
 </table></div>
-{{- else}}
+{{- else}}{{if not .long_sessions}}
 <p class="empty">Nothing is waiting on you.</p>
+{{- end}}{{end}}
+{{- with .long_sessions}}
+<h3>Long sessions</h3>
+<div class="scroll"><table class="items">
+<thead><tr><th>Session</th><th>Item</th><th>Source</th><th>Tokens</th><th>Reason</th></tr></thead>
+<tbody>
+{{- range .}}
+<tr><td><code>{{.session_id}}</code></td><td>{{with .id}}<a class="id" href="#item-{{anchor .}}">{{.}}</a>{{else}}-{{end}}</td><td>{{.source}}</td><td class="num">{{tokens .weighted}}</td><td class="reason">{{.reason}}</td></tr>
+{{- end}}
+</tbody>
+</table></div>
 {{- end}}
 
 <h2>Running drive</h2>
@@ -126,13 +139,13 @@ th { font-weight: 600; }
 {{- range .states}}{{$st := .}}
 <h4><span class="state drover-{{.class}}">{{.state}}</span></h4>
 <div class="scroll"><table class="items">
-<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
 {{- range .items}}
 <tr id="item-{{anchor .id}}"><td><span class="state drover-{{$st.class}}">{{$st.state}}</span> {{$u := issue .issue}}{{if $u}}<a class="id" href="{{$u}}">{{.id}}</a>{{else}}<span class="id">{{.id}}</span>{{end}}</td><td class="title">{{or .title "-"}}</td><td>{{or .severity "-"}}</td>
 {{- if or .park .detail}}<td class="reason">{{.park}}{{if and .park .detail}}: {{end}}{{.detail}}</td>
 {{- else if .error}}<td class="reason">{{.error}}</td>
-{{- else}}<td>{{or .stage "-"}}</td>{{end}}<td>{{range $i, $d := .deps}}{{if $i}}, {{end}}<a href="#item-{{anchor $d}}">{{$d}}</a>{{else}}-{{end}}</td><td>{{range $i, $b := .blocks}}{{if $i}}, {{end}}<a href="#item-{{anchor $b}}">{{$b}}</a>{{else}}-{{end}}</td><td class="num">{{with .pr}}{{$u := or .url (pr .number)}}{{with .number}}{{if $u}}<a href="{{$u}}">#{{.}}</a>{{else}}#{{.}}{{end}}{{else}}-{{end}}{{else}}-{{end}}</td><td class="num">{{with .eta}}{{time "15:04 MST" .}} ({{ago .}}){{else}}-{{end}}</td></tr>
+{{- else}}<td>{{or .stage "-"}}</td>{{end}}<td>{{range $i, $d := .deps}}{{if $i}}, {{end}}<a href="#item-{{anchor $d}}">{{$d}}</a>{{else}}-{{end}}</td><td>{{range $i, $b := .blocks}}{{if $i}}, {{end}}<a href="#item-{{anchor $b}}">{{$b}}</a>{{else}}-{{end}}</td><td class="num">{{with .pr}}{{$u := or .url (pr .number)}}{{with .number}}{{if $u}}<a href="{{$u}}">#{{.}}</a>{{else}}#{{.}}{{end}}{{else}}-{{end}}{{else}}-{{end}}</td><td class="num">{{with .eta}}{{time "15:04 MST" .}} ({{ago .}}){{else}}-{{end}}</td>{{template "spent" .}}</tr>
 {{- end}}
 </tbody>
 </table></div>
@@ -144,10 +157,10 @@ th { font-weight: 600; }
 <h2>Done</h2>
 {{- with done .items}}
 <div class="scroll"><table class="items">
-<thead><tr><th>Item</th><th>Title</th><th>Level</th><th>PR</th><th>Merged</th></tr></thead>
+<thead><tr><th>Item</th><th>Title</th><th>Level</th><th>PR</th><th>Merged</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
 {{- range .}}
-<tr id="item-{{anchor .id}}"><td>{{$u := issue .issue}}{{if $u}}<a class="id" href="{{$u}}">{{.id}}</a>{{else}}<span class="id">{{.id}}</span>{{end}}</td><td class="title">{{or .title "-"}}</td><td><span class="state drover-{{class (or .level "unaudited")}}">{{or .level "unaudited"}}</span></td><td class="num">{{with .pr}}{{$u := or .url (pr .number)}}{{with .number}}{{if $u}}<a href="{{$u}}">#{{.}}</a>{{else}}#{{.}}{{end}}{{else}}-{{end}}{{else}}-{{end}}</td><td class="num">{{with .finished}}{{time "2006-01-02" .}}{{else}}-{{end}}</td></tr>
+<tr id="item-{{anchor .id}}"><td>{{$u := issue .issue}}{{if $u}}<a class="id" href="{{$u}}">{{.id}}</a>{{else}}<span class="id">{{.id}}</span>{{end}}</td><td class="title">{{or .title "-"}}</td><td><span class="state drover-{{class (or .level "unaudited")}}">{{or .level "unaudited"}}</span></td><td class="num">{{with .pr}}{{$u := or .url (pr .number)}}{{with .number}}{{if $u}}<a href="{{$u}}">#{{.}}</a>{{else}}#{{.}}{{end}}{{else}}-{{end}}{{else}}-{{end}}</td><td class="num">{{with .finished}}{{time "2006-01-02" .}}{{else}}-{{end}}</td>{{template "spent" .}}</tr>
 {{- end}}
 </tbody>
 </table></div>
@@ -192,7 +205,12 @@ th { font-weight: 600; }
 <tr><td><span class="state">follow-up</span></td><td>An open follow-up nothing is scheduled to carry.</td></tr>
 </table>
 
-<footer>Rendered {{time "2006-01-02 15:04 MST" .now}} ({{.zone}}) · {{.project}} · drover {{.version}}</footer>
+<footer>
+{{- with .usage}}
+<p>Usage {{if eq .window "7d"}}over the last 7 days{{else}}since {{time "Mon 2006-01-02 15:04 MST" .window}}{{end}}: {{tokens .weighted}} weighted tokens, {{usd .cost_usd}} at list price{{with .budget_used}} · {{$c := budget .}}<span class="state{{with $c}} drover-{{.}}{{end}}">budget {{pct .}}</span> of {{tokens $.usage.budget}} across every project{{end}}{{with .budget_unread}} · not read: {{range $i, $p := .}}{{if $i}}; {{end}}{{$p}}{{end}}{{end}}</p>
+{{- end}}
+Rendered {{time "2006-01-02 15:04 MST" .now}} ({{.zone}}) · {{.project}} · drover {{.version}}</footer>
 {{- end}}
 </body>
 </html>
+{{- define "spent"}}<td class="num">{{with .usage}}{{tokens .weighted}}{{else}}-{{end}}</td><td class="num">{{with .usage}}{{usd .cost_usd}}{{else}}-{{end}}</td>{{end}}

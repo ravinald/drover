@@ -461,6 +461,89 @@ A metric with nothing to read in a period is `null`, never `0`. For `finished` a
 
 A row without `ts` is left out of every trend, since its time is a day in the writer's zone and placing it on a day of another zone would guess. Drive's own rows (`"id":"drive"`) are left out too. A tombstone (`"merged":false`) withdraws the finish before it. `review_passes` counts review launches drover resolved a runner for, so a project that pipes `drover review` reads `null` there rather than a count of zero. `verify` covers the runs drive makes itself, on an updated tree and after a resume that changed `[verify]`; the verify command a session runs inside its own run writes no row drover can time.
 
+#### usage
+
+`usage` on an item and on the report, and `long_sessions` on the report, read the ledger's [usage rows](#writing-to-the-ledger-without-the-binary). The counts are tokens as the API reported them, not the subscription's quota accounting, and `cost_usd` is list price, not what a subscription charged. `weighted` is `input + output + cache_create + 0.1 * cache_read`, computed when status reads the rows and never stored: it ranks which item, stage or session consumed the most, and it is not how the service counts against a limit.
+
+```json
+{
+  "items": [
+    {
+      "id": "F193",
+      "usage": {
+        "runs": 7,
+        "tokens": {
+          "input": 2100,
+          "output": 310000,
+          "cache_create": 2400000,
+          "cache_read": 98000000
+        },
+        "weighted": 12512100,
+        "cost_usd": 61.4
+      }
+    }
+  ],
+  "usage": {
+    "window": "2026-10-17T20:00:00-07:00",
+    "runs": 9,
+    "tokens": {
+      "input": 3000,
+      "output": 540000,
+      "cache_create": 4100000,
+      "cache_read": 170000000
+    },
+    "weighted": 21643000,
+    "cost_usd": 104.2,
+    "by_stage": {
+      "implement": {
+        "runs": 5,
+        "tokens": {
+          "input": 2100,
+          "output": 310000,
+          "cache_create": 2400000,
+          "cache_read": 98000000
+        },
+        "weighted": 12512100,
+        "cost_usd": 61.4
+      },
+      "interactive": {
+        "runs": 4,
+        "tokens": {
+          "input": 900,
+          "output": 230000,
+          "cache_create": 1700000,
+          "cache_read": 72000000
+        },
+        "weighted": 9130900,
+        "cost_usd": 42.8
+      }
+    },
+    "budget": 600000000,
+    "budget_used": 0.62,
+    "budget_unread": [
+      "capy (/src/capy): open /src/capy/docs-internal/ledger.jsonl: permission denied"
+    ]
+  },
+  "long_sessions": [
+    {
+      "session_id": "5f1c0e2a",
+      "source": "interactive",
+      "id": "",
+      "hours": 424.3,
+      "context_max": 965000,
+      "weighted": 48210000,
+      "reason": "open 17d 16h, past 24h; context reached 965K, past 400K"
+    }
+  ]
+}
+```
+
+An item's `usage` sums every usage row whose `id` names it, all time: `runs` is how many rows, `tokens` the four counts added up, `weighted` the formula over those sums, rounded, and `cost_usd` the rows' list prices added up. An item no usage row names has no `usage` key, never a zero object, because nothing measured is a different answer from nothing spent.
+
+The report's `usage` holds the same four totals over every usage row of this project whose `ts` falls in the window, the rows naming no item included, which is where an interactive session lands. `window` is `"7d"`, the 7 days before the report's `now`, or with [`[usage] reset`](configuration.md#usage) set, the RFC 3339 time of the last reset, which the window runs from to `now`. `by_stage` holds the totals per stage (`implement`, `review`, `draft`), with a row no stage launched under `interactive`. `budget` and `budget_used` are present only when [`[usage] weekly_budget`](configuration.md#usage) is set: `budget` is that figure and `budget_used` a fraction, the weighted total of every usage row in the window across every project in the [per-user registry](#projects---json), over it. The limit is per account, so this project's own `weighted` is not the number measured against it. Each ledger is counted once, however many registered roots reach it. `budget_unread` names each registered project whose config or ledger would not read, which the fraction then leaves out rather than counting as zero; it is absent when every one read. A ledger with no usage row has no `usage` key.
+
+`long_sessions` is every session with a usage row in the window whose rows, taken together, span more than [`[usage] session_max_hours`](configuration.md#usage) (24 unless set) or reach a `context_max` past [`[usage] context_warn`](configuration.md#usage) (400000 unless set). The span runs from the earliest of the rows' `started`, `first_ts` and `ts` minus `duration_ms`, to the latest `ts`. `hours` is that span to one decimal, `context_max` the largest of the rows' and `weighted` the session's whole total, all of its rows, not only the window's; `id` is the item a row names, `""` for an interactive session. `reason` says which threshold it passed, in words a view prints as they are. The list is sorted by `weighted`, largest first. It is `[]` when the ledger holds usage rows and no session qualifies, and absent with no usage row at all.
+
 ### `status --template`
 
 `drover status --template <file>` renders the object `status --json` emits through a Go [`text/template`](https://pkg.go.dev/text/template) instead of the table. The template reads the same field names `--json` does, lowercase and underscored (`.items`, `.id`, `.stage_started`, `.pr.number`, `.deps`, `.blocks`, `.drive`, `.drives`, `.trends`), plus `now`, the time of the render, [`attention`](#attention), `zone` (the zone's name, such as `America/Los_Angeles`), `project`, `version` (the drover binary's) and `refresh` ([`[status] refresh`](configuration.md#status)) and `index` ([`[status] index`](configuration.md#status), an empty string when unset). Numbers are JSON numbers and every time is an RFC 3339 string in [`[status] timezone`](configuration.md#status), `now` included, or in the zone `--tz` names. A field the JSON omits is absent from the template's data too: test it with `with` or `or` rather than printing it, or the output says `<no value>`. `--all`, `--sev` and `--by-sev` scope the items as they do for `--json`, and `--template` is refused together with `--json`. `--template builtin:<name>` renders a template drover ships rather than a file: see [Built-in templates](#built-in-templates).
@@ -505,6 +588,9 @@ Each function takes the field as `--json` carries it and returns a string. An ab
 | `secs`   | `{{secs .trends.total.cycle_time.median}}` on 23400  | `6h 30m`                                                     |
 | `pct`    | `{{pct .trends.total.changes_rate.value}}` on 0.25    | `25%`                                                        |
 | `num`    | `{{num .trends.total.review_passes.value}}` on 1.333 | `1.333`                                                      |
+| `tokens` | `{{tokens .usage.weighted}}` on 12512100             | `12.5M`                                                      |
+| `usd`    | `{{usd .usage.cost_usd}}` on 1234.56                 | `$1,235`                                                     |
+| `budget` | `{{budget .usage.budget_used}}` on 0.85              | `warning`                                                    |
 
 `class` maps a state, a park reason or an audit level to one of nine names a stylesheet or a callout can key on: `ready`, `running`, `blocked`, `parked`, `scaffold`, `done`, `broken`, `needs-operator`, `unaudited`. `implemented` is `running`, since the work is in flight and not merged. The levels `claimed`, `reviewed` and `verified` are `done`, and `UNAUDITED` is `unaudited`. Any other value is a park reason: `needs-operator` when the [supervise](configuration.md#supervise) action that owns it is at `operator` policy (`trunk_red` by default), and `parked` otherwise. An absent value is `""`, so `{{class .park}}` on an item nothing parked adds no class. Pass `.stage` to nothing here: a stage is not one of these vocabularies, and `class` reads it as a park reason. An [`attention`](#attention) `kind` reads as its own class, with `needs_operator` as `needs-operator`; `follow-up` has none.
 
@@ -517,6 +603,8 @@ Each function takes the field as `--json` carries it and returns a string. An ab
 `groups` and `done` return lists rather than strings, for the two views a template cannot build with `range` and `if` alone. `groups` drops merged items and returns one entry per drive, in the order `drives` lists them, then one with an empty `drive` for the items no listed drive ran. Each entry carries `drive`, `label` and `states`, and each of `states` carries a `state`, its `class` and the `items` in it, in backlog order. `state` is the word to print and `class` the name to style it with, and the two differ: an `implemented` group has state `implemented` and class `running`. An item whose id is in the lease's `running` list has state `running`, whatever its backlog state or park, so the Open list agrees with the running drive. Pass `.lease` as the third argument; with no lease, every item keeps its backlog state. The states come in a fixed order, what waits on a person first: `needs-operator`, `parked`, `broken`, `running`, `implemented`, `ready`, `blocked`, `scaffold`. An item a park stands on takes the park's class as its state, `parked` or `needs-operator`, so it sits with the other parks rather than among the ready items. `done` is every merged item, newest `finished` first, and an item with no `finished` last.
 
 `spark` draws one [`trends`](#trends) metric across `.trends.days` as an inline `<svg>` of 120 by 24 with the class `spark`: the second argument names the metric and the third the value inside it (`value`, `median`, `p90` or `n`). A day the metric is `null` on is a gap in the line rather than a point at zero, and a value standing alone between gaps is a dot. The markup holds numbers and the two names alone, uses no script and fetches nothing, and `html/template` places it unescaped. `secs` prints seconds in their two largest units (`42s`, `14m 5s`, `6h 30m`, `3d 2h`), `pct` a share as a whole percentage, and `num` a number with no trailing zeros. All three give `""` for a `null`, so test a metric with `with` and print `n/a` in the `else`.
+
+`tokens` prints a count in its largest unit with one decimal at most, trailing `.0` dropped: `840`, `1.3K`, `840K`, `12.5M`, `1.2B`. A value that rounds to the next unit's 1000 is written in that unit, so 999,950 is `1M`, and nothing goes past `B`. `usd` prints a figure as whole dollars, rounded, with thousands separators: `$0`, `$999`, `$1,235`. Both read counts and list prices, so the caveat on [`usage`](#usage) holds for what they print: tokens, not the subscription's quota, and list price, not what a subscription charged. `budget` is the class a `budget_used` fraction is styled with, `warning` from 0.8, `critical` from 1.0 and `""` below, which the built-in templates and `drover status --print-css obsidian` style in the warning and critical colors.
 
 `md` escapes a string for a Markdown table cell: a backslash doubles, `|` becomes `\|`, and a line break becomes a space. `html` escapes `<`, `>`, `&`, `'` and `"`. `esc` escapes only `<`, `>` and `&`, which is what Markdown needs to keep a value from opening a tag or an entity: Obsidian shows `html`'s `&#39;` as typed, so a title reading "place's" would read "place&#39;s".
 
