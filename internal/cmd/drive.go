@@ -243,6 +243,10 @@ const (
 	// parkWorktree is an item whose worktree could not be opened, linked or set
 	// up. Nothing was launched for it.
 	parkWorktree = "worktree_failed"
+	// parkHandEdited is an accepted item whose body changed outside drover
+	// since the last digest it recorded, held before any session until the
+	// operator records the edit with amend or touch.
+	parkHandEdited = "hand_edited"
 )
 
 // launch is one stage of one item: the stage row, then the runner, headless, to
@@ -1739,6 +1743,12 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 	if s.resumeAt == nil {
 		if why := s.checkRefDrift(it); why != "" {
 			return park(parkRefDrift, why)
+		}
+		// Before any session, because the pass after it would read the edit as
+		// a reviewer's findings written by hand and park body_edited only once
+		// a whole implement and review had been spent.
+		if what, fix := s.handEdit(it); what != "" {
+			return park(parkHandEdited, what+"; "+fix)
 		}
 	}
 

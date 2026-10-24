@@ -133,7 +133,10 @@ wording, so never match on it.
   ORPHAN ROW          a ledger row names an id with no body, or one that will not parse
   NO REQUIREMENTS     an accepted, unmerged item whose body has no top-level "N. "
                       lines
-  NO DISPOSITION      a merged item's closes key names an issue nobody judged, so
+  HAND EDITED         an accepted, unmerged item whose body changed since drover last
+                      recorded its digest, outside any live session; record it with
+                      amend (requirements) or touch (prose) before driving it
+  NO DISPOSITION     a merged item's closes key names an issue nobody judged, so
                       finish wrote nothing to the tracker and whoever filed it got
                       silence
   SHELF CLASH         one id holds a body in both the backlog and the shelf
@@ -704,6 +707,26 @@ func (s *session) checkReport() CheckReport {
 			Path:    rel(s.cfg.Root, it.Path),
 			ID:      it.ID.Bare(),
 		})
+	}
+
+	// A body edited by hand since drover last recorded its digest. drive reads
+	// that as a reviewer writing findings by hand and parks the next clean pass,
+	// so an operator's legitimate edit has to be recorded before it is driven.
+	// An item a live session is working is mid-flight rather than hand edited.
+	running := s.sessionItems()
+	for _, it := range s.backlog.Items {
+		if running[it.ID.Bare()] {
+			continue
+		}
+		if what, fix := s.handEdit(it); what != "" {
+			add(Finding{
+				Kind:    "HAND EDITED",
+				Message: what,
+				Detail:  fix,
+				Path:    rel(s.cfg.Root, it.Path),
+				ID:      it.ID.Bare(),
+			})
+		}
 	}
 
 	// The shelf carries ids, never items: a retired body is not parsed as one, so

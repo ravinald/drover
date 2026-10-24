@@ -156,7 +156,8 @@ type Row struct {
 	// in it: the review stage row carries the body as the session launched, and
 	// the ninth shape, a row of {"id","body","date"} alone, carries it after each
 	// command that writes an item (request-changes, close-changes, invariant,
-	// link, split, accept, unaccept). A body that no longer matches the latest digest was changed by
+	// link, split, accept, unaccept, amend, and touch, which adds its reason as
+	// Note). A body that no longer matches the latest digest was changed by
 	// something drover did not run, which is how a review that writes its
 	// findings by hand is told from one that found nothing.
 	//
@@ -182,6 +183,11 @@ type Row struct {
 	// row; it files a follow-up against the item instead, because a failed check is
 	// work somebody owes and a ledger row is owed by nobody.
 	PostFinish string `json:"post_finish,omitempty"`
+	// Amend is the sixteenth shape: one row per `drover amend`, the operator
+	// replacing an accepted item's numbered requirements, with Note carrying
+	// the reason. It sits beside the body row amend writes rather than on it,
+	// so every reader of body rows keeps reading a digest and nothing else.
+	Amend *Amendment `json:"amend,omitempty"`
 	// Drive is the drive that appended the row, D1, D2 and so on, empty on a
 	// row written outside one. Every row a drive appends carries it, which is
 	// what groups an item's history by the drive that ran it without reading
@@ -222,6 +228,16 @@ type Row struct {
 	TS     string `json:"ts,omitempty"`
 	Report string `json:"report,omitempty"`
 	Note   string `json:"note,omitempty"`
+}
+
+// Amendment is what one `drover amend` changed: the requirement count before
+// and after, the other item when a requirement moved between two, and where
+// the replaced list was kept.
+type Amendment struct {
+	From  int    `json:"from"`
+	To    int    `json:"to"`
+	Moved string `json:"moved,omitempty"`
+	Kept  string `json:"kept,omitempty"`
 }
 
 // Outcome is what one item a drive ran came to, as the drive reported it.
