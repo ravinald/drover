@@ -136,7 +136,7 @@ wording, so never match on it.
   HAND EDITED         an accepted, unmerged item whose body changed since drover last
                       recorded its digest, outside any live session; record it with
                       amend (requirements) or touch (prose) before driving it
-  NO DISPOSITION     a merged item's closes key names an issue nobody judged, so
+  NO DISPOSITION      a merged item's closes key names an issue nobody judged, so
                       finish wrote nothing to the tracker and whoever filed it got
                       silence
   SHELF CLASH         one id holds a body in both the backlog and the shelf
