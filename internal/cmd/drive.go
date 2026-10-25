@@ -672,7 +672,8 @@ from the built-in list or [forge] infra_patterns, a job that ran no step or a
 canceled run, is rerun with gh run rerun --failed up to [forge] reruns times
 per head; trunk, a check that also failed on the trunk's latest completed
 run, parks trunk_red without a request for changes and stops the drive; code goes to the
-merge gate as before. A head with no check run after [forge] checks_wait is reported
+merge gate, and a refusal that follows parks gate_refused naming the check and
+the lines its log says failed ([forge] failure_patterns). A head with no check run after [forge] checks_wait is reported
 as no workflow ran on this head. Each classification is a ledger row. An infra
 check drive parked rather than reran (rerun_infra_failure below auto) is read
 once more after the queue drains, unless the drive is stopping: a head whose
@@ -3753,11 +3754,17 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 		// The gate blamed the diff, which makes it a finding like any other and
 		// sends it back the way a reviewer's would. It counts against
 		// max_review_rounds, because a round spent on a red check is still a round.
-		if err := s.requestChangesFromVerify(it, noneFirst(checks.none, "The merge gate refused this branch. Its output:"), out); err != nil {
+		if err := s.requestChangesFromVerify(it, noneFirst(checks.none, "The merge gate refused this branch. Its output:"), out, checks.code...); err != nil {
 			return park("gate_refused", noneFirst(checks.none, "the merge gate blamed this diff and the finding could not be written back: "+err.Error()))
 		}
 		d.Rounds++
 		d.Reason = noneFirst(checks.none, "the merge gate blamed this diff; sent back")
+		if len(checks.code) > 0 {
+			// The cause is the check, so the detail is its class: the last
+			// session's log describes a review that passed.
+			d.Reason = codeReason(checks.code[0]) + "; sent back"
+			d.setDetail(parkDetail{Detail: ledger.ClassCode, Evidence: codeEvidence(checks.code)})
+		}
 		d.Outcome = outcomeParked
 		d.Park = "gate_refused"
 		s.leaveItem(d)
@@ -4759,14 +4766,27 @@ func (s *session) checkRuns(ctx context.Context, sha string) ([]forgeCheck, erro
 
 // requestChangesFromVerify writes the gate's own output back to the branch, through request-changes,
 // which stays the only writer of that section and the only place the cap is
-// enforced.
-func (s *session) requestChangesFromVerify(it backlog.Item, header, out string) error {
+// enforced. Each failed check follows the output with its run and what its log
+// says failed, because a gate's output names a check and a commit, and the
+// session that gets the item back would otherwise start by finding the log.
+func (s *session) requestChangesFromVerify(it backlog.Item, header, out string, failed ...judged) error {
 	f, err := os.CreateTemp("", "drover-verify-*.md")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(f.Name()) }()
 	body := header + "\n\n```\n" + strings.TrimSpace(out) + "\n```\n"
+	for _, j := range failed {
+		body += "\n" + j.run.Name + " failed"
+		if u := checkURL(j.run); u != "" {
+			body += " (" + u + ")"
+		}
+		if len(j.failure) == 0 {
+			body += ": " + j.evidence + "\n"
+			continue
+		}
+		body += ". Its log:\n\n```\n" + strings.Join(j.failure, "\n") + "\n```\n"
+	}
 	if _, err := f.WriteString(body); err != nil {
 		return err
 	}
