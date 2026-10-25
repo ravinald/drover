@@ -529,6 +529,26 @@ func TestAnUnknownLoopKeyIsRefused(t *testing.T) {
 	}
 }
 
+// [forge] failure_patterns are regular expressions, so one that does not
+// compile is refused at load rather than skipped at the first red check.
+func TestFailurePatternsMustCompile(t *testing.T) {
+	root := write(t, map[string]string{
+		FileName: minimal + "\n[forge]\nfailure_patterns = ['^ERROR ', '(unclosed']\n",
+		"go.mod": "module x\n",
+	})
+	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), `forge.failure_patterns holds "(unclosed"`) {
+		t.Fatalf("Load = %v, want a refusal naming the pattern", err)
+	}
+	root = write(t, map[string]string{
+		FileName: minimal + "\n[forge]\nfailure_patterns = ['^ERROR ']\n",
+		"go.mod": "module x\n",
+	})
+	c, err := Load(root)
+	if err != nil || len(c.Forge.FailurePatterns) != 1 {
+		t.Fatalf("Load = %+v, %v, want the one pattern", c, err)
+	}
+}
+
 // [git] merge_method picks the flag drive hands `gh pr merge`. Unset is squash;
 // anything outside the three methods gh knows is refused at load rather than at
 // the first merge of a drive.

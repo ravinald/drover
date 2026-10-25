@@ -91,6 +91,7 @@ type DriveEvent struct {
 	Position int `json:"position,omitempty"`
 	// Head, Check, Class and Evidence are one red check drive classified, or a
 	// head no check ran on, on check alone, as the ledger row records them.
+	// Evidence is also a park's, on parked.
 	Head     string `json:"head,omitempty"`
 	Check    string `json:"check,omitempty"`
 	Class    string `json:"class,omitempty"`
@@ -326,7 +327,7 @@ func (es *eventSink) itemEvents(d DriveItem) {
 		return
 	}
 	if d.Outcome == outcomeParked {
-		ev := DriveEvent{Event: evParked, ID: d.ID, Park: d.Park, Reason: d.Reason, Detail: d.Detail, PR: d.PR, Slot: d.Slot}
+		ev := DriveEvent{Event: evParked, ID: d.ID, Park: d.Park, Reason: d.Reason, Detail: d.Detail, Evidence: d.Evidence, PR: d.PR, Slot: d.Slot}
 		if key := parkAction(d); key != "" {
 			p, _ := es.cfg.Policy(key)
 			ev.Action, ev.Policy = key, string(p)
