@@ -8,6 +8,7 @@ import (
 	"os"
 	stdpath "path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -583,6 +584,10 @@ type Forge struct {
 	// failed job's log, that mark it as the infrastructure failing. They add to
 	// the built-in list rather than replacing it.
 	InfraPatterns []string `toml:"infra_patterns"`
+	// FailurePatterns are regular expressions matched against each line of a
+	// failed job's log, with its timestamp stripped, that pick out the lines
+	// saying what failed. They add to the built-in list.
+	FailurePatterns []string `toml:"failure_patterns"`
 	// Reruns is how many times drive reruns one head's infrastructure failures
 	// before reading the next as the code's. 0 never reruns.
 	Reruns int `toml:"reruns"`
@@ -629,6 +634,14 @@ func (c *Config) validateForge(path string) error {
 	for _, p := range c.Forge.InfraPatterns {
 		if strings.TrimSpace(p) == "" {
 			return fmt.Errorf("%s: forge.infra_patterns holds an empty pattern, which would match every log", path)
+		}
+	}
+	for _, p := range c.Forge.FailurePatterns {
+		if strings.TrimSpace(p) == "" {
+			return fmt.Errorf("%s: forge.failure_patterns holds an empty pattern, which would match every line", path)
+		}
+		if _, err := regexp.Compile(p); err != nil {
+			return fmt.Errorf("%s: forge.failure_patterns holds %q, which is not a Go regular expression: %w", path, p, err)
 		}
 	}
 	return nil

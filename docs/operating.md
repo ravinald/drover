@@ -67,7 +67,7 @@ drover drive --detach --for 8h
 drover watch --until needs_operator,exit
 ```
 
-`--detach` is `drive` with the terminal taken out of the picture: stdin on `/dev/null`, output in a log beside the drive's event file, and nothing tying it to the shell you started it from. `drover drive --enqueue <id>...` adds work to the running drive, `drover attach` follows it, and `drover drive --stop` drains it.
+`--detach` is `drive` with the terminal taken out of the picture: stdin on `/dev/null`, output in a log beside the drive's event file, and nothing tying it to the shell you started it from. `drover drive --enqueue <id>...` adds work to the running drive, `drover attach` follows it, and `drover drive --stop` drains it. `drover attach --session` shows what a running item is doing, each tool call and message of its session beneath the item's `stage` line, and `--item <id>` narrows it to one item.
 
 To be told rather than to watch, point `[supervise.ntfy]` at an [ntfy](https://ntfy.sh) topic your phone subscribes to. The drive POSTs each event the table names, `needs_operator` by default, with the project and item in the title and what to do in the body. The table works in the per-user config as well, so one entry serves every project:
 

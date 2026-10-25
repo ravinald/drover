@@ -154,7 +154,7 @@ var classified = map[string]classification{
 		effect: "With no flag prints its help and sends nothing. --test runs [supervise] notify once with a synthetic needs_operator event on stdin and POSTs the same event to [supervise.ntfy], reading its token_file, whichever of the two are configured. Writes nothing.",
 		reach:  "runs [supervise] notify, posts to [supervise.ntfy]"},
 	"attach": {group: groupRun, class: readOnly, who: either,
-		effect: "Reads the drive's event file under $XDG_STATE_HOME/drover/drives/<project>, {ledger} and this checkout's lease. Never signals the drive or writes anything it reads, so an interrupt leaves the drive running."},
+		effect: "Reads the drive's event file under $XDG_STATE_HOME/drover/drives/<project>, {ledger} and this checkout's lease, and under --session the session logs its stage events name in the log directory, opened for reading only. Never signals the drive or writes anything it reads, so an interrupt leaves the drive running."},
 	"watch": {group: groupRun, class: readOnly, who: either,
 		effect: "Reads the drive's event file under $XDG_STATE_HOME/drover/drives/<project>, {ledger} and this checkout's lease. Never signals the drive or writes anything it reads."},
 	"drives": {group: groupRun, class: readOnly, who: either,

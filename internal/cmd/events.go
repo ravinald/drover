@@ -66,6 +66,9 @@ type DriveEvent struct {
 	// Action is the catalog key that produced the event, where one did.
 	Action string `json:"action,omitempty"`
 	Stage  string `json:"stage,omitempty"`
+	// Log is the session log a stage launching a session streams to, as the
+	// launch banner prints it: relative to the project root, or under ~/.
+	Log    string `json:"log,omitempty"`
 	Park   string `json:"park,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	// Detail is the park's detail token, on parked, as the item's report
@@ -92,6 +95,7 @@ type DriveEvent struct {
 	Position int `json:"position,omitempty"`
 	// Head, Check, Class and Evidence are one red check drive classified, or a
 	// head no check ran on, on check alone, as the ledger row records them.
+	// Evidence is also a park's, on parked.
 	Head     string `json:"head,omitempty"`
 	Check    string `json:"check,omitempty"`
 	Class    string `json:"class,omitempty"`
@@ -296,6 +300,12 @@ func (es *eventSink) stage(id, stage string) {
 	es.emit(DriveEvent{Event: evStage, ID: id, Stage: stage})
 }
 
+// session is the stage event for a step that launches a session, naming the
+// log it streams to.
+func (es *eventSink) session(id, stage, log string) {
+	es.emit(DriveEvent{Event: evStage, ID: id, Stage: stage, Log: log})
+}
+
 // notifyWait bounds one notifier run. A notifier that hangs would otherwise
 // hold the dispatcher, and with it every item waiting for a slot.
 const notifyWait = 30 * time.Second
@@ -358,7 +368,7 @@ func (es *eventSink) itemEvents(d DriveItem) {
 		return
 	}
 	if d.Outcome == outcomeParked {
-		ev := DriveEvent{Event: evParked, ID: d.ID, Park: d.Park, Reason: d.Reason, Detail: d.Detail, PR: d.PR, Slot: d.Slot}
+		ev := DriveEvent{Event: evParked, ID: d.ID, Park: d.Park, Reason: d.Reason, Detail: d.Detail, Evidence: d.Evidence, PR: d.PR, Slot: d.Slot}
 		if key := parkAction(d); key != "" {
 			p, _ := es.cfg.Policy(key)
 			ev.Action, ev.Policy = key, string(p)

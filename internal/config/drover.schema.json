@@ -434,6 +434,11 @@
           "items": { "type": "string", "minLength": 1 },
           "description": "Log lines, matched case-insensitively as substrings of a failed job's log, that mark the failure as infrastructure. They add to the built-in list."
         },
+        "failure_patterns": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Go regular expressions matched against each line of a code failure's job log, timestamp stripped, that pick out the lines saying what failed for the park and the send-back. They add to the built-in list."
+        },
         "reruns": {
           "type": "integer",
           "minimum": 0,

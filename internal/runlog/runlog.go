@@ -78,6 +78,15 @@ type Result struct {
 	// come back at. fault.go holds both and what reads them.
 	Fault   string
 	RetryAt time.Time
+	// RateLimitStatus and RateLimitReset are the last rate_limit_event Claude
+	// Code wrote before its result: "rejected" or "allowed", and the epoch the
+	// limit resets at. The event states the reset as a number where the result
+	// states it as prose, and a quota fault waits on the number first.
+	RateLimitStatus string
+	RateLimitReset  int64
+	// loggedAt is the latest timestamp any event carried, the clock a reset
+	// sentence with no year in it is read against.
+	loggedAt time.Time
 	// Transport is the runner naming its own connection to the model as what
 	// ended the session, for the runners that name it. It decides that a
 	// failure is a fault; which fault it is still comes from the message.
@@ -233,6 +242,10 @@ type Schema struct {
 	// an item event, so a Result read from the terminal line alone has no text
 	// and a result written from it has no report.
 	Carry func(line []byte, r *Result)
+	// Activity reads one event for what the session was doing when it wrote
+	// it, which is what attach --session shows while the log grows. Nil for a
+	// schema that carries nothing of the kind.
+	Activity func(line []byte) []Activity
 }
 
 // claims reports whether an event of this kind belongs to this schema.
@@ -260,12 +273,14 @@ func Schemas() []Schema {
 			Terminal: []string{"result"},
 			Read:     readClaude,
 			Carry:    carryClaude,
+			Activity: claudeActivity,
 		},
 		{
 			Name: "agy", Key: "event",
 			Kinds:    []string{"init", "step_update", "result"},
 			Terminal: []string{"result"},
 			Read:     readAgy,
+			Activity: agyActivity,
 		},
 		{
 			Name: "codex", Key: "type",
@@ -276,6 +291,7 @@ func Schemas() []Schema {
 			Terminal: []string{"turn.completed", "turn.failed", "turn.aborted"},
 			Read:     readCodex,
 			Carry:    carryCodex,
+			Activity: codexActivity,
 		},
 	}
 }
@@ -332,20 +348,38 @@ func readClaude(line []byte) (Result, bool) {
 	return r, true
 }
 
-// carryClaude keeps the fullest context any assistant message reported. Each
-// content block of one message arrives as its own event carrying the same
-// usage, so the repeats cannot raise the maximum.
+// carryClaude keeps the fullest context any assistant message reported, the
+// last rate_limit_event, and the latest event timestamp. Each content block of
+// one message arrives as its own event carrying the same usage, so the repeats
+// cannot raise the maximum.
+//
+// Every rate_limit_event is read and the last one kept, because the stream
+// writes one per request and a session that started inside its limit and ended
+// outside it says "allowed" first and "rejected" only at the end.
 func carryClaude(line []byte, r *Result) {
 	var ev struct {
-		Type    string `json:"type"`
-		Message struct {
+		Type      string `json:"type"`
+		Timestamp string `json:"timestamp"`
+		Message   struct {
 			Usage *APIUsage `json:"usage"`
 		} `json:"message"`
+		RateLimit struct {
+			Status   string `json:"status"`
+			ResetsAt int64  `json:"resetsAt"`
+		} `json:"rate_limit_info"`
 	}
-	if json.Unmarshal(line, &ev) != nil || ev.Type != "assistant" || ev.Message.Usage == nil {
+	if json.Unmarshal(line, &ev) != nil {
 		return
 	}
-	r.ContextMax = max(r.ContextMax, ev.Message.Usage.Context())
+	if at, err := time.Parse(time.RFC3339, ev.Timestamp); err == nil && at.After(r.loggedAt) {
+		r.loggedAt = at
+	}
+	switch {
+	case ev.Type == "rate_limit_event":
+		r.RateLimitStatus, r.RateLimitReset = ev.RateLimit.Status, ev.RateLimit.ResetsAt
+	case ev.Type == "assistant" && ev.Message.Usage != nil:
+		r.ContextMax = max(r.ContextMax, ev.Message.Usage.Context())
+	}
 }
 
 // firstKey is the first key of a JSON object as written, "" for anything else.
@@ -583,14 +617,18 @@ func ReadResult(path string) (Read, error) {
 	if err := sc.Err(); err != nil {
 		return Read{}, fmt.Errorf("read %s: %w", path, err)
 	}
+	// Classified again once the carried fields land: codex states a failure's
+	// reason on the terminal event and its report on an item event, so a
+	// terminal event that carried neither is only nameable from what Carry kept,
+	// and Claude Code states its reset as an epoch only on the events before
+	// its result.
 	if rd.Found {
 		rd.Result.ContextMax = carried.ContextMax
-	}
-	// Classified again once the carried text lands: codex states a failure's
-	// reason on the terminal event and its report on an item event, so a
-	// terminal event that carried neither is only nameable from what Carry kept.
-	if rd.Found && rd.Result.Text == "" {
-		rd.Result.Text = carried.Text
+		rd.Result.RateLimitStatus, rd.Result.RateLimitReset = carried.RateLimitStatus, carried.RateLimitReset
+		rd.Result.loggedAt = carried.loggedAt
+		if rd.Result.Text == "" {
+			rd.Result.Text = carried.Text
+		}
 		rd.Result = Classify(rd.Result)
 	}
 	return rd, nil

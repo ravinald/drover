@@ -697,11 +697,12 @@ A project that wants a follow-up list without a tracker sets [`[register] backen
 
 ## `[forge]`
 
-| Key              | Default | Meaning                                                                                                                   |
-| ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `infra_patterns` | `[]`    | Log lines that mark a failed job as the forge's infrastructure failing, added to the built-in list.                       |
-| `reruns`         | `2`     | How many times `drive` reruns one head's infrastructure failures before reading the next as the code's. `0` never reruns. |
-| `checks_wait`    | `10m`   | How long a head may show no check run at all before `drive` reports that no workflow ran on it, as a Go duration.         |
+| Key                | Default | Meaning                                                                                                                   |
+| ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `infra_patterns`   | `[]`    | Log lines that mark a failed job as the forge's infrastructure failing, added to the built-in list.                       |
+| `failure_patterns` | `[]`    | Go regular expressions picking out the lines of a `code` failure's log that say what failed, added to the built-in list.  |
+| `reruns`           | `2`     | How many times `drive` reruns one head's infrastructure failures before reading the next as the code's. `0` never reruns. |
+| `checks_wait`      | `10m`   | How long a head may show no check run at all before `drive` reports that no workflow ran on it, as a Go duration.         |
 
 `[drive] merge_gate` cannot tell whose failure a red check is, so every one it sees goes back to the item as a send-back. Before the merge gate reads a pushed head, before the pull request opens and again at the merge when the forge has no auto-merge, `drive` waits for the head's checks to finish and classifies each red one (a conclusion of `failure`, `timed_out`, `startup_failure` or `cancelled`):
 
@@ -711,7 +712,22 @@ A project that wants a follow-up list without a tracker sets [`[register] backen
 | `trunk` | Not `infra`, and the trunk's latest completed run of the same check concluded failure         | parks the item `trunk_red`, naming the check and that run's URL, without sending anything back, and stops the drive, under [`report_trunk_red`](#supervise) |
 | `code`  | Anything else                                                                                 | lets the merge gate decide                                                                                                                                  |
 
-The built-in infrastructure lines, matched case-insensitively as substrings of the failed job's log: `toomanyrequests`, `rate limit exceeded`, `429 Too Many Requests`, `No space left on device`, `The runner has received a shutdown signal`, `lost communication with the server`, `Could not resolve host`, `Temporary failure in name resolution`, `connection reset by peer` and `TLS handshake timeout`. A check another app reported, rather than an Actions job, has no log drive reads, so only its conclusion and the trunk decide it, and an `infra` one there has no run to rerun and is read as `code`.
+The built-in infrastructure lines, matched case-insensitively as substrings of the failed job's log: `toomanyrequests`, `rate limit exceeded`, `429 Too Many Requests`, `No space left on device`, `The runner has received a shutdown signal`, `lost communication with the server`, `Could not resolve host`, `Temporary failure in name resolution`, `connection reset by peer`, `TLS handshake timeout` and `from the Go standard library`. The last is govulncheck's summary of a finding in the standard library: `actions/setup-go` installs the toolchain on the runner, so the patch release that fixes it arrives with a rerun once it is published, and no diff can supply it. A finding in a module reads `from 1 module` instead and stays `code`, since `go.mod` is the diff's to change. A check another app reported, rather than an Actions job, has no log drive reads, so only its conclusion and the trunk decide it, and an `infra` one there has no run to rerun and is read as `code`.
+
+For a `code` check, `drive` also reads what failed out of the same job log: up to 5 lines matching one of the failure patterns, each with its Actions timestamp, its `##[error]` annotation and its terminal colors stripped. The built-in patterns, matched as Go regular expressions against each stripped line:
+
+| Pattern                         | Matches                                               |
+| ------------------------------- | ----------------------------------------------------- |
+| `^--- FAIL`                     | A failed Go test                                      |
+| `^FAIL\b`                       | A failed Go test package                              |
+| `^\S+:\d+:\d+: .*\(\w[\w-]*\)$` | A golangci-lint finding, its linter named last        |
+| `^\S+\.\w+:\d+:\d+: `           | A compiler or `go vet` error                          |
+| `^Vulnerability #\d+`           | A govulncheck finding                                 |
+| `^\s*Found in: `                | The module or package version govulncheck found it in |
+| `^\s*Fixed in: `                | The version that fixes it                             |
+| `^panic: `                      | A Go panic                                            |
+
+A log matching none of them falls back to the last 5 non-blank lines before its first `make: ***` or `Error:` line. `failure_patterns` adds to the list, so a project whose test runner prints `ERROR <name>` adds `'^ERROR '`; a pattern that does not compile is refused at load. Those lines are what the [`gate_refused`](automation.md#drive---json) park carries when the merge gate then blames the diff: its reason names the check and the first line, its `detail` is `code`, its `evidence` is the lines, and the body sent back to the item adds them and the check's URL under the merge gate's output.
 
 `reruns` counts `gh run rerun` calls on one head across drives, from the ledger, so a later drive does not rerun a head the earlier one already spent. A head that needs more reruns than remain is read as `code`, and the merge gate sends it back. Beside a `code` failure, an `infra` one is recorded and not rerun, since the head is going back either way.
 

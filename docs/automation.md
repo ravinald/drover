@@ -242,6 +242,23 @@ A drive that exits before it holds the lease (a refusal, a preflight that fails)
 2026-10-18T09:40:52Z  exit           code=0 seq=4
 ```
 
+`--session` prints, beneath each `stage` event that carries a [`log`](#drive---events), what that session is doing as its log grows: one line per tool call or block of text, indented under the item and prefixed with its id, so items running at once under `--jobs` stay apart. `attach` follows each log by offset as it follows the event file, opened for reading only, and stops at the same item's next event, reading the log once more to its last whole line first. Replaying a drive already under way, it reads the logs of sessions still running when it started and of every session launched after; a session that finished before `attach` started keeps its `stage` line alone, so attaching to a long drive does not print hours of old logs. A log not written yet is waited for, and one that will not read is named once on stderr with the error while `attach` goes on with the events. What a line says depends on the runner: a Claude tool call is its name and the first of its `command`, `file_path`, `pattern` or `url` inputs, a codex one is a `command_execution` or `file_change` item, an agy one is the tool step it opens; Claude and codex text is each message the session writes, and agy, which streams text in fragments, yields none. Each summary is one line, cut at 160 characters with a trailing `...`.
+
+```text
+2026-10-24T22:40:11Z  stage          F14 stage=implement log=~/.cache/drover/webapp/F14-ntfy.20261024-154011.123456789.jsonl seq=7
+                                     F14 > Read internal/cmd/events.go
+                                     F14 > Bash make build && make check
+                                     F14 · The verify command passes; committing.
+```
+
+Under `--json --session` each activity is one object keyed `activity`, never `event`, so a reader filtering on `event` sees the drive's stream unchanged. `activity` is `tool` or `text`, `tool` is the tool's name on a `tool` entry alone, and `text` is the summary above. `ts` is the time `attach` read the line, not the time the session wrote it: codex and agy stamp none of their lines, and one clock across runners keeps the entries of items running at once in the order they were read.
+
+```json
+{ "activity": "tool", "ts": "2026-10-24T22:41:02Z", "drive": "D8", "id": "F14", "stage": "implement", "tool": "Bash", "text": "Bash make build && make check" }
+```
+
+`--item <id>` limits `attach`, with or without `--session`, to one item's events and the `exit`. An id the drive has not dispatched or queued is not an error, since it may be enqueued later: `attach` prints nothing for it until it appears.
+
 **`drover watch [drive id] --until <event,...>`** blocks until the drive emits one of the named events, prints that event's JSON line and exits `0`. It exits `3` when the drive exits, or stops running, without emitting one, and `1` when there is no such drive or an `--until` name is no event. Without `--after` or `--since`, only events written after `watch` starts count, so an event written between two calls is lost. `--after <seq>` counts only events whose `seq` is past it, whenever they were written: a loop passing the `seq` of the last event it handled gets each event once and misses none. `--since <ts>` counts events stamped at or after `ts`, for a person reading by time; `ts` is one second wide and two events often share one, so a loop on `--since` returns the event it handled again, and strict "after" on `ts` would drop the event beside it. The `exit` event ends a watch whenever it was written, so `watch` on a drive that already exited returns at once: `0` with that event when `--until` names `exit`, `3` otherwise. An interrupt exits `1` and leaves the drive running.
 
 ```sh
@@ -934,7 +951,7 @@ Reconciliation refuses a finish that would leave the tree dirty, before `finish`
 
 `pr` is the pull request drover opened for the item, and it is absent wherever none exists. Only a green `[drive] merge_gate` on a review that passed opens one, so every park before that point reports none; `blocked_on_deps`, `awaiting_signoff` and `protected_paths` report one, because each is a branch a human merges and a human needs something to merge. A zero on an item that reached the forge means `gh` printed a URL drover could not read a number out of, which is not a failure: the pull request is open either way.
 
-`gate_refused` with no `pr` is the merge gate blaming the diff before any pull request opened, and its output goes back to the branch; with a `pr` it is the merge gate refusing at the merge, when the forge has no auto-merge, and the reason carries the merge gate's last lines. `gate_refused` with `update_branch.verify` `failed` is the item's own verify command failing on the branch merged with the trunk while the trunk alone passes: the merge commit is pushed, the send-back opens with the trunk range drive merged and carries the verify command's output, and it counts against `max_review_rounds` as a round. `trunk_conflict` is a trunk that moved since the branch was pushed and would not merge into it: the reason names the conflicted files, the merge is aborted and nothing is pushed. `trunk_red` is a trunk that fails the item's verify command on its own, which no item can fix: the reason names the trunk commit and the verify command's last lines, nothing is sent back or pushed, the local branch drops the merge, and the drive stops. A pull request already open stays open. `trunk_red` is also a red check on the head that concluded failure on the trunk's latest completed run of the same check: the reason names the check and that run's URL, the merge gate does not run, nothing is sent back, and the drive stops. `infra_failure` is a check that failed on the forge's infrastructure while `rerun_infra_failure` is below `auto`, so drive did not rerun it: the reason names each check and the log line that marked it; the queue goes on. Once the queue drains, and only when the drive is not stopping, drive reads the checks on that head once more. Where every one completed `success`, `neutral` or `skipped` and the branch still points there, it records a `green` check row and sends the item through the merge gate and the merge it would have taken, and the item is reported a second time with its new outcome; otherwise stderr says `checks on <head> still red at the end of the drive; left parked`. `forge_down` on a head no workflow reported on within `[forge] checks_wait` opens its reason with `no workflow ran on this head`, because the fix is CI that fires on a branch push rather than a failing check. See [`[forge]`](configuration.md#forge) for how each red check is classified. `merge_failed` is any refusal from `gh pr merge` other than the auto-merge one, and every auto-merge refusal in a project with no `[drive] merge_gate`.
+`gate_refused` with no `pr` is the merge gate blaming the diff before any pull request opened, and its output goes back to the branch. Where a red check drive read as `code` sits under that refusal, the reason reads `<check> failed: <first line>`, the `detail` is `code`, `evidence` holds up to 5 lines its job log says failed (see [`[forge]`](configuration.md#forge)), and the body sent back adds those lines and the check's URL under the merge gate's output, so the next run starts from the failure rather than a check name; with a `pr` it is the merge gate refusing at the merge, when the forge has no auto-merge, and the reason carries the merge gate's last lines. `gate_refused` with `update_branch.verify` `failed` is the item's own verify command failing on the branch merged with the trunk while the trunk alone passes: the merge commit is pushed, the send-back opens with the trunk range drive merged and carries the verify command's output, and it counts against `max_review_rounds` as a round. `trunk_conflict` is a trunk that moved since the branch was pushed and would not merge into it: the reason names the conflicted files, the merge is aborted and nothing is pushed. `trunk_red` is a trunk that fails the item's verify command on its own, which no item can fix: the reason names the trunk commit and the verify command's last lines, nothing is sent back or pushed, the local branch drops the merge, and the drive stops. A pull request already open stays open. `trunk_red` is also a red check on the head that concluded failure on the trunk's latest completed run of the same check: the reason names the check and that run's URL, the merge gate does not run, nothing is sent back, and the drive stops. `infra_failure` is a check that failed on the forge's infrastructure while `rerun_infra_failure` is below `auto`, so drive did not rerun it: the reason names each check and the log line that marked it; the queue goes on. Once the queue drains, and only when the drive is not stopping, drive reads the checks on that head once more. Where every one completed `success`, `neutral` or `skipped` and the branch still points there, it records a `green` check row and sends the item through the merge gate and the merge it would have taken, and the item is reported a second time with its new outcome; otherwise stderr says `checks on <head> still red at the end of the drive; left parked`. `forge_down` on a head no workflow reported on within `[forge] checks_wait` opens its reason with `no workflow ran on this head`, because the fix is CI that fires on a branch push rather than a failing check. See [`[forge]`](configuration.md#forge) for how each red check is classified. `merge_failed` is any refusal from `gh pr merge` other than the auto-merge one, and every auto-merge refusal in a project with no `[drive] merge_gate`.
 
 `push_failed` is a rejected `git push`, which drover never forces past and never retries with `--no-verify`: a branch can carry a human's commits, and a pre-push hook is the project's own check on what leaves the machine. `blocked_on_deps` is a `SPLIT-OUT` the review filed during the drive, since `drover split` rewrites the `deps` line and leaves the item waiting on work nobody has accepted. `ledger_unwritable` is a ledger that refused the pass row, which parks rather than merging on a result nothing can read back.
 
@@ -984,9 +1001,10 @@ The `findings_open` park reason names the follow-up for that item, chosen from t
 | `tool_denied`             | The terminal event's denials (claude's `permission_denials`, agy's `denied_actions`)                                            | `the runner denied <tools>`                                                     |
 | `push_hook`               | A refused `git push` in a tree whose pre-push hook would have run, with no rejection from the remote                            | The hook (its config name, or its path) and the first line of the push's output |
 | `push_network`            | A `git push` whose output names the transport failing (`closed by remote host`, `Could not resolve host`, `Connection refused`) | That line                                                                       |
+| `code`                    | A `gate_refused` park whose merge gate refused over a red check drive read as `code`, rather than any session log               | Up to 5 lines the check's job log says failed                                   |
 | `unknown`                 | None of the above                                                                                                               | The log's last 5 lines, or the push's                                           |
 
-The order of the rows is the order they are read in. A park that comes after a clean session (`gate_refused`, `at_limit`, `protected_paths`) reads `unknown` with the last lines of the last log the item wrote, since nothing under it failed; the `reason` carries the cause. A park before any launch says no session ran.
+The order of the rows is the order they are read in. A park that comes after a clean session (`gate_refused` with no `code` check under it, `at_limit`, `protected_paths`) reads `unknown` with the last lines of the last log the item wrote, since nothing under it failed; the `reason` carries the cause. A park before any launch says no session ran.
 
 A session that leaves a process it started running is not counted as clean, whatever its terminal event says: the implement run parks `implement_died` and a review reads `died`. The prompt tells every session to run its verify command in the foreground.
 
@@ -1019,8 +1037,10 @@ A `push_failed` park with `push_hook` belongs to `push_refused_by_hook`, which s
 `stage`: an item reached a step. `stage` is one of `implement`, `review`, `update_branch`, `gate`, `pr`, `merge` or `finish`. The trunk steps (`update_branch` through `finish`) can repeat for one item, because the merge fallback updates the branch and runs the merge gate again at the head it merges.
 
 ```json
-{ "event": "stage", "ts": "2026-10-16T22:00:01Z", "id": "E36", "stage": "implement" }
+{ "event": "stage", "ts": "2026-10-16T22:00:01Z", "id": "E36", "stage": "implement", "log": "~/.cache/drover/webapp/E36-retry.20261016-150001.123456789.jsonl" }
 ```
+
+An `implement` or `review` stage launches a session and carries `log`: the session log's path as the launch banner prints it, relative to the project root or under `~/`, chosen before the event and the file the runner writes. A relaunch after a transient fault (an overloaded service, an exhausted account) writes a log of its own and emits a `stage` of its own. The trunk steps launch no session and carry no `log`. [`attach --session`](#detaching-from-a-drive) follows it.
 
 An `update_branch` for another item's open pull request, after a merge or under `--update-branches`, arrives once its branch update is done and carries `result`, `branch` and `pr`. `result` is an `update_branch.verify` word (`passed`, `failed`, `sequence`, `trunk_red`, `skipped`, `unrunnable`), or `up_to_date` (the branch already held the trunk), `conflict`, or `kept` (not attempted, `reason` says why).
 
@@ -1053,7 +1073,7 @@ The branch update drive makes before an item's own implement session, or its `--
 }
 ```
 
-`parked`: an item stopped. `park`, `reason` and `detail` are the fields the item's report carries; key on `park`. Where a catalog action owns the park, `action` names it and `policy` says who handles it in this project.
+`parked`: an item stopped. `park`, `reason`, `detail` and `evidence` are the fields the item's report carries; key on `park`. For `gate_refused` over a `code` check, `evidence` is the lines its job log says failed, one per line, the same lines `drover show` prints under the park. Where a catalog action owns the park, `action` names it and `policy` says who handles it in this project.
 
 ```json
 {
@@ -1065,6 +1085,18 @@ The branch update drive makes before an item's own implement session, or its `--
   "reason": "this branch changes Makefile, which decides what every later item tonight is measured by; merge it by hand",
   "policy": "operator",
   "pr": 7
+}
+```
+
+```json
+{
+  "event": "parked",
+  "ts": "2026-10-25T00:54:02Z",
+  "id": "F14",
+  "park": "gate_refused",
+  "reason": "Gate failed: internal/cmd/notify.go:28:16: var-declaration: should omit type http.RoundTripper from declaration of var ntfyTransport; it will be inferred from the right-hand side (revive); sent back",
+  "detail": "code",
+  "evidence": "internal/cmd/notify.go:28:16: var-declaration: should omit type http.RoundTripper from declaration of var ntfyTransport; it will be inferred from the right-hand side (revive)"
 }
 ```
 

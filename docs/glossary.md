@@ -424,7 +424,7 @@ The `.drover.toml` sections, with the keys whose names carry drover vocabulary. 
 | `[finish]`                   | `post_check`, the command run after each finish.                                                    |
 | `[numbered_files]`           | Globs of numbered files that must not share a number.                                               |
 | `[github]`                   | `repo`, `follow_up_label`, `severity_prefix` and `page_limit`.                                      |
-| `[forge]`                    | How drive reads forge checks: `infra_patterns`, `reruns` and `checks_wait`.                         |
+| `[forge]`                    | How drive reads forge checks: `infra_patterns`, `failure_patterns`, `reruns` and `checks_wait`.     |
 | `[usage]`                    | How status reads usage rows: `weekly_budget`, `reset`, `session_max_hours` and `context_warn`.      |
 | `[register]`                 | Where the follow-up list lives: `backend`.                                                          |
 | `[backlog]`                  | `mirror`, which publishes items as tracker issues.                                                  |
