@@ -69,23 +69,38 @@ drover watch --until needs_operator,exit
 
 `--detach` is `drive` with the terminal taken out of the picture: stdin on `/dev/null`, output in a log beside the drive's event file, and nothing tying it to the shell you started it from. `drover drive --enqueue <id>...` adds work to the running drive, `drover attach` follows it, and `drover drive --stop` drains it. `drover attach --session` shows what a running item is doing, each tool call and message of its session beneath the item's `stage` line, and `--item <id>` narrows it to one item.
 
-To be told rather than to watch, point `[supervise.ntfy]` at an [ntfy](https://ntfy.sh) topic your phone subscribes to. The drive POSTs each event the table names, `needs_operator` by default, with the project and item in the title and what to do in the body. The table works in the per-user config as well, so one entry serves every project:
+To be told rather than to watch, give `[notify]` a destination. An `ntfy` destination POSTs to an [ntfy](https://ntfy.sh) topic your phone subscribes to; each event it routes arrives with the project and item in the title, the priority you chose for that event, and a body saying what happened or what to do. Put it in the per-user config and one entry serves every project:
 
 ```toml
-[supervise.ntfy]
+[notify.destinations.phone]
+type       = "ntfy"
 url        = "https://ntfy.example.com/drover"
 token_file = "~/.config/drover/ntfy-token"
-events     = ["needs_operator", "needs_supervisor"]
+events     = { started = "low", merged = "low", parked = "default", needs_operator = "high", needs_supervisor = "default", exit = "default", exit_undone = "high" }
 ```
 
-For anything else, set `[supervise] notify` to a command that reaches you. drover runs it once for each `needs_operator` event, from the project root, with the event as JSON on stdin and 30 seconds to finish. The following entry raises a desktop notification:
+That one table tells you when a drive starts and what it queued, each merge and park, every stop that needs you, and how the drive ended. The exit names what was left undone and why, such as `E72 skipped: blocked by F14 (parked gate_refused)`, and an exit that left anything parked, skipped or held goes out at `exit_undone`'s priority, so a drive that exits 0 with work behind it still rings.
+
+For anything ntfy does not reach, a `command` destination runs an argv with each event it routes as one JSON line on stdin, from the project root, with 30 seconds to finish. The line carries the event, the `priority` it was routed at and the `message` an ntfy destination would send. The following entry raises a desktop notification for each stop and merge:
 
 ```toml
-[supervise]
-notify = ["notify-send", "drover"]
+[notify.destinations.desk]
+type   = "command"
+argv   = ["notify-send", "drover"]
+events = { needs_operator = "high", merged = "default" }
 ```
 
-Both may be set, and both run. `drover notify --test` sends a test event through each and prints what it answered, so a wrong token turns up before a drive stops for you.
+Destinations of different names both apply, each to the events it names, and a slow one delays neither the drive nor the other. `drover notify --test` sends a test event through each and prints what it answered, so a wrong token turns up before a drive stops for you; `drover notify --test --event exit_undone` shows what a drive that left work behind sends, at the priority each destination routes it.
+
+Two `[notify]` keys keep a long drive from waking you for nothing. `quiet_hours` holds every message routed below `high` until the window ends and then sends what it held as one message per destination; `needs_operator` and `needs_supervisor` are never held, and a drive that exits inside the window folds what it held into its exit, sent at `min` so ntfy delivers it without sound unless you routed `exit` at `high` or above. `coalesce` folds events of one kind that arrive close together into one message listing their ids, such as `filed: B91 B91 B92`:
+
+```toml
+[notify]
+quiet_hours = "22:30-07:00"
+coalesce    = "2m"
+```
+
+A config written for an earlier release with `[supervise] notify` or `[supervise.ntfy]` is refused at load; `scripts/migrate-notify.sh <file>` rewrites either into a destination. See [`[notify]`](configuration.md#notify) for every key.
 
 This is the mode to settle into. The queue runs, the waiting costs nothing, and the only thing that reaches you is an event a person has to handle.
 
@@ -132,10 +147,10 @@ A drive meets situations it can't settle from the merge gate and the review alon
 | ------------ | ---------------------------------------------------------------------------------- |
 | `auto`       | The drive does it itself, with no session involved.                                |
 | `supervisor` | The drive emits `needs_supervisor` and leaves it for a `drover supervise` session. |
-| `operator`   | The drive emits `needs_operator`, runs `notify`, and waits for you.                |
+| `operator`   | The drive emits `needs_operator`, sends it to `[notify]`, and waits for you.       |
 | `off`        | Nothing happens, and the item stays parked.                                        |
 
-**A project with no `[supervise]` table runs every action at its default, and several defaults are `supervisor`.** `resolve_conflict`, `relaunch_after_runner_death`, `write_scaffold_requirements`, `close_changes`, `enqueue` and `cleanup_interrupted_drive` all default there. With no `drover supervise` session running, those events park and wait, and `notify` doesn't fire for them, because it runs only on `needs_operator`; `[supervise.ntfy]` reaches you for them only when its `events` names `needs_supervisor`. In practice someone notices the parks and starts handling them in whatever chat is open, and that chat becomes a supervisor nobody configured: the [long-lived session](cost.md#long-lived-sessions) that cost tracking catches later.
+**A project with no `[supervise]` table runs every action at its default, and several defaults are `supervisor`.** `resolve_conflict`, `relaunch_after_runner_death`, `write_scaffold_requirements`, `close_changes`, `enqueue` and `cleanup_interrupted_drive` all default there. With no `drover supervise` session running, those events park and wait, and a `[notify]` destination reaches you for them only when its `events` names `needs_supervisor`. In practice someone notices the parks and starts handling them in whatever chat is open, and that chat becomes a supervisor nobody configured: the [long-lived session](cost.md#long-lived-sessions) that cost tracking catches later.
 
 Decide each action once instead. The following command walks the catalog by category and offers each action only the policies it allows. It appends a `[supervise]` table to `.drover.toml` when the file has none, and prints one to paste over the existing table when it has one:
 
@@ -148,7 +163,7 @@ Without `--defaults` it needs a terminal to ask on, and inside a session drover 
 
 - **Raise what you'd always approve to `auto`.** `resolve_conflict` and `relaunch_after_runner_death` can reach `auto`, and at `auto` neither needs a session.
 - **Some actions stop short of `auto` by design.** `merge_drive_pr`, `merge_protected_paths`, `write_scaffold_requirements`, `triage_finding` and `close_changes` cap at `supervisor`, and `accept`, `signoff`, `override_review_limit`, `auth_expired` and `push_refused_by_hook` cap at `operator`. Asking for more is a load error that names the ceiling.
-- **Don't leave anything at `supervisor` unless you run `drover supervise`.** Without one, set it to `operator` so `notify` reaches you, or to `auto` where the ceiling allows.
+- **Don't leave anything at `supervisor` unless you run `drover supervise`.** Without one, set it to `operator` so a `[notify]` destination routing `needs_operator` reaches you, or to `auto` where the ceiling allows.
 
 `drover config` prints every action's effective policy, marked `default` where the file sets nothing. Read it after any drover upgrade. A project whose config predates `[supervise]` has no table, and `drover config --diff` doesn't list the table, so the defaults apply without anything pointing at them.
 
@@ -171,7 +186,7 @@ Most projects end up with the following arrangement once the first few items hav
 1. Run `drover init supervise`, so every action has an owner you chose ([Who handles each event](#who-handles-each-event)).
 2. Write and accept items in a short operator session.
 3. Start `drover drive --detach --for <hours>` from a terminal, not as a background task inside an agent session.
-4. Let `[supervise] notify` reach you on `needs_operator`, and use `drover supervise` only if routine parks keep waiting overnight.
+4. Let a [`[notify]`](configuration.md#notify) destination reach you on `needs_operator` and `exit_undone`, and use `drover supervise` only if routine parks keep waiting overnight.
 5. Set [`[usage.weekly]`](#running-past-the-weekly-allotment) `notify_remaining` and `pause_remaining` in the per-user config, so no drive spends the end of the week for you.
 6. Handle each event in a fresh operator session.
 7. Read `drover status`, or the page `[[status.render]]` writes, whenever you like: reading it costs nothing.

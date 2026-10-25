@@ -25,7 +25,7 @@ import (
 // driveEventNames is every event a drive emits, which is what watch --until
 // may name.
 var driveEventNames = []string{
-	evQueued, evDispatched, evPreflight, evStage, evCheck, evParked, evFiled,
+	evStarted, evQueued, evDispatched, evPreflight, evStage, evCheck, evParked, evFiled,
 	evNeedsOperator, evMerged, evPaused, evResumed, evUsageWarning, evExit,
 }
 
@@ -233,6 +233,9 @@ func eventLine(e DriveEvent) string {
 		}
 		return strconv.Itoa(n)
 	}
+	add("queue", strings.Join(e.Queue, ","))
+	add("jobs", num(e.Jobs))
+	add("deadline", e.Deadline)
 	add("stage", e.Stage)
 	add("park", e.Park)
 	add("detail", e.Detail)
@@ -246,6 +249,13 @@ func eventLine(e DriveEvent) string {
 	add("head", e.Head)
 	if e.Code != nil {
 		add("code", strconv.Itoa(*e.Code))
+	}
+	if e.Summary != nil {
+		add("ended", e.Summary.Ended)
+		add("merged", strconv.Itoa(e.Summary.Merged))
+		add("parked", strconv.Itoa(e.Summary.Parked))
+		add("skipped", strconv.Itoa(e.Summary.Skipped))
+		add("held", strconv.Itoa(e.Summary.Held))
 	}
 	add("changed", strings.Join(e.Changed, ","))
 	add("window", e.Window)

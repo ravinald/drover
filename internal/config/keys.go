@@ -65,6 +65,30 @@ var resolved = map[string]string{
 	"usage.session_max_hours": strconv.Itoa(DefaultSessionMaxHours),
 	"usage.context_warn":      strconv.Itoa(DefaultContextWarn),
 	"usage.overage.mode":      strconv.Quote(OveragePause),
+	"notify.coalesce":         strconv.Quote("0s"),
+}
+
+// NotifyKeys is every key under notify., the destination keys written under
+// the placeholder <name> that a project replaces with its own. Keys reports the
+// destinations table as one open entry, so the keys inside a destination are
+// listed here, from the same lists validation reads.
+func NotifyKeys() []string {
+	var out []string
+	for _, k := range Keys() {
+		if strings.HasPrefix(k.Dotted, "notify.") {
+			out = append(out, k.Dotted)
+		}
+	}
+	seen := map[string]bool{}
+	for _, kind := range []string{DestNtfy, DestCommand} {
+		for _, key := range NotifyDestinationKeys(kind) {
+			if !seen[key] {
+				seen[key] = true
+				out = append(out, "notify.destinations.<name>."+key)
+			}
+		}
+	}
+	return out
 }
 
 // walkKeys collects one Key per toml-tagged field, descending into nested

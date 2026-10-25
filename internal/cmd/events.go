@@ -9,18 +9,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ravinald/drover/internal/config"
+	"github.com/ravinald/drover/internal/gh"
 )
 
 // The event types `drive --events` writes. Documented with a sample each in
 // docs/automation.md; a wrapper keys on these, so renaming one is a breaking
 // change to the stream.
 const (
+	// evStarted is the drive holding its lease with its queue read: what it
+	// will run, how many at once, and until when.
+	evStarted       = "started"
 	evQueued        = "queued"
 	evDispatched    = "dispatched"
 	evStage         = "stage"
@@ -105,6 +108,16 @@ type DriveEvent struct {
 	Evidence string `json:"evidence,omitempty"`
 	// Code is the drive's exit status, on exit alone.
 	Code *int `json:"code,omitempty"`
+	// Summary is what the drive left done and undone, on exit alone.
+	Summary *ExitSummary `json:"summary,omitempty"`
+	// Queue, Jobs and Deadline are the drive's queue in order, its --jobs, and
+	// the instant --for or --until bounds it at in local time, RFC 3339, on
+	// started alone. Deadline is absent on an unbounded drive.
+	Queue    []string `json:"queue,omitempty"`
+	Jobs     int      `json:"jobs,omitempty"`
+	Deadline string   `json:"deadline,omitempty"`
+	// Title is the merged pull request's title, on merged alone.
+	Title string `json:"title,omitempty"`
 	// Changed is which inputs a resume reloaded differ from those before it,
 	// on resumed alone: config, prompt, review, verify, binary.
 	Changed []string `json:"changed,omitempty"`
@@ -131,29 +144,18 @@ type DriveEvent struct {
 	*DriveTotals
 }
 
-// eventSink is where a drive's events go: stdout under --events, the
-// [supervise] notify argv for each needs_operator, and [supervise.ntfy] for each
-// event it names, whatever the flags.
+// eventSink is where a drive's events go: stdout under --events, and each
+// [notify] destination that routes the event, whatever the flags.
 //
 // Stage events arrive from every slot's goroutine, so writes are serialized
 // here. The writer is captured when the sink is made, because finishMerged points
 // os.Stdout at stderr while finish runs and an event emitted from another slot in
 // that window would otherwise land on the wrong stream.
 type eventSink struct {
-	mu     sync.Mutex
-	w      io.Writer
-	cfg    *config.Config
-	notify []string
-	// notified records that a failing notifier was already reported, so a
-	// broken one costs one line per drive rather than one per event.
-	notified bool
-	// ntfy is [supervise.ntfy], sent only while ntfyOn. ntfyFailed and
-	// ntfyLoose are notified's two counterparts: one line per drive for a
-	// failing send, and one for a token file others can read.
-	ntfy       config.Ntfy
-	ntfyOn     bool
-	ntfyFailed bool
-	ntfyLoose  bool
+	mu       sync.Mutex
+	w        io.Writer
+	cfg      *config.Config
+	notifier *notifier
 	// file is the drive's event file (driveEventsPath), opened for the drive
 	// id it carries. broken records that a write to it failed and was
 	// reported, after which the drive stops trying: the file is how a process
@@ -162,9 +164,10 @@ type eventSink struct {
 	broken bool
 	// seq is the last line the event file holds, as this process knows it.
 	seq int
-	// totals is what the exit event reports about findings, set once the
-	// drive's queue is done.
-	totals *DriveTotals
+	// totals is what the exit event reports about findings, and summary what
+	// it reports about items, both set once the drive's queue is done.
+	totals  *DriveTotals
+	summary *ExitSummary
 }
 
 // events is the running drive's sink, nil outside a drive that launches.
@@ -174,8 +177,7 @@ var events *eventSink
 var driveEvents bool
 
 func newEventSink(cfg *config.Config, stream bool) *eventSink {
-	es := &eventSink{cfg: cfg, notify: cfg.Notify()}
-	es.ntfy, es.ntfyOn = cfg.Ntfy()
+	es := &eventSink{cfg: cfg, notifier: newNotifier(cfg)}
 	if stream {
 		es.w = os.Stdout
 	}
@@ -210,23 +212,45 @@ func (es *eventSink) emit(e DriveEvent) {
 		}
 		es.toFile(line)
 	}
+	es.notifier.route(e)
 	if e.Event == evExit {
 		es.closeFile()
-	}
-	if notifies(e) {
-		es.runNotify(e)
-	}
-	if es.ntfyOn && (slices.Contains(es.ntfy.Events, e.Event) || notifies(e) && slices.Contains(es.ntfy.Events, evNeedsOperator)) {
-		es.sendNtfy(e)
+		es.notifier.close()
 	}
 }
 
-// notifies reports an event [supervise] notify runs on: needs_operator, a
-// usage_warning, and the resumed that lifts a usage hold, which owes whoever
-// was told the drive stopped the news that it started again.
-func notifies(e DriveEvent) bool {
-	return e.Event == evNeedsOperator || e.Event == evUsageWarning ||
-		e.Event == evResumed && e.Action == "usage_admission"
+// settle sends what this sink's destinations still hold and waits for them,
+// for a sink that will see no exit: one made outside a drive, or a drive about
+// to re-execute, whose goroutines go with the process.
+func (es *eventSink) settle() {
+	if es == nil {
+		return
+	}
+	es.notifier.close()
+}
+
+// flushNotify sends what coalescing and quiet hours hold now and waits for it,
+// leaving the destinations open for a drive that goes on.
+func (es *eventSink) flushNotify() {
+	if es == nil {
+		return
+	}
+	es.notifier.flush()
+}
+
+// forge names the repository a pull request's Click header links under,
+// resolved through gh the first time a message needs it.
+func (es *eventSink) forge(labels gh.Labels) {
+	if es == nil {
+		return
+	}
+	es.notifier.forge = func() string {
+		u, err := gh.RepoURL(labels)
+		if err != nil {
+			return ""
+		}
+		return u
+	}
 }
 
 // openFile starts the event file of a drive that just took its id, emptying
@@ -303,15 +327,15 @@ func (es *eventSink) closeFile() {
 }
 
 // reconfigure points the sink at the config a resume loaded, so a policy and
-// the notifier are read from the file as it now stands.
+// the destinations are read from the file as it now stands.
 func (es *eventSink) reconfigure(cfg *config.Config) {
 	if es == nil {
 		return
 	}
 	es.mu.Lock()
 	defer es.mu.Unlock()
-	es.cfg, es.notify = cfg, cfg.Notify()
-	es.ntfy, es.ntfyOn = cfg.Ntfy()
+	es.cfg = cfg
+	es.notifier.reload(cfg)
 }
 
 // stage is the event for an item reaching one step.
@@ -329,27 +353,10 @@ func (es *eventSink) session(id, stage, log string) {
 // hold the dispatcher, and with it every item waiting for a slot.
 const notifyWait = 30 * time.Second
 
-// runNotify hands one needs_operator event to [supervise] notify on stdin.
-// Called with mu held, so notifiers never overlap.
-func (es *eventSink) runNotify(e DriveEvent) {
-	if len(es.notify) == 0 {
-		return
-	}
-	out, err := runArgvNotifier(es.cfg.Root, es.notify, e)
-	if err != nil && !es.notified {
-		es.notified = true
-		if out != "" {
-			out = ": " + lastLines(out, 3)
-		}
-		fmt.Fprintf(os.Stderr, "· [supervise] notify %s failed (%v)%s; the drive goes on, and later failures are not reported\n",
-			strings.Join(es.notify, " "), err, out)
-	}
-}
-
-// runArgvNotifier runs one notifier argv with the event on stdin, bounded at
-// notifyWait, and returns what it printed, trimmed.
-func runArgvNotifier(dir string, argv []string, e DriveEvent) (string, error) {
-	payload, err := json.Marshal(e)
+// runArgvNotifier runs one notifier argv with the payload on stdin as one JSON
+// line, bounded at notifyWait, and returns what it printed, trimmed.
+func runArgvNotifier(dir string, argv []string, p NotifyPayload) (string, error) {
+	payload, err := json.Marshal(p)
 	if err != nil {
 		return "", err
 	}
@@ -362,22 +369,6 @@ func runArgvNotifier(dir string, argv []string, e DriveEvent) (string, error) {
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err = cmd.Run()
 	return strings.TrimSpace(out.String()), err
-}
-
-// sendNtfy posts one event to [supervise.ntfy]. Called with mu held, so a send
-// never overlaps a notifier or another send, and holds dispatch at most
-// ntfyWait.
-func (es *eventSink) sendNtfy(e DriveEvent) {
-	if loose := tokenLoose(es.ntfy.TokenFile); loose != "" && !es.ntfyLoose {
-		es.ntfyLoose = true
-		fmt.Fprintf(os.Stderr, "· [supervise.ntfy] %s; the send goes out\n", loose)
-	}
-	res, err := postNtfy(es.ntfy, e)
-	if err != nil && !es.ntfyFailed {
-		es.ntfyFailed = true
-		fmt.Fprintf(os.Stderr, "· [supervise.ntfy] POST %s failed (%v)%s; the drive goes on, and later failures are not reported\n",
-			es.ntfy.URL, err, res.bodyClause())
-	}
 }
 
 // itemEvents emits what one finished item amounted to: its park, the operator
@@ -405,7 +396,7 @@ func (es *eventSink) itemEvents(d DriveItem) {
 		}
 	}
 	if d.Merged {
-		es.emit(DriveEvent{Event: evMerged, ID: d.ID, PR: d.PR})
+		es.emit(DriveEvent{Event: evMerged, ID: d.ID, PR: d.PR, Title: d.ID + ": " + d.Title})
 	}
 }
 
@@ -507,6 +498,16 @@ var coverageMeaning = map[string]string{
 	coverageUnowned:  "no owner link names an owner, so no run carries it",
 }
 
+// setSummary records what the exit event reports about the drive's items.
+func (es *eventSink) setSummary(s *ExitSummary) {
+	if es == nil {
+		return
+	}
+	es.mu.Lock()
+	defer es.mu.Unlock()
+	es.summary = s
+}
+
 // setTotals records the findings the exit event reports.
 func (es *eventSink) setTotals(t DriveTotals) {
 	if es == nil {
@@ -524,9 +525,19 @@ func (es *eventSink) exit(err error) {
 	}
 	code := Code(err)
 	es.mu.Lock()
-	totals := es.totals
+	totals, summary := es.totals, es.summary
 	es.mu.Unlock()
-	ev := DriveEvent{Event: evExit, Code: &code, DriveTotals: totals}
+	if summary == nil {
+		summary = &ExitSummary{Ended: endedDrained}
+	}
+	sum := *summary
+	if err != nil && sum.Ended == endedDrained {
+		sum.Ended = endedFault
+	}
+	if d := activeDrive.Load(); d != nil {
+		sum.Weighted = driveWeighted(es.cfg.Abs(es.cfg.Paths.Ledger), d.id)
+	}
+	ev := DriveEvent{Event: evExit, Code: &code, DriveTotals: totals, Summary: &sum}
 	if err != nil {
 		ev.Reason = err.Error()
 	}

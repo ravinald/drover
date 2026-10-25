@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	stdpath "path"
@@ -66,9 +67,10 @@ type Config struct {
 	Backlog     Backlog                `toml:"backlog"`
 	Run         Run                    `toml:"run"`
 	Runners     map[string]runner.Spec `toml:"runners"`
-	// Supervise maps supervised action keys to policies, beside the three keys
-	// that are not actions: template, notify and the ntfy table. Read it
-	// through Policy, SuperviseTemplate, Notify and Ntfy.
+	Notify      Notify                 `toml:"notify"`
+	// Supervise maps supervised action keys to policies, beside template, the
+	// one key that is not an action. Read it through Policy and
+	// SuperviseTemplate.
 	//
 	// A map rather than a struct because the action keys are a catalog the cmd
 	// package owns (RegisterActions), and walking it as an open table keeps a
@@ -1106,12 +1108,12 @@ func loadRoot(root string) (*Config, error) {
 	}
 	c.sources = append(c.sources, path)
 
-	globalNtfy := c.Supervise[SuperviseNtfyKey]
+	globalDests := maps.Clone(c.Notify.Destinations)
 	md, err := toml.DecodeFile(path, c)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	c.layerNtfy(globalNtfy)
+	c.layerNotify(globalDests)
 	c.absorbDeclared(md, path, true)
 	// Checked before unknown keys, because the keys a stale config carries are
 	// unknown *as a consequence of* the version being old. Reporting
@@ -1417,6 +1419,9 @@ func (c *Config) validate(path string) error {
 	if err := c.validateSupervise(path); err != nil {
 		return err
 	}
+	if err := c.validateNotify(path); err != nil {
+		return err
+	}
 	// A shape drover cannot read would check nothing while reading as though it
 	// did, which is the whole gap the table closes. Refused at load for the
 	// reason a typo'd colour is: the author just typed it, and no item is at
@@ -1472,11 +1477,14 @@ type ActionBounds struct {
 	Ceiling Policy
 }
 
-// Two of the [supervise] keys that are settings rather than action keys; the
-// third is SuperviseNtfyKey.
+// SuperviseTemplateKey is the [supervise] key that is a setting rather than an
+// action. SuperviseNotifyKey and SuperviseNtfyKey are the two [notify]
+// replaced, named so a config still carrying one is refused rather than read
+// as an action.
 const (
 	SuperviseTemplateKey = "template"
 	SuperviseNotifyKey   = "notify"
+	SuperviseNtfyKey     = "ntfy"
 )
 
 // actions is the catalog's bounds, keyed by action. The catalog lives in the
@@ -1507,18 +1515,6 @@ func (c *Config) SuperviseTemplate() string {
 	return c.Abs(s)
 }
 
-// Notify is the [supervise] notify argv, empty when unset.
-func (c *Config) Notify() []string {
-	raw, _ := c.Supervise[SuperviseNotifyKey].([]any)
-	out := make([]string, 0, len(raw))
-	for _, v := range raw {
-		if s, ok := v.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 // validateSupervise refuses a [supervise] table drover would have to guess
 // about. A policy above its ceiling is the one that matters: the ceiling is
 // where a person has to stay in the loop, and a config that silently clamped
@@ -1537,22 +1533,8 @@ func (c *Config) validateSupervise(path string) error {
 				return fmt.Errorf("%s: supervise.template is %v: name a template file", path, v)
 			}
 			continue
-		case SuperviseNtfyKey:
-			if err := c.validateNtfy(path, v); err != nil {
-				return err
-			}
-			continue
-		case SuperviseNotifyKey:
-			raw, ok := v.([]any)
-			if !ok || len(raw) == 0 {
-				return fmt.Errorf("%s: supervise.notify is %v: give an argv, such as [\"notify-send\", \"drover\"]", path, v)
-			}
-			for _, a := range raw {
-				if _, ok := a.(string); !ok {
-					return fmt.Errorf("%s: supervise.notify holds %v, which is not a string", path, a)
-				}
-			}
-			continue
+		case SuperviseNotifyKey, SuperviseNtfyKey:
+			return removedNotifier(c.writer("supervise."+key, path), key)
 		}
 		s, _ := v.(string)
 		p := Policy(s)

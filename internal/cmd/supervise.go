@@ -392,7 +392,7 @@ type superviseData struct {
 
 func (s *session) superviseData(ids []string, runnerName string) superviseData {
 	d := superviseData{Project: s.cfg.Project, IDs: ids, Runner: runnerName,
-		Policies: policyRows(s.cfg), Notify: len(s.cfg.Notify()) > 0}
+		Policies: policyRows(s.cfg), Notify: routes(s.cfg, evNeedsOperator)}
 	for name, k := range classified {
 		if k.who == operator && !policyOpens[name] {
 			d.Sealed = append(d.Sealed, "`"+name+"`")
@@ -608,12 +608,12 @@ whatever the flags: the policies bound that session, so it cannot choose them.`,
 
 // superviseState is what a project's own [supervise] table already says: the
 // policies it sets, and every other line verbatim. A table printed to paste
-// over the original has to carry both, or pasting it drops a notify the
+// over the original has to carry both, or pasting it drops a template the
 // operator relies on with nothing reporting the loss.
 type superviseState struct {
 	policies map[string]config.Policy
-	// carried are the non-policy lines, notify and template first, then any
-	// key this build does not know, which is not the picker's to delete.
+	// carried are the non-policy lines, template first, then any key this
+	// build does not know, which is not the picker's to delete.
 	carried []string
 }
 
@@ -637,15 +637,13 @@ func readSuperviseState(in *config.Inspection) superviseState {
 			}
 			continue
 		}
-		if key == config.SuperviseNotifyKey || key == config.SuperviseTemplateKey {
+		if key == config.SuperviseTemplateKey {
 			continue
 		}
 		rest = append(rest, key+" = "+literal)
 	}
-	for _, key := range []string{config.SuperviseNotifyKey, config.SuperviseTemplateKey} {
-		if literal, ok := written["supervise."+key]; ok {
-			st.carried = append(st.carried, key+" = "+literal)
-		}
+	if literal, ok := written["supervise."+config.SuperviseTemplateKey]; ok {
+		st.carried = append(st.carried, config.SuperviseTemplateKey+" = "+literal)
 	}
 	slices.Sort(rest)
 	st.carried = append(st.carried, rest...)

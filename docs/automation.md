@@ -238,10 +238,11 @@ A drive that exits before it holds the lease (a refusal, a preflight that fails)
 **`drover attach [drive id]`** prints the drive's event file from the first line and follows it until the `exit` event, then exits `0`. With no id it follows the drive running in this checkout, else the project's latest from the ledger. Each event is one readable line by default and the drive's own JSON line under `--json`; `--since <ts>` (RFC 3339) skips events stamped before it. An interrupt stops following and leaves the drive running, since `attach` never signals the drive or writes anything it reads. An id the ledger and the lease do not name exits `1`, and so does a drive that stopped running with no `exit` event in its file, or with no file at all (one that ran before drives kept one).
 
 ```text
-2026-10-18T09:12:03Z  dispatched     4 seq=1
-2026-10-18T09:12:03Z  stage          4 stage=implement seq=2
-2026-10-18T09:40:51Z  parked         4 park=no_record detail=unknown seq=3 reason="the review recorded nothing"
-2026-10-18T09:40:52Z  exit           code=0 seq=4
+2026-10-18T09:12:02Z  started        queue=4 jobs=1 seq=1
+2026-10-18T09:12:03Z  dispatched     4 seq=2
+2026-10-18T09:12:03Z  stage          4 stage=implement seq=3
+2026-10-18T09:40:51Z  parked         4 park=no_record detail=unknown seq=4 reason="the review recorded nothing"
+2026-10-18T09:40:52Z  exit           code=0 ended=drained merged=0 parked=1 skipped=0 held=0 seq=5
 ```
 
 `--session` prints, beneath each `stage` event that carries a [`log`](#drive---events), what that session is doing as its log grows: one line per tool call or block of text, indented under the item and prefixed with its id, so items running at once under `--jobs` stay apart. `attach` follows each log by offset as it follows the event file, opened for reading only, and stops at the same item's next event, reading the log once more to its last whole line first. Replaying a drive already under way, it reads the logs of sessions still running when it started and of every session launched after; a session that finished before `attach` started keeps its `stage` line alone, so attaching to a long drive does not print hours of old logs. A log not written yet is waited for, and one that will not read is named once on stderr with the error while `attach` goes on with the events. What a line says depends on the runner: a Claude tool call is its name and the first of its `command`, `file_path`, `pattern` or `url` inputs, a codex one is a `command_execution` or `file_change` item, an agy one is the tool step it opens; Claude and codex text is each message the session writes, and agy, which streams text in fragments, yields none. Each summary is one line, cut at 160 characters with a trailing `...`.
@@ -1054,6 +1055,21 @@ account: weekly 21% left, five-hour 91% left, not on purchased credit, week rese
 
 `drive --json --events` writes, beside each item's report, one event object per line as things happen. Every event carries `event`, which no item report has, so a reader splits the stream on that key. Every event also carries `ts` (RFC 3339, UTC), `drive` (the drive's id, taken with the lease; absent only on the `exit` of a drive whose id would not allocate because the ledger would not open), `seq` (the event's line in the drive's event file, from 1, and the cursor [`watch --after`](#detaching-from-a-drive) takes; absent where `drive` is), `project` (the project's name as [`drover projects`](#projects---json) lists it, so a notifier serving several projects reads it rather than working it out from its directory), `id` where one item is meant, and `action` where a [`[supervise]`](configuration.md#supervise) catalog action produced it. `--events` without `--json` refuses with exit `3`. The same objects go to the drive's event file whatever the flags; see [Detaching from a drive](#detaching-from-a-drive).
 
+`started`: the drive holds its lease and has read its queue, before anything is dispatched. `queue` is the ids it will run, in order, `jobs` its `--jobs`, and `deadline` the instant `--for` or `--until` bounds it at, in local time; `deadline` is absent on an unbounded drive. A drive whose queue is empty, and one [re-executed onto a new binary](#resuming-onto-a-new-binary), emits none.
+
+```json
+{
+  "event": "started",
+  "ts": "2026-10-24T17:31:04Z",
+  "seq": 1,
+  "drive": "D10",
+  "project": "drover",
+  "queue": ["B89", "E71", "F14", "E72"],
+  "jobs": 2,
+  "deadline": "2026-10-24T19:31:04-07:00"
+}
+```
+
 `queued`: an id `drive --enqueue` appended to this drive was taken into its queue. `position` is its place among the items waiting, from 1. `action` is `enqueue`.
 
 ```json
@@ -1170,7 +1186,7 @@ The branch update drive makes before an item's own implement session, or its `--
 {"event":"needs_operator","ts":"2026-10-16T22:31:00Z","id":"E43","action":"triage_finding","reason":"follow-up #846, filed by E43, is orphaned: every owner has merged, so no run is left to carry it","policy":"operator","run":"read follow-up #846 (drover follow-ups --coverage), then give it an owner a run will reach, or close it","kind":"follow-up","ref":"846","filed_by":["E43"],"owners":["E35"],"coverage":"orphaned"}
 ```
 
-`needs_operator`: an action at `operator` policy stopped, after its `parked` or `filed` event. `run` is what the operator has to do. `[supervise] notify` runs once per `needs_operator` with this object on stdin, with or without `--events`, and [`[supervise.ntfy]`](configuration.md#supervisentfy) posts it, and any other event its `events` names.
+`needs_operator`: an action at `operator` policy stopped, after its `parked` or `filed` event. `run` is what the operator has to do. Each [`[notify]`](configuration.md#notify) destination that routes `needs_operator` is sent it, with or without `--events`; see [Notification payloads](#notification-payloads).
 
 ```json
 {
@@ -1218,13 +1234,19 @@ The branch update drive makes before an item's own implement session, or its `--
 }
 ```
 
-`merged`: an item's pull request merged, by the forge at once or by drover on the merge gate's word. A merge the forge queued is not one: the next drive's reconciliation finishes it.
+`merged`: an item's pull request merged, by the forge at once or by drover on the merge gate's word. `pr` is its number and `title` its title. A merge the forge queued is not one: the next drive's reconciliation finishes it.
 
 ```json
-{ "event": "merged", "ts": "2026-10-16T22:45:00Z", "id": "E36", "pr": 252 }
+{
+  "event": "merged",
+  "ts": "2026-10-16T22:45:00Z",
+  "id": "E36",
+  "pr": 252,
+  "title": "E36: retry a flaky gate once"
+}
 ```
 
-`paused`: `drive --pause` reached the drive, or [`usage_admission`](configuration.md#supervise) held it. It dispatches nothing more, and each running item holds at its next stage boundary. A usage hold carries `action` `usage_admission`, `policy`, and `window`, `remaining` and `resets_at` as `usage_warning` does, with `reason` naming the level crossed: `the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT`, a window entered on purchased credit under `[usage.overage] mode = "pause"`, a list-price sum at `max_usd`, or a refusal, `impl's review session was refused: the weekly window is spent and so is the purchased credit (out_of_credits), so the service refuses sessions; it resets …`. A `needs_operator` with the same fields and `run` `drover drive --resume` follows it at every policy, so `notify` and `ntfy` reach the operator.
+`paused`: `drive --pause` reached the drive, or [`usage_admission`](configuration.md#supervise) held it. It dispatches nothing more, and each running item holds at its next stage boundary. A usage hold carries `action` `usage_admission`, `policy`, and `window`, `remaining` and `resets_at` as `usage_warning` does, with `reason` naming the level crossed: `the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT`, a window entered on purchased credit under `[usage.overage] mode = "pause"`, a list-price sum at `max_usd`, or a refusal, `impl's review session was refused: the weekly window is spent and so is the purchased credit (out_of_credits), so the service refuses sessions; it resets …`. A `needs_operator` with the same fields and `run` `drover drive --resume` follows it at every policy, so a destination routing `needs_operator` reaches the operator.
 
 ```json
 { "event": "paused", "ts": "2026-10-16T22:50:00Z" }
@@ -1242,7 +1264,7 @@ The branch update drive makes before an item's own implement session, or its `--
 
 A session the service refused for quota (its reading `rejected` with no overage, or `out_of_credits`) is held rather than parked: its item goes back to the head of the queue at the stage that was refused, with a `queued` event carrying `action` `usage_admission`, `stage` and `position` 1, and the refused launch counts against neither `rerun_lost_review` nor `max_review_rounds`. A quota fault with no reading, codex's or agy's, waits or parks `runner_fault` as before, and so does every quota fault at `usage_admission = "off"`.
 
-`usage_warning`: the newest reading crossed a [`[usage]` notify level](configuration.md#usageweekly-and-usagefive_hour). `window` is `weekly` or `five_hour` with `remaining` the percent of it left, `overage` (the weekly allotment spent and sessions drawing on purchased credit, sent when `[usage.weekly] notify_remaining` is set) or `overage_usd` (the list-price sum at `[usage.overage] notify_usd`); neither overage form carries `remaining`, since the service reports no credit figure. `resets_at` is the window's reset in local time and `reason` the sentence. It pauses nothing. Each is sent once per window per reset: drive appends a ledger row naming both first, and sends nothing a row in any registered project already names. `[supervise] notify` runs on it as on `needs_operator`, and `[supervise.ntfy]` sends it when its `events` names `usage_warning` or `needs_operator`.
+`usage_warning`: the newest reading crossed a [`[usage]` notify level](configuration.md#usageweekly-and-usagefive_hour). `window` is `weekly` or `five_hour` with `remaining` the percent of it left, `overage` (the weekly allotment spent and sessions drawing on purchased credit, sent when `[usage.weekly] notify_remaining` is set) or `overage_usd` (the list-price sum at `[usage.overage] notify_usd`); neither overage form carries `remaining`, since the service reports no credit figure. `resets_at` is the window's reset in local time and `reason` the sentence. It pauses nothing. Each is sent once per window per reset: drive appends a ledger row naming both first, and sends nothing a row in any registered project already names. Each [`[notify]`](configuration.md#notify) destination routing `usage_warning` is sent it.
 
 ```json
 {
@@ -1256,7 +1278,7 @@ A session the service refused for quota (its reading `rejected` with no overage,
 }
 ```
 
-`resumed`: `drive --resume` reloaded the drive's inputs. The event without `id` is the drive's own; one with `id` is an item leaving the boundary it was held at, and `stage` is where it goes next (`implement`, `review` or `update_branch`). `changed` names which inputs differ from what the drive, or that item, ran under before: `config` (the `.drover.toml` bytes), `prompt`, `review` (the template text) and `verify` (the item's own verify command, or for the drive's event the whole `[verify]` table). An item whose `verify` changed runs the new command on its tree before it goes on, with a `stage` event for `gate`, and a refusal is sent back to it as a merge gate's would be. A drive that [re-executed onto a new binary](#resuming-onto-a-new-binary) emits one `resumed` with `changed` `binary` from the new process. A usage hold lifting on its own at its window's reset (plus a minute), which it does when the reset falls inside `--for` or `--until`, emits `resumed` with `action` `usage_admission`, the hold's `window`, `remaining` and `resets_at`, and `reason` `the weekly hold reached its reset at Sun Oct 25 20:00 PDT, so the drive dispatches again`; `[supervise] notify` runs on that one too. `drive --resume` lifts a usage hold at any time and emits the ordinary `resumed`, and the same reading does not hold the drive again before its window resets.
+`resumed`: `drive --resume` reloaded the drive's inputs. The event without `id` is the drive's own; one with `id` is an item leaving the boundary it was held at, and `stage` is where it goes next (`implement`, `review` or `update_branch`). `changed` names which inputs differ from what the drive, or that item, ran under before: `config` (the `.drover.toml` bytes), `prompt`, `review` (the template text) and `verify` (the item's own verify command, or for the drive's event the whole `[verify]` table). An item whose `verify` changed runs the new command on its tree before it goes on, with a `stage` event for `gate`, and a refusal is sent back to it as a merge gate's would be. A drive that [re-executed onto a new binary](#resuming-onto-a-new-binary) emits one `resumed` with `changed` `binary` from the new process. A usage hold lifting on its own at its window's reset (plus a minute), which it does when the reset falls inside `--for` or `--until`, emits `resumed` with `action` `usage_admission`, the hold's `window`, `remaining` and `resets_at`, and `reason` `the weekly hold reached its reset at Sun Oct 25 20:00 PDT, so the drive dispatches again`; a destination routing `resumed` is sent that one as it is every other. `drive --resume` lifts a usage hold at any time and emits the ordinary `resumed`, and the same reading does not hold the drive again before its window resets.
 
 ```json
 {
@@ -1269,6 +1291,55 @@ A session the service refused for quota (its reading `rejected` with no overage,
 ```
 
 `exit`: the drive ended, last on the stream. `code` is the exit status the process returns, and `reason` the stop when there was one. A drive that walked its queue also carries `findings_by_coverage` and `findings_needing_triage`, as the [totals object](#drive---json) does.
+
+Every `exit` carries `summary`, what the drive left done and undone:
+
+| Field            | Meaning                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `merged`         | Items whose pull request merged.                                                                                                                                                                                                                                                                                                                         |
+| `ready_to_merge` | Items reviewed and green that nothing merged, such as under `--no-merge` or a `protected_paths` hold.                                                                                                                                                                                                                                                    |
+| `parked`         | Items parked.                                                                                                                                                                                                                                                                                                                                            |
+| `skipped`        | Items not attempted: done, scaffolded, blocked or broken.                                                                                                                                                                                                                                                                                                |
+| `held`           | Items a usage hold kept from starting or finishing.                                                                                                                                                                                                                                                                                                      |
+| `undone`         | Each item that did not merge, in the order it finished: `id`, `outcome`, and `park`, `detail`, `reason` and `pr` where it has them. A skipped item blocked by its dependencies carries `blocked_by`, each unmerged dependency's `id` with its `state`: its outcome in this drive (`parked gate_refused`) where the drive ran it, else its backlog state. |
+| `weighted`       | The weighted tokens of the usage rows the drive's sessions wrote, as [`usage`](#usage) weighs them.                                                                                                                                                                                                                                                      |
+| `ended`          | Why the drive ended: `drained` (the queue ran out), `deadline`, `max_items`, `stopped` (`drive --stop`), `interrupted` or `fault`.                                                                                                                                                                                                                       |
+
+An exit whose summary counts any item parked, skipped or held is what a [`[notify]`](configuration.md#notify) destination routes at `exit_undone`'s priority. A drive re-executed onto a new binary counts the items its predecessor finished by their outcome alone.
+
+```json
+{
+  "event": "exit",
+  "ts": "2026-10-24T18:59:12Z",
+  "drive": "D10",
+  "code": 0,
+  "summary": {
+    "merged": 2,
+    "ready_to_merge": 0,
+    "parked": 1,
+    "skipped": 1,
+    "held": 0,
+    "undone": [
+      {
+        "id": "F14",
+        "outcome": "parked",
+        "park": "gate_refused",
+        "detail": "code",
+        "reason": "Gate failed: internal/cmd/notify.go:28:16: var-declaration (revive); sent back"
+      },
+      {
+        "id": "E72",
+        "outcome": "skipped",
+        "park": "blocked",
+        "reason": "blocked by F14",
+        "blocked_by": [{ "id": "F14", "state": "parked gate_refused" }]
+      }
+    ],
+    "weighted": 48210000,
+    "ended": "drained"
+  }
+}
+```
 
 ```json
 {
@@ -1294,6 +1365,15 @@ A session the service refused for quota (its reading `rejected` with no overage,
     }
   ]
 }
+```
+
+#### Notification payloads
+
+A [`[notify]`](configuration.md#notify) `command` destination reads each message as one JSON line on stdin: the event as above, plus `priority`, the ntfy priority the destination routed it at, and `message`, the body an ntfy destination would send. A message standing for several events, a coalesced kind or what quiet hours held, carries them in `folded`; a coalesced one takes the last event's fields with `id` and `pr` cleared, and what quiet hours held arrives when the window ends as `event` `held`, which no drive emits and only a destination's stdin carries. An exit inside quiet hours folds what was held into the `exit`.
+
+```json
+{ "event": "parked", "ts": "2026-10-24T18:12:40Z", "seq": 31, "drive": "D10", "project": "drover", "id": "F14", "park": "gate_refused", "reason": "Gate failed: internal/cmd/notify.go:28:16: var-declaration (revive); sent back", "detail": "code", "priority": "default", "message": "parked gate_refused (code): Gate failed: internal/cmd/notify.go:28:16: var-declaration (revive); sent back" }
+{ "event": "held", "ts": "2026-10-25T14:00:00Z", "drive": "D11", "project": "drover", "priority": "default", "message": "held during quiet hours (2):\nB93 merged #19: B93: …\nB94 merged #20: B94: …", "folded": [{ "event": "merged", "id": "B93", "pr": 19 }, { "event": "merged", "id": "B94", "pr": 20 }] }
 ```
 
 ### `check --json`

@@ -576,7 +576,7 @@ post_finish_check = "auto"
 | `DROVER_PR`   | the pull request number the ledger recorded for it, empty when none was      |
 | `DROVER_SHA`  | the commit origin's trunk points at after the finish, else the local trunk's |
 
-Exit 0 appends a ledger row `{"id","post_finish","date"}` carrying the first line of what the command printed. Any other exit, including a binary that is not on `PATH`, files a follow-up owned by the item in the project's [follow-up list](#register) with the command's last 40 lines in its body, and emits `needs_operator` for `post_finish_check`, which reaches [`[supervise] notify`](#supervise). Neither undoes the merge or changes `finish`'s exit status. Nothing bounds how long it runs, as nothing bounds `[drive] merge_gate`.
+Exit 0 appends a ledger row `{"id","post_finish","date"}` carrying the first line of what the command printed. Any other exit, including a binary that is not on `PATH`, files a follow-up owned by the item in the project's [follow-up list](#register) with the command's last 40 lines in its body, and emits `needs_operator` for `post_finish_check`, which reaches each [`[notify]`](#notify) destination routing it. Neither undoes the merge or changes `finish`'s exit status. Nothing bounds how long it runs, as nothing bounds `[drive] merge_gate`.
 
 `post_check` is executed, like `merge_gate` and `worktree_setup`: see the paragraph closing [`[drive]`](#drive). A first element that is empty is a load error.
 
@@ -760,10 +760,10 @@ The limit is per account, so `budget_used` sums every project in the [project re
 
 `weekly_budget` is an estimate in drover's own weighting. These two tables act on the figure the service itself reports. Claude Code writes a `rate_limit_event` into every headless log, and drover keeps the last one of each session on its usage row as [`rate_limit`](automation.md#writing-to-the-ledger-without-the-binary). Each window's level is the **percent of the window left**, `100 - utilization * 100`, as the service reports it in steps of 1%. It is not tokens and not dollars.
 
-| Key                | Type    | Range   | Default | Meaning                                                                                                                                                                                                                                                     |
-| ------------------ | ------- | ------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `notify_remaining` | integer | 0 to 99 | unset   | The notify level. At or below it, `drive` emits one [`usage_warning`](automation.md#drive---events) per window per reset and runs `notify` and `ntfy` on it. It does not pause or slow the drive. Unset sends none for this window.                         |
-| `pause_remaining`  | integer | 0 to 99 | unset   | The fail-safe level. At or below it, [`usage_admission`](#supervise) holds the drive: running sessions finish their stage, nothing new starts, and the drive pauses until the window resets or `drover drive --resume`. Unset holds nothing on this window. |
+| Key                | Type    | Range   | Default | Meaning                                                                                                                                                                                                                                                                         |
+| ------------------ | ------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `notify_remaining` | integer | 0 to 99 | unset   | The notify level. At or below it, `drive` emits one [`usage_warning`](automation.md#drive---events) per window per reset and sends it to each [`[notify]`](#notify) destination routing `usage_warning`. It does not pause or slow the drive. Unset sends none for this window. |
+| `pause_remaining`  | integer | 0 to 99 | unset   | The fail-safe level. At or below it, [`usage_admission`](#supervise) holds the drive: running sessions finish their stage, nothing new starts, and the drive pauses until the window resets or `drover drive --resume`. Unset holds nothing on this window.                     |
 
 `[usage.weekly]` is the seven-day window and `[usage.five_hour]` the five-hour one. When both keys of a table are set, `pause_remaining` must be below `notify_remaining`, so the notice comes before the hold; load refuses the pair otherwise, naming both values. `0` is a level, not unset: `pause_remaining = 0` holds once the window reads 100% used.
 
@@ -863,21 +863,21 @@ Publishing makes item text readable to everyone who can read the repository, so 
 
 A drive runs unattended, and what it parks still needs somebody: a conflict after a sibling merged, a scaffold a review filed, a review session that died. `[supervise]` says, per action, who that is.
 
-| Key          | Default             | Meaning                                                                                                                                                                                                                                                                                  |
-| ------------ | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `template`   | unset               | The template [`drover supervise`](automation.md#the-supervisor) renders its prompt from, resolved like [`[prompts]`](#prompts) `implement`. Unset uses the built-in one; `drover supervise --dry-run` prints the result.                                                                 |
-| `notify`     | unset               | An argv run once per `needs_operator` and `usage_warning` event, and on the `resumed` that lifts a usage hold, from the project root, with the event JSON on stdin and 30 seconds to finish. A notifier that fails or is missing is reported once per drive and never parks or stops it. |
-| `ntfy`       | unset               | A table naming an [ntfy](https://ntfy.sh) topic each chosen event is POSTed to. See [`[supervise.ntfy]`](#supervisentfy). `notify` and `ntfy` may both be set, and both run.                                                                                                             |
-| _action key_ | the catalog default | The policy for one action below.                                                                                                                                                                                                                                                         |
+| Key          | Default             | Meaning                                                                                                                                                                                                                  |
+| ------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `template`   | unset               | The template [`drover supervise`](automation.md#the-supervisor) renders its prompt from, resolved like [`[prompts]`](#prompts) `implement`. Unset uses the built-in one; `drover supervise --dry-run` prints the result. |
+| _action key_ | the catalog default | The policy for one action below.                                                                                                                                                                                         |
+
+`[supervise]` takes neither a `notify` argv nor an `ntfy` table: [`[notify]`](#notify) destinations do that work, and a config carrying either is refused at load with an error naming the key and `scripts/migrate-notify.sh`, which rewrites it in place.
 
 Every other key is an action from the catalog, set to a policy:
 
-| Policy       | Means                                                                                   |
-| ------------ | --------------------------------------------------------------------------------------- |
-| `auto`       | Drive does it.                                                                          |
-| `supervisor` | A session `drover supervise` started may do it, and reports it.                         |
-| `operator`   | drover stops, emits `needs_operator`, runs `notify` and `ntfy`, and waits for a person. |
-| `off`        | Nothing happens. Today's park stands.                                                   |
+| Policy       | Means                                                                                                                        |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `auto`       | Drive does it.                                                                                                               |
+| `supervisor` | A session `drover supervise` started may do it, and reports it.                                                              |
+| `operator`   | drover stops, emits `needs_operator`, sends it to each [`[notify]`](#notify) destination routing it, and waits for a person. |
+| `off`        | Nothing happens. Today's park stands.                                                                                        |
 
 The policies are ordered `off` < `operator` < `supervisor` < `auto`, and each action has a ceiling: a policy above it is a load error naming the key, the policy requested and the ceiling. An omitted key takes its default, and an unknown key is a load error. Each command listed beside an action is that action when a supervisor runs it, and refuses there with exit `3` unless the action is at `supervisor` or `auto`.
 
@@ -945,40 +945,109 @@ The five preflight and admission keys do change what drive does. Each check emit
 
 The path scan reads the command line alone, so a file a verify command reaches only through a `Makefile` or a script is not found that way; the traced run finds it and costs one run of the verify command.
 
-`drover config` prints every action's effective policy after the file, marked `default` where no file sets it. `drover init supervise` walks the catalog by category and offers each action the policies up to its ceiling; drover never rewrites `.drover.toml`, so it appends a `[supervise]` table when the file has none and prints one to paste over it when the file does. The printed table carries the existing `notify`, `template` and any key this build does not know as written, and the walk offers each action the policy the project's own file sets, so pressing return keeps it. `--defaults` resets the policies and still carries those lines. Values the per-user file supplies are never copied in. `drover agents` renders the effective table into the generated instructions.
+`drover config` prints every action's effective policy after the file, marked `default` where no file sets it. `drover init supervise` walks the catalog by category and offers each action the policies up to its ceiling; drover never rewrites `.drover.toml`, so it appends a `[supervise]` table when the file has none and prints one to paste over it when the file does. The printed table carries the existing `template` and any key this build does not know as written, and the walk offers each action the policy the project's own file sets, so pressing return keeps it. `--defaults` resets the policies and still carries those lines. Values the per-user file supplies are never copied in. `drover agents` renders the effective table into the generated instructions.
 
 ```toml
 [supervise]
-notify            = ["notify-send", "drover"]
 resolve_conflict  = "operator"   # nobody but a person touches a conflict here
 post_finish_check = "auto"
 ```
 
-### `[supervise.ntfy]`
+## `[notify]`
 
-The drive sends to an [ntfy](https://ntfy.sh) topic itself, so reaching a phone takes a URL and a token file rather than a script. The table may sit in `.drover.toml` or in the per-user config, and where both write it the project's wins key by key: a per-user file naming the server and token serves every project, and one project can raise its priority without repeating the rest.
+A drive runs unattended, so what it does has to reach somebody who is not watching the terminal. `[notify]` names the destinations its events go to, and each destination chooses which events it takes and how loudly. The table may sit in `.drover.toml` or in the per-user config: a per-user destination serves every project, a project destination of the same name wins over it key by key, and destinations of different names both apply.
 
-| Key          | Default              | Meaning                                                                                                                                                                                                                                            |
-| ------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `url`        | required             | The topic URL, such as `https://ntfy.sh/<topic>`. It must be `https://` unless the host is a loopback address, must name a topic in its path, and may not carry credentials.                                                                       |
-| `token_file` | unset                | A file holding the access token, sent as `Authorization: Bearer <token>`. It must start with `/` or `~/`, and is read at every send, so a rotated token takes effect on the next event. Unset sends no token.                                      |
-| `events`     | `["needs_operator"]` | The drive events that send: any of `needs_operator`, `needs_supervisor`, `parked`, `usage_warning` and `exit`. A list naming `needs_operator` also sends each `usage_warning` and the `resumed` that lifts a usage hold, as `notify` runs on them. |
-| `priority`   | `"high"`             | ntfy's priority for every send: `min`, `low`, `default`, `high` or `urgent`.                                                                                                                                                                       |
+| Key            | Type     | Default | Meaning                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `coalesce`     | duration | `"0s"`  | Events of one kind for one destination that arrive within this window go out as one message listing their ids, such as `filed: B91 B91 B92`. `0s` is off. `needs_operator`, `needs_supervisor` and `exit` are never coalesced or delayed.                                                                                                                                |
+| `quiet_hours`  | string   | unset   | `"HH:MM-HH:MM"` in local time, which may cross midnight. Messages routed below `high` are held until the window ends, then sent as one message per destination. `needs_operator`, `needs_supervisor` and `exit` are never held. A drive that exits inside the window folds what it held into its exit message, sent at `min` unless `exit` is routed at `high` or above. |
+| `destinations` | table    | none    | One `[notify.destinations.<name>]` table per destination, keyed below. A drive with none sends nothing.                                                                                                                                                                                                                                                                  |
 
-An unknown key, a malformed URL, an unknown event or priority, and a table with no `url` are load errors naming the key and the file that wrote it.
+Each destination takes:
 
-Each send is a `POST` to `url` with `Title: drover: <project> <id>` (`drover: <project>` for an event with no item), `Priority`, `Tags: robot`, and a body of `<action>: <run>`, falling back to the event's `reason` and then to its name. It runs where `notify` runs, after the event is written, so sends never overlap and none holds dispatch longer than its 10-second bound. A send that fails, whether a non-2xx status, a timeout or an unreadable token file, is reported once per drive on stderr with the status and the body ntfy returned, and never parks or stops the drive.
+| Key          | Type   | Applies to | Default  | Meaning                                                                                                                                                                                                                                                                                         |
+| ------------ | ------ | ---------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`       | string | both       | required | `ntfy` POSTs each routed event to an [ntfy](https://ntfy.sh) topic; `command` runs an argv with each routed event on stdin.                                                                                                                                                                     |
+| `events`     | table  | both       | required | An inline table mapping each event the destination takes to an ntfy priority: `min`, `low`, `default`, `high` or `urgent`. An event the table does not name is not sent there. Any event a drive emits may be named, and `exit_undone`, described below.                                        |
+| `url`        | string | `ntfy`     | required | The topic URL, such as `https://ntfy.sh/<topic>`. It must be `https://` unless the host is a loopback address, must name a topic in its path, and may not carry credentials.                                                                                                                    |
+| `token_file` | string | `ntfy`     | unset    | A file holding the access token, sent as `Authorization: Bearer <token>`. It must start with `/` or `~/`, and is read at every send, so a rotated token takes effect on the next message. Unset sends no token.                                                                                 |
+| `argv`       | array  | `command`  | required | The command, run from the project root with 30 seconds to finish. It reads the event as one JSON line on stdin with `priority`, `message` (the body an ntfy destination would send) and, for a coalesced or held message, `folded` added. See [`drive --events`](automation.md#drive---events). |
 
-The token appears in no output drover writes: not in an error, the event file, `--events`, or `drover config`, which prints the `url`, the resolved `token_file` and whether that file exists and reads. A `token_file` that group or others can read draws one warning per drive naming the path and `chmod 600`, and the send still goes out. `drover notify --test` sends one synthetic `needs_operator` event through `notify` and `ntfy` alike, prints each one's exit or HTTP status, and exits 0 when all succeeded, 1 when one failed and 2 when neither is configured.
+The events a drive emits are `started`, `queued`, `dispatched`, `preflight`, `stage`, `check`, `parked`, `filed`, `needs_operator`, `needs_supervisor`, `merged`, `paused`, `resumed`, `usage_warning` and `exit`, each described under [`drive --events`](automation.md#drive---events). `exit_undone` is a routing key rather than an event: an exit that leaves any item parked, skipped or held is sent at `exit_undone`'s priority instead of `exit`'s, and it defaults to `high` wherever `exit` is routed, so a drive that exited 0 with work left behind reaches the phone louder than one that finished everything.
+
+An unknown key, type, event name or priority, a malformed URL, a destination with no `type`, `events`, or the `url` or `argv` its type needs, a `coalesce` that is not a duration and a `quiet_hours` that is not two `HH:MM` times are load errors naming the destination, the key and the file that wrote it.
+
+### Sending
+
+Sends to different destinations do not wait on each other or on the drive: each destination has a queue of its own, an ntfy send is bounded at 10 seconds and a command at 30. A send that fails, whether a non-2xx status, a timeout, an unreadable token file or a command exiting non-zero, is reported once per destination per drive on stderr, with the status and the body ntfy returned or the command's last lines, and never parks or stops the drive or the other destinations. A destination more than 256 messages behind drops the rest and says so once.
+
+An ntfy message carries `Title: drover: <project> <id>` (`drover: <project>` for an event with no item, and for a coalesced or held message), the routed `Priority`, `Tags: robot`, and a body written for its event:
+
+| Event                                | Body                                                                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `started`                            | The drive id, the queue in order, `--jobs` above 1, and the deadline or `no deadline`.                                                                 |
+| `merged`                             | The pull request's number and title.                                                                                                                   |
+| `parked`                             | The park, its detail and reason, then up to 5 lines of the park's evidence, which for a `gate_refused` park are the lines its check's log says failed. |
+| `needs_operator`, `needs_supervisor` | `<action>: <run>`, the action and the command to run.                                                                                                  |
+| `usage_warning`                      | The window, the percent of it left and its reset in local time.                                                                                        |
+| `exit`                               | The summary below.                                                                                                                                     |
+| any other                            | A line naming what happened: the stage, the check, the finding, the position.                                                                          |
+
+Where the event concerns a pull request drover recorded, the message sets ntfy's `Click` header to that pull request's URL, so tapping it opens the pull request. The repository address comes from one `gh repo view` per drive, the first time a message needs it.
+
+The exit message says what the drive left undone, within ntfy's 4096-byte limit:
+
+```text
+D10 exited 0: the queue drained
+1 merged · 1 parked · 1 skipped · 0 held
+F14 parked gate_refused (code): revive failed: internal/cmd/notify.go:28:16: var-declaration; sent back
+E72 skipped: blocked by F14 (parked gate_refused)
+48.2M weighted tokens
+```
+
+It names why the drive ended (the queue drained, the deadline arrived, `--max-items`, `drive --stop`, an interrupt, or a fault), its exit code, how many items merged, parked, skipped and held, each item that did not merge with its cause, and the weighted tokens of the usage rows its sessions wrote. Items past the limit are listed as `and N more`.
+
+### Tokens and testing
+
+The token appears in no output drover writes: not in an error, the event file, `--events`, or `drover config`, which prints each ntfy destination's `url`, its resolved `token_file` and whether that file exists and reads. A `token_file` that group or others can read draws one warning per destination per drive naming the path and `chmod 600`, and the send still goes out.
+
+`drover notify --test` sends one synthetic `needs_operator` event, id `TEST`, through every destination, whatever its `events` name, at its routed priority or `high` where it routes none. `--event <name>` sends a sample of that kind instead, rendered as the real one would be, at each destination's routed priority, to the destinations that route it. It prints each destination's HTTP or exit status, and exits 0 when every send succeeded, 1 when one failed and 2 when no destination is configured or none routes the `--event` named.
+
+### Example
+
+Two destinations: a phone that hears what needs a person and how each drive ended, and a desktop command that hears every merge. Overnight, merges wait for the morning and arrive as one message:
 
 ```toml
-[supervise.ntfy]
+# ~/.config/drover/config.toml
+[notify]
+quiet_hours = "22:30-07:00"
+coalesce    = "2m"
+
+[notify.destinations.phone]
+type       = "ntfy"
 url        = "https://ntfy.example.com/drover"
 token_file = "~/.config/drover/ntfy-token"
-events     = ["needs_operator", "needs_supervisor"]
+events     = { needs_operator = "high", needs_supervisor = "default", parked = "default", exit = "low", exit_undone = "high", usage_warning = "high" }
+
+[notify.destinations.desk]
+type   = "command"
+argv   = ["notify-send", "drover"]
+events = { merged = "default", needs_operator = "default" }
+```
+
+A project that wants its own exits louder writes only what differs, and keeps the rest of the per-user destination:
+
+```toml
+# .drover.toml
+[notify.destinations.phone]
+events = { needs_operator = "urgent", exit = "default" }
 ```
 
 iOS delivers a notification from a self-hosted server instantly only when that server sets `upstream-base-url` (usually `https://ntfy.sh`), so Apple's push service is told a message is waiting. That is a setting in the ntfy server's own `server.yml`, not in drover; without it the iOS app picks messages up only when it next polls.
+
+### Migrating from `[supervise]`
+
+`[supervise] notify` and `[supervise.ntfy]` are refused at load. `scripts/migrate-notify.sh <file>`, in the drover repository, rewrites either in place in a project or per-user config: `notify = [...]` becomes a `command` destination named `command` routed `{ needs_operator = "default" }`, and `[supervise.ntfy]` an `ntfy` destination named `ntfy` carrying its `url`, `token_file`, and each of its `events` at its `priority`. It changes only those lines, writes through a temp file and a rename, follows a symlink to the file it names, and leaves a file with neither key untouched. The old `notify` argv also ran on `usage_warning` and on the `resumed` that lifts a usage hold; add `usage_warning` to the migrated destination's `events` to keep hearing it.
 
 ## Worked example
 

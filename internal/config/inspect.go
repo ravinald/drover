@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -104,12 +105,12 @@ func Inspect(dir string) (*Inspection, error) {
 	if err != nil {
 		return nil, err
 	}
-	globalNtfy := c.Supervise[SuperviseNtfyKey]
+	globalDests := maps.Clone(c.Notify.Destinations)
 	md, err := toml.Decode(string(data), c)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	c.layerNtfy(globalNtfy)
+	c.layerNotify(globalDests)
 	ownMD, err := toml.Decode(string(data), in.own)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)

@@ -510,6 +510,9 @@ type DriveItem struct {
 	// signoff is the same for an [operator] requirement park: which ones, and
 	// the command that records them.
 	signoff string
+	// blockedBy is the unmerged dependencies of an item skipped as blocked,
+	// which the exit summary names with what each came to.
+	blockedBy []string
 	// handed is a park whose hand-off drive already emitted, carrying where to
 	// work, so the item's own parked event does not emit a second, emptier one.
 	handed bool
@@ -807,14 +810,18 @@ neither unless reconciliation already wrote a row naming it. drover drives
 lists them. --dry-run takes no id.
 
 --events, beside --json, also writes one event object per line as things
-happen: queued, dispatched, preflight, stage, check, parked, filed,
-needs_operator, needs_supervisor, merged, paused, resumed, usage_warning and exit. Each carries "event", which is how a reader tells it from an item's
+happen: started, queued, dispatched, preflight, stage, check, parked, filed,
+needs_operator, needs_supervisor, merged, paused, resumed, usage_warning and
+exit. Each carries "event", which is how a reader tells it from an item's
 report, "ts", "drive", "id" where one item is meant, and "action" where a [supervise]
-catalog action produced it. A park whose action is at operator policy emits needs_operator,
-and [supervise] notify runs once per needs_operator and usage_warning, and on
-the resumed that lifts a usage hold, with the event on stdin, with or without
---events; a notifier that fails is reported once and never
-stops the drive. Every drive also appends each event to
+catalog action produced it. A park whose action is at operator policy emits
+needs_operator. exit carries a summary: what merged, parked, skipped and was
+held, each item that did not merge with its cause, the drive's weighted
+tokens, and why it ended. Each [notify] destination is sent the events it
+routes, at the priority it routes each at, with or without --events; an exit
+that left an item parked, skipped or held goes at exit_undone's priority. A
+destination that fails is reported once and never stops the drive or the
+others. Every drive also appends each event to
 $XDG_STATE_HOME/drover/drives/<project>/<drive id>.jsonl whatever the flags,
 which is the file attach and watch read; a write there that fails is reported
 once and never stops the drive.
@@ -849,7 +856,7 @@ usage row of any registered project, before each dispatch and before each
 stage that launches a session. Crossing [usage.weekly] or [usage.five_hour]
 notify_remaining (the percent of the window left) emits usage_warning once per
 window per reset, recorded in the ledger so no drive in any project sends it
-twice, and runs [supervise] notify on it. Crossing pause_remaining, entering
+twice, and sends it to each [notify] destination routing usage_warning. Crossing pause_remaining, entering
 purchased credit under [usage.overage] mode = "pause", reaching max_usd under
 mode = "continue", or a reading the service refuses sessions under, holds the
 drive: running sessions finish their stage, nothing new starts, and the drive
@@ -969,7 +976,9 @@ drive with exit 0 and each item it held reports held. At usage_admission =
 		// no item, so a line in one has nothing to be misread by.
 		if driveTakeover == "" && !driveCatchUp {
 			if lerr := s.lintQueue(args); lerr != nil {
-				newEventSink(s.cfg, driveEvents).preflight("", "deps_lint", lerr.Error())
+				sink := newEventSink(s.cfg, driveEvents)
+				sink.preflight("", "deps_lint", lerr.Error())
+				sink.settle()
 				return lerr
 			}
 		}
@@ -1035,9 +1044,10 @@ drive with exit 0 and each item it held reports held. At usage_admission =
 				activeRender.Store(&driveRenderer{targets: s.cfg.Status.Render})
 				defer activeRender.Store(nil)
 			}
-			// Made whether or not --events streams, because [supervise] notify
-			// is owed every needs_operator either way.
+			// Made whether or not --events streams, because [notify] is owed
+			// every event it routes either way.
 			events = newEventSink(s.cfg, driveEvents)
+			events.forge(s.labels())
 			defer func() {
 				s.endDrive(err)
 				s.driveSync("after the drive")
@@ -1380,6 +1390,14 @@ func (s *session) drive(ctx context.Context, ids []string, reviewer string, dead
 	if err := s.startDrive(items); err != nil {
 		return err
 	}
+	started := DriveEvent{Event: evStarted, Jobs: driveJobs}
+	for _, it := range items {
+		started.Queue = append(started.Queue, it.ID.Bare())
+	}
+	if !deadline.IsZero() {
+		started.Deadline = deadline.Format(time.RFC3339)
+	}
+	events.emit(started)
 	s.driveHeader(os.Stderr, items, reviewer, deadline)
 	s.checkTreeLinks(os.Stderr, items, false)
 
@@ -1436,6 +1454,14 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 	results := make(chan finished)
 	running := map[int]queued{}
 	stopped := false
+	// ended is why the drive stopped dispatching, for the exit summary: the
+	// first cause that stopped it, drained where nothing did.
+	ended := ""
+	end := func(why string) {
+		if ended == "" {
+			ended = why
+		}
+	}
 	var stop error
 	var published []string
 	var admit admission
@@ -1455,6 +1481,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		s.answerControl(sched)
 		if !stopped && errors.Is(sched.draining(), errStopRequested) {
 			stopped = true
+			end(endedStopped)
 		}
 		if !stopped && sched.reexecReady(len(running)) {
 			s.reexec(sched, pending, running, dispatched, deadline, watch)
@@ -1470,6 +1497,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 				// did not reach is held rather than failed.
 				fmt.Fprintln(os.Stderr, "· the deadline arrived while the drive was held on usage; stopping, and each item it holds reports held")
 				stopped = true
+				end(endedDeadline)
 				sched.drain(errUsageDeadline)
 				for _, q := range pending {
 					d := heldItem(q.it, u)
@@ -1488,6 +1516,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		if paused && !stopped && ctx.Err() != nil {
 			fmt.Fprintln(os.Stderr, "· interrupted while paused; stopping")
 			stopped = true
+			end(endedInterrupted)
 		}
 		if !stopped {
 			pending = append(pending, s.takeAppended(false, seen, holds, len(pending))...)
@@ -1501,16 +1530,19 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			if !carried && driveMax > 0 && dispatched >= driveMax {
 				fmt.Fprintf(os.Stderr, "· stopping at --max-items %d\n", driveMax)
 				stopped = true
+				end(endedMaxItems)
 				break
 			}
 			if !carried && !deadline.IsZero() && !time.Now().Before(deadline) {
 				fmt.Fprintf(os.Stderr, "· stopping at the deadline\n")
 				stopped = true
+				end(endedDeadline)
 				break
 			}
 			if ctx.Err() != nil {
 				fmt.Fprintln(os.Stderr, "· interrupted; stopping at the item boundary")
 				stopped = true
+				end(endedInterrupted)
 				break
 			}
 			if i < 0 {
@@ -1631,6 +1663,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		if d.stop != nil && stop == nil {
 			fmt.Fprintf(os.Stderr, "· %v; stopping the drive\n", d.stop)
 			stop, stopped = d.stop, true
+			end(endedFault)
 			sched.drain(d.stop)
 		}
 	}
@@ -1639,10 +1672,16 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 	if stop == nil && sched.draining() == nil && ctx.Err() == nil {
 		if err := s.recheckInfra(ctx, done, deadline, enc); err != nil {
 			stop = err
+			end(endedFault)
 		}
 	}
+	if ended == "" && ctx.Err() != nil {
+		end(endedInterrupted)
+	}
+	end(endedDrained)
 	totals := driveTotals(watch.all)
 	events.setTotals(totals)
+	events.setSummary(s.exitSummary(done, ended))
 	if driveJSON {
 		if err := enc.Encode(totals); err != nil {
 			return err
@@ -1840,6 +1879,7 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 	if s.resumeAt == nil && !drivable(state, named) {
 		if state == stateBlocked {
 			d.Reason = "blocked by " + strings.Join(missing, " ")
+			d.blockedBy = missing
 		}
 		return skip(state)
 	}

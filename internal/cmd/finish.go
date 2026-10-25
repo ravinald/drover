@@ -915,11 +915,13 @@ func (s *session) postFinish(it backlog.Item, trunk string) {
 	} else {
 		fmt.Printf("    filed %s against %s\n", where, id)
 	}
-	sink := events
-	if sink == nil {
-		sink = newEventSink(s.cfg, false)
+	if events != nil {
+		events.needsOperator(id, "post_finish_check", "[finish] post_check failed: "+why, "")
+		return
 	}
+	sink := newEventSink(s.cfg, false)
 	sink.needsOperator(id, "post_finish_check", "[finish] post_check failed: "+why, "")
+	sink.settle()
 }
 
 // fileFollowUp files a follow-up owned by one item, in whichever follow-up list
