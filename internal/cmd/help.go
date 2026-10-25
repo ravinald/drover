@@ -151,7 +151,7 @@ var classified = map[string]classification{
 		effect:  "--dry-run prints the prompt and launches nothing. Otherwise launches the runner interactively in the checkout at the project root, with DROVER_ACTOR=supervisor and a prompt rendered from [supervise] template or the built-in one, and prints the resolved argv first. That session may run drive while [supervise] enqueue is supervisor or auto, finish while merge_drive_pr is supervisor and the ledger shows a pull request drive opened with a passed review, and any other command that is a supervised action only at supervisor or auto; accept, unaccept, signoff, intake, mark-merged, unmark-merged, open-pr and supervise stay refused to it. The sessions a supervised drive launches are agents. supervise itself writes nothing.",
 		reach:   "launches a supervising session"},
 	"attach": {group: groupRun, class: readOnly, who: either,
-		effect: "Reads the drive's event file under $XDG_STATE_HOME/drover/drives/<project>, {ledger} and this checkout's lease. Never signals the drive or writes anything it reads, so an interrupt leaves the drive running."},
+		effect: "Reads the drive's event file under $XDG_STATE_HOME/drover/drives/<project>, {ledger} and this checkout's lease, and under --session the session logs its stage events name in the log directory, opened for reading only. Never signals the drive or writes anything it reads, so an interrupt leaves the drive running."},
 	"watch": {group: groupRun, class: readOnly, who: either,
 		effect: "Reads the drive's event file under $XDG_STATE_HOME/drover/drives/<project>, {ledger} and this checkout's lease. Never signals the drive or writes anything it reads."},
 	"drives": {group: groupRun, class: readOnly, who: either,
