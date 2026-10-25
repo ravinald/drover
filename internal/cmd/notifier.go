@@ -166,6 +166,9 @@ type notice struct {
 	priority string
 	body     string
 	folded   []DriveEvent
+	// reminder is "(reminder N of M)" on a repeated needs_operator, which the
+	// title carries.
+	reminder string
 }
 
 // NotifyPayload is what a command destination reads on stdin: the event, the
@@ -176,6 +179,7 @@ type NotifyPayload struct {
 	Priority string       `json:"priority"`
 	Message  string       `json:"message"`
 	Folded   []DriveEvent `json:"folded,omitempty"`
+	Reminder string       `json:"reminder,omitempty"`
 }
 
 // evHeld is the event a command destination reads for what quiet hours held,
@@ -201,7 +205,9 @@ const queueDepth = 256
 // not the dispatcher, and not another destination.
 type notifier struct {
 	project, root string
+	cfg           *config.Config
 	routing       config.Routing
+	probe         answerProbe
 	// forge resolves the repository URL a pull request's Click header links
 	// under, once per drive and only when a message needs it.
 	forge     func() string
@@ -243,7 +249,7 @@ func sameEndpoint(a, b config.Destination) bool {
 }
 
 func newNotifier(cfg *config.Config) *notifier {
-	n := &notifier{project: cfg.Project, root: cfg.Root}
+	n := &notifier{project: cfg.Project, root: cfg.Root, probe: ledgerProbe{}}
 	n.load(cfg)
 	return n
 }
@@ -252,6 +258,7 @@ func newNotifier(cfg *config.Config) *notifier {
 // before the notifier is shared.
 func (n *notifier) load(cfg *config.Config) {
 	prev := n.dests
+	n.cfg = cfg
 	n.routing = cfg.Notifications()
 	n.dests = nil
 	for _, d := range n.routing.Destinations {
@@ -298,6 +305,8 @@ func (n *notifier) route(e DriveEvent) {
 	}
 	now := notifyClock()
 	n.releaseLocked(now)
+	var repeat []*destination
+	prio := map[string]string{}
 	for _, d := range n.dests {
 		if e.Event == evExit {
 			n.exitLocked(d, e, now)
@@ -317,6 +326,13 @@ func (n *notifier) route(e DriveEvent) {
 			continue
 		}
 		n.deliverLocked(d, notice{event: e, priority: p, body: noticeBody(e)}, now)
+		if e.Event == evNeedsOperator && d.Repeat > 0 {
+			repeat = append(repeat, d)
+			prio[d.Name] = p
+		}
+	}
+	if len(repeat) > 0 {
+		n.watchLocked(e, repeat, prio)
 	}
 }
 
@@ -630,7 +646,7 @@ func (d *destination) send(nt notice) {
 }
 
 func (nt notice) payload() NotifyPayload {
-	return NotifyPayload{DriveEvent: nt.event, Priority: nt.priority, Message: nt.body, Folded: nt.folded}
+	return NotifyPayload{DriveEvent: nt.event, Priority: nt.priority, Message: nt.body, Folded: nt.folded, Reminder: nt.reminder}
 }
 
 // click is the pull request URL an event concerns, empty where it names none

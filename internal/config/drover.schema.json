@@ -623,6 +623,16 @@
                 },
                 "minItems": 1,
                 "description": "command only. Run from the project root with the event on stdin, bounded at 30 seconds."
+              },
+              "repeat": {
+                "type": "string",
+                "description": "A duration of at least 5m: while the drive runs, a needs_operator this destination took and nobody answered is sent again this often, at the same priority, its title suffixed (reminder N of M). Answered means the item was accepted, merged, rerun or shelved, or the drive resumed from the pause that raised it. Unset sends no reminders. Repeats end when the drive exits."
+              },
+              "repeat_max": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 6,
+                "description": "The most reminders one needs_operator gets at this destination. Read only where repeat is set."
               }
             }
           }

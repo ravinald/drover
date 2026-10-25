@@ -230,6 +230,7 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `exit`             | Event: the drive ended, with a summary of what it merged and what it left undone and why.                          |
 | `exit_undone`      | `[notify]` routing key: an exit that left an item parked, skipped or held.                                         |
 | `held`             | Event on a `[notify]` command's stdin alone: what quiet hours held, sent as the window ends.                       |
+| `answered`         | Event on a `[notify]` command's stdin alone: a reminded `needs_operator` was answered while the drive ran.         |
 | round              | One implement session and the review that reads it.                                                                |
 | `infra`            | Check class: a red check blamed on the forge's infrastructure.                                                     |
 | `trunk`            | Check class: a red check the trunk fails too.                                                                      |
