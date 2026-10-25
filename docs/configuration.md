@@ -617,13 +617,16 @@ The text goes in as written, with no template processing, so a `{{` renders as `
 
 ## `[intake]`
 
-| Key           | Meaning                                                                        |
-| ------------- | ------------------------------------------------------------------------------ |
-| `stop_marker` | Text that holds a scaffolded item inert until a human writes its requirements. |
+| Key            | Meaning                                                                                                                           |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `stop_marker`  | Text that holds a scaffolded item inert until a human writes its requirements.                                                    |
+| `hold_markers` | Texts that say a body is not ready to accept. Default `["OPERATOR DECISION PENDING", "BEFORE ACCEPT"]`; `[]` turns the check off. |
 
 drover refuses to launch or preview an item whose body carries this text on a line of its own, and `status` shows it as `[?]`: `scaffold · needs requirements` while no numbered requirement is written, `drafted · N reqs · drover accept <id>` once the list is there and waits on accept. The match is a whole line outside any fenced block, never a substring: a body quoting the marker in a config sample is somebody's accepted contract, and matching the quote would make `run` refuse to preview it.
 
 `drover accept <id>` removes the line and `drover unaccept <id>` restores it. Both refuse a project that leaves this key unset, because neither can tell a scaffold from a contract there.
+
+`accept` refuses, unless given `--yes`, a body with a line containing one of `hold_markers` outside a fenced block or a code span holding a space, and names the line. The match is a substring, so `OPERATOR STEP BEFORE ACCEPT: measure X` is a hold under the default. `drover check` reports `HOLD MARKER` for one in an accepted, unmerged item. See [What accept checks](lifecycle.md#what-accept-checks).
 
 ## `[git]`
 
