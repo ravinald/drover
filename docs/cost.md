@@ -45,7 +45,7 @@ A background loop started from inside an agent session, such as `sleep 60` follo
 Let something that isn't a model do the waiting:
 
 - `drover drive --detach` waits for everything a drive waits on, at no token cost.
-- `[supervise] notify` tells you when a drive needs a person, so nothing has to watch for it.
+- [`[notify]`](configuration.md#notify) tells you when a drive needs a person and what it left undone, so nothing has to watch for it.
 - `drover watch --until <events>` blocks until an event arrives, so a session that must wait wakes once per event instead of once per check.
 
 ### Parallel work

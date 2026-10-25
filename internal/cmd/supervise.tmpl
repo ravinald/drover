@@ -45,6 +45,8 @@ to find the drive, `drover attach` to read what it did meanwhile, then
 
 Each event is one JSON object carrying `event`. Events:
 
+- `started`: the drive holds its lease and read its queue. `queue`, `jobs`,
+  and `deadline` when `--for` or `--until` bounds it.
 - `queued`: an id `drover drive --enqueue <ids>` appended joined the queue, at
   `position`. Queue more work that way rather than waiting for a drive to exit:
   it appends to the running drive, or starts one when none is running.
@@ -59,9 +61,10 @@ Each event is one JSON object carrying `event`. Events:
   sentence, and `action` the catalog key that owns it, when one does.
 - `filed`: a session created an item, such as a scaffold a review filed.
 - `needs_operator`: an action at `operator` stopped. `action` and `run` say
-  what the operator has to do.{{ if .Notify }} [supervise] notify has already
-  been run for it.{{ end }}
-- `merged`: an item's pull request merged. `pr` is its number.
+  what the operator has to do.{{ if .Notify }} A `[notify]` destination has
+  already sent it to the operator.{{ end }}
+- `merged`: an item's pull request merged. `pr` is its number and `title`
+  its title.
 - `usage_warning`: the account crossed a `[usage]` notify level. `window`,
   `remaining` (the percent of it left) and `resets_at`. Report it and do
   nothing else: the drive goes on, and the notice is the operator's.
@@ -72,7 +75,10 @@ Each event is one JSON object carrying `event`. Events:
   `drover drive --resume` is the operator's, since it spends what they kept
   back, unless `pause_for_config_change` is `supervisor` here. A `resumed`
   with the same action is the hold lifting at the reset; report it.
-- `exit`: the drive ended. `code` is its exit status.
+- `exit`: the drive ended. `code` is its exit status, and `summary` counts
+  what merged, parked, skipped and was held, lists in `undone` each item that
+  did not merge with its cause, and says in `ended` why the drive stopped.
+  Report the undone items.
 
 Every event carries `ts`, `id` where one item is meant, and `action` where a
 catalog action produced it. Key on `event`, `park` and `action`, never on

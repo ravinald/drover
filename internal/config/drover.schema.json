@@ -488,7 +488,7 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 99,
-              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and runs [supervise] notify and [supervise.ntfy] on it. It does not pause or slow the drive. Unset sends none."
+              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and sends it to each [notify] destination routing usage_warning. It does not pause or slow the drive. Unset sends none."
             },
             "pause_remaining": {
               "type": "integer",
@@ -507,7 +507,7 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 99,
-              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and runs [supervise] notify and [supervise.ntfy] on it. It does not pause or slow the drive. Unset sends none."
+              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and sends it to each [notify] destination routing usage_warning. It does not pause or slow the drive. Unset sends none."
             },
             "pause_remaining": {
               "type": "integer",
@@ -568,6 +568,67 @@
         }
       }
     },
+    "notify": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where a drive's events go. Each destination routes the events it names, each at its own ntfy priority; an event a destination does not name is not sent to it. Sends to different destinations do not wait on each other, and a failure is reported once per destination per drive and never stops the drive.",
+      "properties": {
+        "coalesce": {
+          "type": "string",
+          "default": "0s",
+          "description": "A duration: events of one kind for one destination arriving within it go out as one message listing their ids. 0s is off. needs_operator, needs_supervisor and exit are never coalesced or delayed."
+        },
+        "quiet_hours": {
+          "type": "string",
+          "pattern": "^[0-2][0-9]:[0-5][0-9]-[0-2][0-9]:[0-5][0-9]$",
+          "description": "HH:MM-HH:MM in local time, which may cross midnight. Messages routed below high are held until it ends, then sent as one message per destination; an exit inside it folds what was held into the exit message at priority min unless exit is routed at high or above. needs_operator and needs_supervisor are never held. Unset means none."
+        },
+        "destinations": {
+          "type": "object",
+          "description": "One table per destination, [notify.destinations.<name>]. A project destination wins over the per-user one of the same name key by key; destinations of different names both apply.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "events"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["ntfy", "command"],
+                "description": "ntfy POSTs each routed event to url; command runs argv with the event as one JSON line on stdin, priority and message added."
+              },
+              "events": {
+                "type": "object",
+                "minProperties": 1,
+                "propertyNames": {
+                  "enum": ["started", "queued", "dispatched", "preflight", "stage", "check", "parked", "filed", "needs_operator", "needs_supervisor", "merged", "paused", "resumed", "usage_warning", "exit", "exit_undone"]
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": ["min", "low", "default", "high", "urgent"]
+                },
+                "description": "Each event this destination takes, mapped to its ntfy priority. exit_undone is an exit leaving an item parked, skipped or held, and defaults to high wherever exit is routed."
+              },
+              "url": {
+                "type": "string",
+                "description": "ntfy only. The topic URL, such as https://ntfy.sh/<topic>. Must be https:// unless the host is a loopback address."
+              },
+              "token_file": {
+                "type": "string",
+                "description": "ntfy only. A file holding the bearer token, starting with / or ~/, read at each send. Unset sends no Authorization header."
+              },
+              "argv": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "description": "command only. Run from the project root with the event on stdin, bounded at 30 seconds."
+              }
+            }
+          }
+        }
+      }
+    },
     "supervise": {
       "type": "object",
       "description": "Who carries out each supervised action: auto (drive does it), supervisor (a session `drover supervise` started may do it and reports it), operator (drover stops, notifies and waits), off (nothing happens; today's park stands). Keys are the action catalog `drover config` prints; an omitted key takes its default, and a policy above an action's ceiling is a load error.",
@@ -577,39 +638,12 @@
           "description": "The template `drover supervise` renders its prompt from. Unset uses the built-in one."
         },
         "notify": {
-          "type": "array",
-          "items": { "type": "string" },
-          "minItems": 1,
-          "description": "Argv run once per needs_operator and usage_warning event, and on the resumed that lifts a usage hold, with the event JSON on stdin. A failing or missing notifier is reported once per drive and never stops it."
+          "not": {},
+          "description": "Removed: [notify] destinations replace it. A config carrying it is refused at load; scripts/migrate-notify.sh rewrites it in place."
         },
         "ntfy": {
-          "type": "object",
-          "description": "An ntfy topic each named drive event is POSTed to, bounded at 10 seconds. The project's table wins over the per-user one key by key. A failed send is reported once per drive and never stops it.",
-          "properties": {
-            "url": {
-              "type": "string",
-              "description": "The topic URL, such as https://ntfy.sh/<topic>. Must be https:// unless the host is a loopback address."
-            },
-            "token_file": {
-              "type": "string",
-              "description": "A file holding the bearer token, starting with / or ~/, read at each send. Unset sends no Authorization header."
-            },
-            "events": {
-              "type": "array",
-              "items": { "type": "string", "enum": ["needs_operator", "needs_supervisor", "parked", "exit"] },
-              "minItems": 1,
-              "default": ["needs_operator"],
-              "description": "The drive events that send."
-            },
-            "priority": {
-              "type": "string",
-              "enum": ["min", "low", "default", "high", "urgent"],
-              "default": "high",
-              "description": "The ntfy priority every send carries."
-            }
-          },
-          "required": ["url"],
-          "additionalProperties": false
+          "not": {},
+          "description": "Removed: [notify] destinations replace it. A config carrying it is refused at load; scripts/migrate-notify.sh rewrites it in place."
         }
       },
       "additionalProperties": {

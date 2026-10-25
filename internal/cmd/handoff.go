@@ -219,6 +219,9 @@ func (s *session) reexec(q *driveSched, pending []queued, running map[int]queued
 		return
 	}
 	fmt.Fprintf(os.Stderr, "· re-executing drive %s onto %s; %d held, %d queued\n", d.id, q.reexec, len(holds), len(queue))
+	// Whatever coalescing or quiet hours hold goes out now: the process that
+	// holds it is about to be replaced, and its timers with it.
+	events.flushNotify()
 	argv := append([]string{os.Args[0]}, takeoverArgs(os.Args[1:], "--takeover", d.id, "--lease-fd", strconv.Itoa(int(fd)), "--ignore-stale")...)
 	failed(driveExec(startedFrom.path, argv, os.Environ()))
 }

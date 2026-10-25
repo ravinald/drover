@@ -408,7 +408,7 @@ drover signoff F5 6 "ssh dev-guest-1 'systemctl is-active webapp' printed active
 | `0`      | appends a `post_finish` ledger row carrying the first line of its output                                       |
 | non-zero | files a follow-up owned by the item, prints where, and emits `needs_operator` (the `post_finish_check` action) |
 
-Neither undoes the merge or changes finish's exit: the trunk already carries the commit, and a failed check is work somebody owes on it rather than a reason to pretend the item was never finished. Under `[register] backend = "none"`, or `--no-tracker` with the tracker backend, nothing is filed and the line says so. Outside a drive, `needs_operator` reaches `[supervise] notify` and nothing else. See [`[finish]`](configuration.md#finish).
+Neither undoes the merge or changes finish's exit: the trunk already carries the commit, and a failed check is work somebody owes on it rather than a reason to pretend the item was never finished. Under `[register] backend = "none"`, or `--no-tracker` with the tracker backend, nothing is filed and the line says so. Outside a drive, `needs_operator` reaches each [`[notify]`](configuration.md#notify) destination routing it, and nothing else. See [`[finish]`](configuration.md#finish).
 
 ### When the forge has no auto-merge
 

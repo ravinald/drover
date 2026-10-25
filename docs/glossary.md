@@ -36,7 +36,7 @@ Each command, as typed after `drover`.
 | `link`                  | Adds an issue number to the item's `closes` key, so `finish` answers whoever filed it.                       |
 | `mark-merged`           | Appends the completion row alone, for a merge recorded by hand.                                              |
 | `new`                   | Writes a scaffolded item with no tracker issue behind it.                                                    |
-| `notify`                | Sends a test event through `[supervise] notify` and `[supervise.ntfy]` and prints what each answered.        |
+| `notify`                | Sends a test event, or a sample of one `--event`, to each `[notify]` destination and prints each answer.     |
 | `open-pr`               | Runs the merge gate and opens the pull request for a branch the review passed.                               |
 | `projects`              | Lists every project drover has been pointed at on this machine.                                              |
 | `report`                | Prints the run's self-report beside a requirements checklist; `--save` writes it under `[paths] reports`.    |
@@ -213,6 +213,7 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `pr`               | Event stage: drive opened the pull request.                                                                        |
 | `merge`            | Event stage: drive asked the forge to merge.                                                                       |
 | `finish`           | Ledger and event stage: the finish step after a merge.                                                             |
+| `started`          | Event: the drive holds its lease and read its queue; names the queue, `--jobs` and any deadline.                   |
 | `queued`           | Event: an item joined the queue.                                                                                   |
 | `dispatched`       | Event: an item left the queue for a session.                                                                       |
 | `preflight`        | Event: a check drive runs before launching, such as `stale_citations`.                                             |
@@ -226,7 +227,9 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `paused`           | Event: the drive paused.                                                                                           |
 | `resumed`          | Event: the drive resumed, naming what changed.                                                                     |
 | `usage_warning`    | Event: the account crossed a `[usage]` notify level; sent once per window per reset, and it pauses nothing.        |
-| `exit`             | Event: the drive ended.                                                                                            |
+| `exit`             | Event: the drive ended, with a summary of what it merged and what it left undone and why.                          |
+| `exit_undone`      | `[notify]` routing key: an exit that left an item parked, skipped or held.                                         |
+| `held`             | Event on a `[notify]` command's stdin alone: what quiet hours held, sent as the window ends.                       |
 | round              | One implement session and the review that reads it.                                                                |
 | `infra`            | Check class: a red check blamed on the forge's infrastructure.                                                     |
 | `trunk`            | Check class: a red check the trunk fails too.                                                                      |
@@ -431,7 +434,8 @@ The `.drover.toml` sections, with the keys whose names carry drover vocabulary. 
 | `[usage]`                    | How status reads usage rows, and when drive warns and holds: `weekly_budget`, `reset`, `session_max_hours`, `context_warn`, and the tables `[usage.weekly]`, `[usage.five_hour]` and `[usage.overage]`. |
 | `[register]`                 | Where the follow-up list lives: `backend`.                                                                                                                                                              |
 | `[backlog]`                  | `mirror`, which publishes items as tracker issues.                                                                                                                                                      |
-| `[supervise]`                | One policy per supervise action, plus `template` and `notify`.                                                                                                                                          |
+| `[supervise]`                | One policy per supervise action, plus `template`.                                                                                                                                                       |
+| `[notify]`                   | Where a drive's events go: `coalesce`, `quiet_hours`, and `[notify.destinations.<name>]` tables, each an `ntfy` topic or a `command` routing its own events at their own priorities.                    |
 
 ## Concept words
 

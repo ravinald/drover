@@ -291,7 +291,8 @@ func TestOneUsageWarningAcrossTwoDrives(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", home)
 	sent := filepath.Join(t.TempDir(), "sent")
 	extra := "\n[drive]\nmerge_gate = [\"stub-gate\"]\n\n[usage.weekly]\nnotify_remaining = 20\n\n" +
-		"[supervise]\nnotify = [\"sh\", \"-c\", \"cat >> " + sent + "\"]\n"
+		"[notify.destinations.sent]\ntype = \"command\"\nargv = [\"sh\", \"-c\", \"cat >> " + sent + "\"]\n" +
+		"events = { usage_warning = \"default\" }\n"
 	a := driveProjectWith(t, extra)
 	b := driveProjectWith(t, extra)
 	reg := projects.Path(config.GlobalPath())

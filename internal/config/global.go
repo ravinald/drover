@@ -200,15 +200,17 @@ func unknownKeys(path string, md toml.MetaData) error {
 	return fmt.Errorf("%s: unknown key(s): %v", path, keys)
 }
 
-// undecoded is md.Undecoded less the keys inside [supervise.ntfy]. The decoder
-// hands a table under an untyped map over whole and lists every key in it as
-// undecoded, so without this a correct table reads as unknown keys;
-// validateNtfy names the ones that are.
+// undecoded is md.Undecoded less the keys inside a [notify] destination and
+// inside a removed [supervise.ntfy]. The decoder hands a table under an untyped
+// map over whole and lists every key in it as undecoded, so without this a
+// correct destination reads as unknown keys, and an old ntfy table as a typo
+// rather than the removal validateSupervise names with its migration.
+// validateNotify names the destination keys that are unknown.
 func undecoded(md toml.MetaData) []toml.Key {
-	prefix := "supervise." + SuperviseNtfyKey + "."
 	var out []toml.Key
 	for _, k := range md.Undecoded() {
-		if !strings.HasPrefix(k.String(), prefix) {
+		s := k.String()
+		if !strings.HasPrefix(s, "notify.destinations.") && !strings.HasPrefix(s, "supervise."+SuperviseNtfyKey+".") {
 			out = append(out, k)
 		}
 	}
