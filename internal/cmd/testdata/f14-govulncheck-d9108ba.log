@@ -1,0 +1,294 @@
+﻿2026-10-25T00:48:11.8114114Z Current runner version: '2.338.0'
+2026-10-25T00:48:11.8142354Z ##[group]Runner Image Provisioner
+2026-10-25T00:48:11.8143258Z Hosted Compute Agent
+2026-10-25T00:48:11.8143821Z Version: 20261021.618
+2026-10-25T00:48:11.8144474Z Commit: 21505ad2541d5be6135ed84fc33697146cf75b8e
+2026-10-25T00:48:11.8145541Z Build Date: 2026-10-21T00:45:21Z
+2026-10-25T00:48:11.8146457Z Worker ID: {a2a7360e-e4ce-4c1f-b4f3-dccb58131e98}
+2026-10-25T00:48:11.8147315Z Region: centralus
+2026-10-25T00:48:11.8147851Z Cloud: Azure
+2026-10-25T00:48:11.8148356Z ##[endgroup]
+2026-10-25T00:48:11.8149746Z ##[group]Operating System
+2026-10-25T00:48:11.8150738Z Ubuntu
+2026-10-25T00:48:11.8151250Z 24.04.5
+2026-10-25T00:48:11.8151751Z LTS
+2026-10-25T00:48:11.8152246Z ##[endgroup]
+2026-10-25T00:48:11.8152773Z ##[group]Runner Image
+2026-10-25T00:48:11.8153441Z Image: ubuntu-24.04
+2026-10-25T00:48:11.8153985Z Version: 20261012.334.1
+2026-10-25T00:48:11.8155230Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261012.334/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-25T00:48:11.8157137Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261012.334
+2026-10-25T00:48:11.8158142Z ##[endgroup]
+2026-10-25T00:48:11.8159481Z ##[group]GITHUB_TOKEN Permissions
+2026-10-25T00:48:11.8162098Z Checks: read
+2026-10-25T00:48:11.8162652Z Contents: read
+2026-10-25T00:48:11.8163300Z Metadata: read
+2026-10-25T00:48:11.8163847Z PullRequests: read
+2026-10-25T00:48:11.8164422Z ##[endgroup]
+2026-10-25T00:48:11.8166506Z Secret source: Actions
+2026-10-25T00:48:11.8167377Z Cache mode: write
+2026-10-25T00:48:11.8168336Z Prepare workflow directory
+2026-10-25T00:48:11.8478241Z Prepare all required actions
+2026-10-25T00:48:11.8528280Z Getting action download info
+2026-10-25T00:48:12.0972538Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-10-25T00:48:12.2005006Z Download action repository 'actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e' (SHA:b7ad1dad31e06c5925ef5d2fc7ad053ef454303e)
+2026-10-25T00:48:12.7804584Z Complete job name: Gate
+2026-10-25T00:48:12.8565551Z ##[group]Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+2026-10-25T00:48:12.8566515Z with:
+2026-10-25T00:48:12.8567027Z   fetch-depth: 0
+2026-10-25T00:48:12.8567553Z   repository: ravinald/drover
+2026-10-25T00:48:12.8571317Z   token: ***
+2026-10-25T00:48:12.8571844Z   ssh-strict: true
+2026-10-25T00:48:12.8572397Z   ssh-user: git
+2026-10-25T00:48:12.8572898Z   persist-credentials: true
+2026-10-25T00:48:12.8573441Z   clean: true
+2026-10-25T00:48:12.8573946Z   sparse-checkout-cone-mode: true
+2026-10-25T00:48:12.8574541Z   fetch-tags: false
+2026-10-25T00:48:12.8575034Z   show-progress: true
+2026-10-25T00:48:12.8575511Z   lfs: false
+2026-10-25T00:48:12.8576012Z   submodules: false
+2026-10-25T00:48:12.8576507Z   set-safe-directory: true
+2026-10-25T00:48:12.8577063Z   allow-unsafe-pr-checkout: false
+2026-10-25T00:48:12.8577875Z ##[endgroup]
+2026-10-25T00:48:12.9585815Z Syncing repository: ravinald/drover
+2026-10-25T00:48:12.9588164Z ##[group]Getting Git version info
+2026-10-25T00:48:12.9589001Z Working directory is '/home/runner/work/drover/drover'
+2026-10-25T00:48:12.9590759Z [command]/usr/bin/git version
+2026-10-25T00:48:12.9641590Z git version 2.55.0
+2026-10-25T00:48:12.9657934Z ##[endgroup]
+2026-10-25T00:48:12.9667632Z Temporarily overriding HOME='/home/runner/work/_temp/778fbcff-b2ee-4645-afa0-4264569fc6e1' before making global git config changes
+2026-10-25T00:48:12.9669418Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-25T00:48:12.9673319Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/drover/drover
+2026-10-25T00:48:12.9717577Z Deleting the contents of '/home/runner/work/drover/drover'
+2026-10-25T00:48:12.9720870Z ##[group]Determining repository object format
+2026-10-25T00:48:12.9722105Z ##[endgroup]
+2026-10-25T00:48:12.9723313Z ##[group]Initializing the repository
+2026-10-25T00:48:12.9725932Z [command]/usr/bin/git init /home/runner/work/drover/drover
+2026-10-25T00:48:12.9821354Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-10-25T00:48:12.9822939Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-10-25T00:48:12.9824685Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-10-25T00:48:12.9825803Z hint: call:
+2026-10-25T00:48:12.9826502Z hint:
+2026-10-25T00:48:12.9827279Z hint: 	git config --global init.defaultBranch <name>
+2026-10-25T00:48:12.9828154Z hint:
+2026-10-25T00:48:12.9829191Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-10-25T00:48:12.9830835Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-10-25T00:48:12.9831955Z hint:
+2026-10-25T00:48:12.9832649Z hint: 	git branch -m <name>
+2026-10-25T00:48:12.9833378Z hint:
+2026-10-25T00:48:12.9834404Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-10-25T00:48:12.9835780Z Initialized empty Git repository in /home/runner/work/drover/drover/.git/
+2026-10-25T00:48:12.9838421Z [command]/usr/bin/git remote add origin https://github.com/ravinald/drover
+2026-10-25T00:48:12.9880167Z ##[endgroup]
+2026-10-25T00:48:12.9881559Z ##[group]Disabling automatic garbage collection
+2026-10-25T00:48:12.9883300Z [command]/usr/bin/git config --local gc.auto 0
+2026-10-25T00:48:12.9912850Z ##[endgroup]
+2026-10-25T00:48:12.9914070Z ##[group]Setting up auth
+2026-10-25T00:48:12.9918788Z Removing SSH command configuration
+2026-10-25T00:48:12.9924716Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-25T00:48:12.9945795Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-25T00:48:13.0410210Z Removing HTTP extra header
+2026-10-25T00:48:13.0414775Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-25T00:48:13.0441644Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-25T00:48:13.0613834Z Removing includeIf entries pointing to credentials config files
+2026-10-25T00:48:13.0619234Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-25T00:48:13.0646338Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-25T00:48:13.0834401Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-edf78ddf-791e-420c-b7ac-0b61549aff91.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-10-25T00:48:13.0866167Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/drover/drover/.git.path /home/runner/work/_temp/git-credentials-edf78ddf-791e-420c-b7ac-0b61549aff91.config
+2026-10-25T00:48:13.0892941Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/drover/drover/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-edf78ddf-791e-420c-b7ac-0b61549aff91.config
+2026-10-25T00:48:13.0922228Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-edf78ddf-791e-420c-b7ac-0b61549aff91.config
+2026-10-25T00:48:13.0947709Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-edf78ddf-791e-420c-b7ac-0b61549aff91.config
+2026-10-25T00:48:13.0975389Z ##[endgroup]
+2026-10-25T00:48:13.0976461Z ##[group]Fetching the repository
+2026-10-25T00:48:13.0981157Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+2026-10-25T00:48:13.8039609Z From https://github.com/ravinald/drover
+2026-10-25T00:48:13.8043478Z  * [new branch]      bug/b82-split-always-makes-the-original-item-wait-on-the -> origin/bug/b82-split-always-makes-the-original-item-wait-on-the
+2026-10-25T00:48:13.8048241Z  * [new branch]      bug/b83-drive-resume-onto-a-new-binary-deadlocks-when-an -> origin/bug/b83-drive-resume-onto-a-new-binary-deadlocks-when-an
+2026-10-25T00:48:13.8053306Z  * [new branch]      bug/b84-drive-skips-the-dependent-of-a-dep-parked-for-a -> origin/bug/b84-drive-skips-the-dependent-of-a-dep-parked-for-a
+2026-10-25T00:48:13.8056947Z  * [new branch]      docs/operating-modes-and-cost -> origin/docs/operating-modes-and-cost
+2026-10-25T00:48:13.8060982Z  * [new branch]      enhancement/e64-an-accepted-item-s-requirements-can-only-change -> origin/enhancement/e64-an-accepted-item-s-requirements-can-only-change
+2026-10-25T00:48:13.8066040Z  * [new branch]      enhancement/e66-record-each-headless-session-s-token-usage-in-th -> origin/enhancement/e66-record-each-headless-session-s-token-usage-in-th
+2026-10-25T00:48:13.8071959Z  * [new branch]      enhancement/e67-status-and-the-built-in-dashboards-show-token-us -> origin/enhancement/e67-status-and-the-built-in-dashboards-show-token-us
+2026-10-25T00:48:13.8077953Z  * [new branch]      feature/f14-drover-sends-needs-operator-events-to-an-ntfy-se -> origin/feature/f14-drover-sends-needs-operator-events-to-an-ntfy-se
+2026-10-25T00:48:13.8081374Z  * [new branch]      main       -> origin/main
+2026-10-25T00:48:13.8082770Z  * [new tag]         v0.1.0     -> v0.1.0
+2026-10-25T00:48:13.8084355Z  * [new tag]         v0.1.1     -> v0.1.1
+2026-10-25T00:48:13.8088196Z [command]/usr/bin/git branch --list --remote origin/feature/f14-drover-sends-needs-operator-events-to-an-ntfy-se
+2026-10-25T00:48:13.8091105Z   origin/feature/f14-drover-sends-needs-operator-events-to-an-ntfy-se
+2026-10-25T00:48:13.8095052Z [command]/usr/bin/git rev-parse refs/remotes/origin/feature/f14-drover-sends-needs-operator-events-to-an-ntfy-se
+2026-10-25T00:48:13.8099597Z d9108bae5614f06548f44724a0bf4de3a7fc3a33
+2026-10-25T00:48:13.8104279Z ##[endgroup]
+2026-10-25T00:48:13.8106451Z ##[group]Determining the checkout info
+2026-10-25T00:48:13.8108932Z ##[endgroup]
+2026-10-25T00:48:13.8110365Z [command]/usr/bin/git sparse-checkout disable
+2026-10-25T00:48:13.8155710Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-10-25T00:48:13.8183340Z ##[group]Checking out the ref
+2026-10-25T00:48:13.8187546Z [command]/usr/bin/git checkout --progress --force -B feature/f14-drover-sends-needs-operator-events-to-an-ntfy-se refs/remotes/origin/feature/f14-drover-sends-needs-operator-events-to-an-ntfy-se
+2026-10-25T00:48:13.8516793Z Switched to a new branch 'feature/f14-drover-sends-needs-operator-events-to-an-ntfy-se'
+2026-10-25T00:48:13.8531090Z branch 'feature/f14-drover-sends-needs-operator-events-to-an-ntfy-se' set up to track 'origin/feature/f14-drover-sends-needs-operator-events-to-an-ntfy-se'.
+2026-10-25T00:48:13.8537531Z ##[endgroup]
+2026-10-25T00:48:13.8576627Z [command]/usr/bin/git log -1 --format=%H
+2026-10-25T00:48:13.8598108Z d9108bae5614f06548f44724a0bf4de3a7fc3a33
+2026-10-25T00:48:13.9037034Z ##[group]Run actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+2026-10-25T00:48:13.9038631Z with:
+2026-10-25T00:48:13.9039628Z   go-version-file: go.mod
+2026-10-25T00:48:13.9040811Z   check-latest: false
+2026-10-25T00:48:13.9049199Z   token: ***
+2026-10-25T00:48:13.9050243Z   cache: true
+2026-10-25T00:48:13.9051132Z ##[endgroup]
+2026-10-25T00:48:14.0250922Z Setup go version spec 1.26
+2026-10-25T00:48:14.0326960Z Found in cache @ /opt/hostedtoolcache/go/1.26.9/x64
+2026-10-25T00:48:14.0328704Z Added go to the path
+2026-10-25T00:48:14.0330158Z Successfully set up Go version 1.26
+2026-10-25T00:48:14.0847505Z [command]/opt/hostedtoolcache/go/1.26.9/x64/bin/go env GOMODCACHE
+2026-10-25T00:48:14.0877531Z [command]/opt/hostedtoolcache/go/1.26.9/x64/bin/go env GOCACHE
+2026-10-25T00:48:14.0900611Z /home/runner/go/pkg/mod
+2026-10-25T00:48:14.0916166Z /home/runner/.cache/go-build
+2026-10-25T00:48:14.2316433Z Cache hit for: setup-go-Linux-x64-ubuntu24-go-1.26.9-d4c596845b0cb846be05486b846867e37bab01918280da8fb88b89c97ccf5033
+2026-10-25T00:48:15.4029577Z Received 117440512 of 284632444 (41.3%), 111.9 MBs/sec
+2026-10-25T00:48:16.4073872Z Received 276824064 of 284632444 (97.3%), 131.9 MBs/sec
+2026-10-25T00:48:16.4431109Z Received 284632444 of 284632444 (100.0%), 132.9 MBs/sec
+2026-10-25T00:48:16.4432293Z Cache Size: ~271 MB (284632444 B)
+2026-10-25T00:48:16.4465651Z [command]/usr/bin/tar -xf /home/runner/work/_temp/23e0c1c0-a39e-4fc3-8ba6-90f8aa0a2e8c/cache.tzst -P -C /home/runner/work/drover/drover --use-compress-program unzstd
+2026-10-25T00:48:19.1318610Z Cache restored successfully
+2026-10-25T00:48:19.1600930Z Cache restored from key: setup-go-Linux-x64-ubuntu24-go-1.26.9-d4c596845b0cb846be05486b846867e37bab01918280da8fb88b89c97ccf5033
+2026-10-25T00:48:19.1627178Z go version go1.26.9 linux/amd64
+2026-10-25T00:48:19.1627592Z 
+2026-10-25T00:48:19.1628297Z ##[group]go env
+2026-10-25T00:48:19.1832227Z AR='ar'
+2026-10-25T00:48:19.1832777Z CC='gcc'
+2026-10-25T00:48:19.1833212Z CGO_CFLAGS='-O2 -g'
+2026-10-25T00:48:19.1833669Z CGO_CPPFLAGS=''
+2026-10-25T00:48:19.1834095Z CGO_CXXFLAGS='-O2 -g'
+2026-10-25T00:48:19.1834486Z CGO_ENABLED='1'
+2026-10-25T00:48:19.1834842Z CGO_FFLAGS='-O2 -g'
+2026-10-25T00:48:19.1835260Z CGO_LDFLAGS='-O2 -g'
+2026-10-25T00:48:19.1835628Z CXX='g++'
+2026-10-25T00:48:19.1835983Z GCCGO='gccgo'
+2026-10-25T00:48:19.1836416Z GO111MODULE=''
+2026-10-25T00:48:19.1836762Z GOAMD64='v1'
+2026-10-25T00:48:19.1837093Z GOARCH='amd64'
+2026-10-25T00:48:19.1837451Z GOAUTH='netrc'
+2026-10-25T00:48:19.1837790Z GOBIN=''
+2026-10-25T00:48:19.1838217Z GOCACHE='/home/runner/.cache/go-build'
+2026-10-25T00:48:19.1838649Z GOCACHEPROG=''
+2026-10-25T00:48:19.1838970Z GODEBUG=''
+2026-10-25T00:48:19.1839363Z GOENV='/home/runner/.config/go/env'
+2026-10-25T00:48:19.1840133Z GOEXE=''
+2026-10-25T00:48:19.1840579Z GOEXPERIMENT=''
+2026-10-25T00:48:19.1841006Z GOFIPS140='off'
+2026-10-25T00:48:19.1841351Z GOFLAGS=''
+2026-10-25T00:48:19.1842361Z GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build374679144=/tmp/go-build -gno-record-gcc-switches'
+2026-10-25T00:48:19.1843161Z GOHOSTARCH='amd64'
+2026-10-25T00:48:19.1843550Z GOHOSTOS='linux'
+2026-10-25T00:48:19.1843915Z GOINSECURE=''
+2026-10-25T00:48:19.1844370Z GOMOD='/home/runner/work/drover/drover/go.mod'
+2026-10-25T00:48:19.1844893Z GOMODCACHE='/home/runner/go/pkg/mod'
+2026-10-25T00:48:19.1845421Z GONOPROXY=''
+2026-10-25T00:48:19.1845778Z GONOSUMDB=''
+2026-10-25T00:48:19.1846139Z GOOS='linux'
+2026-10-25T00:48:19.1846549Z GOPATH='/home/runner/go'
+2026-10-25T00:48:19.1846995Z GOPRIVATE=''
+2026-10-25T00:48:19.1847460Z GOPROXY='https://proxy.golang.org,direct'
+2026-10-25T00:48:19.1847990Z GOROOT='/opt/hostedtoolcache/go/1.26.9/x64'
+2026-10-25T00:48:19.1848449Z GOSUMDB='sum.golang.org'
+2026-10-25T00:48:19.1848877Z GOTELEMETRY='local'
+2026-10-25T00:48:19.1849323Z GOTELEMETRYDIR='/home/runner/.config/go/telemetry'
+2026-10-25T00:48:19.1849918Z GOTMPDIR=''
+2026-10-25T00:48:19.1850346Z GOTOOLCHAIN='local'
+2026-10-25T00:48:19.1851135Z GOTOOLDIR='/opt/hostedtoolcache/go/1.26.9/x64/pkg/tool/linux_amd64'
+2026-10-25T00:48:19.1851643Z GOVCS=''
+2026-10-25T00:48:19.1852038Z GOVERSION='go1.26.9'
+2026-10-25T00:48:19.1852373Z GOWORK=''
+2026-10-25T00:48:19.1852824Z PKG_CONFIG='pkg-config'
+2026-10-25T00:48:19.1853058Z 
+2026-10-25T00:48:19.1853589Z ##[endgroup]
+2026-10-25T00:48:19.2287296Z ##[group]Run go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+2026-10-25T00:48:19.2288282Z [36;1mgo install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2[0m
+2026-10-25T00:48:19.2288922Z [36;1mgo install golang.org/x/vuln/cmd/govulncheck@v1.7.0[0m
+2026-10-25T00:48:19.2521685Z shell: /usr/bin/bash -e {0}
+2026-10-25T00:48:19.2522220Z env:
+2026-10-25T00:48:19.2522599Z   GOTOOLCHAIN: local
+2026-10-25T00:48:19.2522998Z ##[endgroup]
+2026-10-25T00:48:28.8806818Z ##[group]Run make build && make check
+2026-10-25T00:48:28.8807245Z [36;1mmake build && make check[0m
+2026-10-25T00:48:28.8851113Z shell: /usr/bin/bash -e {0}
+2026-10-25T00:48:28.8851589Z env:
+2026-10-25T00:48:28.8851906Z   GOTOOLCHAIN: local
+2026-10-25T00:48:28.8852246Z ##[endgroup]
+2026-10-25T00:48:28.9470012Z go build -trimpath -ldflags '-s -w -X github.com/ravinald/drover/internal/cmd.version=v0.1.1-8-gd9108ba -X github.com/ravinald/drover/internal/cmd.commit=d9108ba -X github.com/ravinald/drover/internal/cmd.date=2026-10-25T00:48:28Z' -o bin/drover ./cmd/drover
+2026-10-25T00:48:35.5189268Z golangci-lint run
+2026-10-25T00:48:56.7780997Z 0 issues.
+2026-10-25T00:48:56.7936602Z go test -timeout=20m ./...
+2026-10-25T00:48:59.2252709Z ?   	github.com/ravinald/drover/cmd/drover	[no test files]
+2026-10-25T00:48:59.2281663Z ok  	github.com/ravinald/drover/internal/backlog	(cached)
+2026-10-25T00:51:01.3088073Z ok  	github.com/ravinald/drover/internal/cmd	118.118s
+2026-10-25T00:51:01.3089449Z ok  	github.com/ravinald/drover/internal/config	0.323s
+2026-10-25T00:51:01.3090689Z ?   	github.com/ravinald/drover/internal/dashboard	[no test files]
+2026-10-25T00:51:01.3091573Z ok  	github.com/ravinald/drover/internal/gh	(cached)
+2026-10-25T00:51:01.3092230Z ok  	github.com/ravinald/drover/internal/gitcmd	(cached)
+2026-10-25T00:51:01.3093058Z ok  	github.com/ravinald/drover/internal/graph	(cached)
+2026-10-25T00:51:01.3094039Z ?   	github.com/ravinald/drover/internal/idalloc	[no test files]
+2026-10-25T00:51:01.3095097Z ok  	github.com/ravinald/drover/internal/lease	(cached)
+2026-10-25T00:51:01.3095874Z ok  	github.com/ravinald/drover/internal/ledger	0.085s
+2026-10-25T00:51:01.3096865Z ok  	github.com/ravinald/drover/internal/projects	(cached)
+2026-10-25T00:51:01.3097796Z ok  	github.com/ravinald/drover/internal/prompts	0.284s
+2026-10-25T00:51:01.3098590Z ok  	github.com/ravinald/drover/internal/register	(cached)
+2026-10-25T00:51:01.3099452Z ok  	github.com/ravinald/drover/internal/reports	(cached)
+2026-10-25T00:51:01.3100332Z ok  	github.com/ravinald/drover/internal/runlog	0.011s
+2026-10-25T00:51:01.3101336Z ok  	github.com/ravinald/drover/internal/runner	6.768s
+2026-10-25T00:51:01.3102064Z ok  	github.com/ravinald/drover/internal/sev	(cached)
+2026-10-25T00:51:01.3102781Z ok  	github.com/ravinald/drover/scripts	8.813s
+2026-10-25T00:51:01.3397598Z go test -count=1 -run TestSupportedVersionsTableNamesTheCurrentMinor -timeout=20m ./internal/cmd/
+2026-10-25T00:51:01.7781626Z ok  	github.com/ravinald/drover/internal/cmd	0.008s
+2026-10-25T00:51:01.7848644Z govulncheck ./...
+2026-10-25T00:51:05.2139758Z === Symbol Results ===
+2026-10-25T00:51:05.2140809Z 
+2026-10-25T00:51:05.2142113Z Vulnerability #1: GO-2026-6809
+2026-10-25T00:51:05.2143125Z     Distrust compromised intermediate certificates in crypto/x509
+2026-10-25T00:51:05.2144037Z   More info: https://pkg.go.dev/vuln/GO-2026-6809
+2026-10-25T00:51:05.2144678Z   Standard library
+2026-10-25T00:51:05.2145417Z     Found in: crypto/x509@go1.26.9
+2026-10-25T00:51:05.2146068Z     Fixed in: crypto/x509@go1.26.10
+2026-10-25T00:51:05.2146571Z     Example traces found:
+2026-10-25T00:51:05.2174105Z ##[error]      #1: internal/projects/projects.go:157:26: projects.Append calls fmt.Fprintf, which eventually calls x509.Certificate.Verify
+2026-10-25T00:51:05.2183882Z 
+2026-10-25T00:51:05.2184452Z Your code is affected by 1 vulnerability from the Go standard library.
+2026-10-25T00:51:05.2185412Z This scan found no other vulnerabilities in packages you import or modules you
+2026-10-25T00:51:05.2186231Z require.
+2026-10-25T00:51:05.2186656Z Use '-show verbose' for more details.
+2026-10-25T00:51:05.2204630Z make: *** [Makefile:57: vuln] Error 3
+2026-10-25T00:51:05.2211650Z ##[error]Process completed with exit code 2.
+2026-10-25T00:51:05.2369174Z Post job cleanup.
+2026-10-25T00:51:05.3162739Z [command]/usr/bin/git version
+2026-10-25T00:51:05.3204384Z git version 2.55.0
+2026-10-25T00:51:05.3234665Z Temporarily overriding HOME='/home/runner/work/_temp/47a18d96-ec68-4cdd-9c79-f991be5fa8da' before making global git config changes
+2026-10-25T00:51:05.3236028Z Adding repository directory to the temporary git global config as a safe directory
+2026-10-25T00:51:05.3238634Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/drover/drover
+2026-10-25T00:51:05.3267324Z Removing SSH command configuration
+2026-10-25T00:51:05.3273624Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-10-25T00:51:05.3303759Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-10-25T00:51:05.3489114Z Removing HTTP extra header
+2026-10-25T00:51:05.3493717Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-10-25T00:51:05.3523465Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-10-25T00:51:05.3696728Z Removing includeIf entries pointing to credentials config files
+2026-10-25T00:51:05.3702737Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-10-25T00:51:05.3722861Z includeif.gitdir:/home/runner/work/drover/drover/.git.path
+2026-10-25T00:51:05.3723534Z includeif.gitdir:/home/runner/work/drover/drover/.git/worktrees/*.path
+2026-10-25T00:51:05.3724019Z includeif.gitdir:/github/workspace/.git.path
+2026-10-25T00:51:05.3724433Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-25T00:51:05.3730513Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/drover/drover/.git.path
+2026-10-25T00:51:05.3748310Z /home/runner/work/_temp/git-credentials-edf78ddf-791e-420c-b7ac-0b61549aff91.config
+2026-10-25T00:51:05.3757025Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/drover/drover/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-edf78ddf\-791e\-420c\-b7ac\-0b61549aff91\.config
+2026-10-25T00:51:05.3790845Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/drover/drover/.git/worktrees/*.path
+2026-10-25T00:51:05.3809096Z /home/runner/work/_temp/git-credentials-edf78ddf-791e-420c-b7ac-0b61549aff91.config
+2026-10-25T00:51:05.3823617Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/drover/drover/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-edf78ddf\-791e\-420c\-b7ac\-0b61549aff91\.config
+2026-10-25T00:51:05.3854122Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-10-25T00:51:05.3871932Z /github/runner_temp/git-credentials-edf78ddf-791e-420c-b7ac-0b61549aff91.config
+2026-10-25T00:51:05.3879067Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-edf78ddf\-791e\-420c\-b7ac\-0b61549aff91\.config
+2026-10-25T00:51:05.3908924Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-10-25T00:51:05.3925722Z /github/runner_temp/git-credentials-edf78ddf-791e-420c-b7ac-0b61549aff91.config
+2026-10-25T00:51:05.3931296Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-edf78ddf\-791e\-420c\-b7ac\-0b61549aff91\.config
+2026-10-25T00:51:05.3961124Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-10-25T00:51:05.4140312Z Removing credentials config '/home/runner/work/_temp/git-credentials-edf78ddf-791e-420c-b7ac-0b61549aff91.config'
+2026-10-25T00:51:05.4275852Z Cleaning up orphan processes

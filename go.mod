@@ -2,6 +2,8 @@ module github.com/ravinald/drover
 
 go 1.26
 
+toolchain go1.26.10
+
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/spf13/cobra v1.10.2

@@ -67,6 +67,10 @@ func dashboardProject(t *testing.T) *session {
 		`{"id":"B12","park":"trunk_red","detail":"vuln","date":"2026-10-17","ts":"2026-10-17T09:00:00Z"}`,
 		`{"id":"drive","drive":"D2","label":"day run","queued":["B8","B9"],"jobs":1,"date":"2026-10-17","ts":"2026-10-17T17:00:00Z"}`,
 		`{"id":"B8","stage":"implement","drive":"D2","date":"2026-10-17","ts":"2026-10-17T17:56:00Z"}`,
+		`{"id":"B1","stage":"implement","usage":{"input":10,"output":20000,"cache_create":80000,"cache_read":400000},"session_id":"s-b1","source":"headless","cost_usd":3.2,"duration_ms":600000,"context_max":90000,"date":"2026-01-15","ts":"2026-01-15T17:50:00Z"}`,
+		`{"id":"B6","stage":"implement","drive":"D1","usage":{"input":1200,"output":45000,"cache_create":300000,"cache_read":9000000},"session_id":"s-b6","source":"headless","cost_usd":42.5,"duration_ms":1800000,"context_max":180000,"date":"2026-10-16","ts":"2026-10-16T06:39:00Z"}`,
+		`{"id":"B2","stage":"implement","drive":"D1","usage":{"input":900,"output":310000,"cache_create":2100000,"cache_read":98000000},"session_id":"s-b2","source":"headless","cost_usd":1234.56,"duration_ms":1700000,"context_max":520000,"date":"2026-10-16","ts":"2026-10-16T07:29:00Z"}`,
+		`{"id":"","usage":{"input":40,"output":90000,"cache_create":600000,"cache_read":51000000},"session_id":"i-long","source":"interactive","context_max":965000,"started":"2026-10-01T09:00:00Z","first_ts":"2026-10-17T08:00:00Z","date":"2026-10-17","ts":"2026-10-17T12:00:00Z"}`,
 	}
 	ledgerText := strings.Join(rows, "\n") + "\n"
 	for _, r := range timedRuns(5) {
@@ -441,6 +445,9 @@ func TestPrintCSSNamesEveryClass(t *testing.T) {
 	}
 	if len(classes) != 9 {
 		t.Fatalf("class returned %d values, want E50's 9: %v", len(classes), classes)
+	}
+	for _, v := range []string{"0.8", "1"} {
+		classes[budgetClass(json.Number(v))] = true
 	}
 	for c := range classes {
 		if !strings.Contains(css, ".drover-"+c+" ") && !strings.Contains(css, ".drover-"+c+",") {

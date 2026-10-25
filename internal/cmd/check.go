@@ -145,6 +145,12 @@ wording, so never match on it.
   BAD DEPS            a deps line written as a YAML list, bracketed or quoted, so
                       drover reads none of its ids. The finding prints the line that
                       parses; an id it names with no body is MISSING DEP as well
+  BRANCH CYCLE        an unmerged item depends on one whose body cites a path, or a
+                      backticked function or type name, that the trunk lacks and
+                      the dependent's branch has. The dep runs from the trunk and
+                      cannot change that code, and the dependent cannot merge
+                      first, so neither finishes. Names are a whole-word git grep
+                      over the cited files, a heuristic
   MISSING REPORT      a report named in the ledger is no longer at that path
   BAD REGISTER        [register] backend = "file" and the register file is on disk and
                       will not read. An absent file is an empty follow-up list,
@@ -841,6 +847,36 @@ func (s *session) checkReport() CheckReport {
 		}
 		if malformed {
 			add(s.badDeps(it))
+		}
+	}
+
+	// A dep whose body cites code only the dependent's branch has: the dep
+	// runs from the trunk and cannot change it, and the dependent cannot merge
+	// first. Read here as well as at split and accept, so a pair written before
+	// either checked, or by hand, is still found. Unmerged pairs only: once
+	// either side merges the wait is over.
+	for _, it := range s.backlog.Items {
+		if s.done(it.ID.Bare()) {
+			continue
+		}
+		for _, d := range it.Deps() {
+			if state, _ := s.resolve(d); state != idReadable || s.done(d) {
+				continue
+			}
+			dep, err := s.item(d)
+			if err != nil {
+				continue
+			}
+			for _, msg := range s.branchOnly(dep, it) {
+				add(Finding{
+					Kind:    "BRANCH CYCLE",
+					Message: msg,
+					Detail: fmt.Sprintf("%s runs from the trunk and %s cannot merge before it: %s, or rewrite %s to stand on the trunk alone",
+						d, it.ID.Bare(), flipDeps(d, []string{it.ID.Bare()}), d),
+					Path: rel(s.cfg.Root, dep.Path),
+					ID:   d,
+				})
+			}
 		}
 	}
 

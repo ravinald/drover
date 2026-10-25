@@ -576,7 +576,7 @@ post_finish_check = "auto"
 | `DROVER_PR`   | the pull request number the ledger recorded for it, empty when none was      |
 | `DROVER_SHA`  | the commit origin's trunk points at after the finish, else the local trunk's |
 
-Exit 0 appends a ledger row `{"id","post_finish","date"}` carrying the first line of what the command printed. Any other exit, including a binary that is not on `PATH`, files a follow-up owned by the item in the project's [follow-up list](#register) with the command's last 40 lines in its body, and emits `needs_operator` for `post_finish_check`, which reaches [`[supervise] notify`](#supervise). Neither undoes the merge or changes `finish`'s exit status. Nothing bounds how long it runs, as nothing bounds `[drive] merge_gate`.
+Exit 0 appends a ledger row `{"id","post_finish","date"}` carrying the first line of what the command printed. Any other exit, including a binary that is not on `PATH`, files a follow-up owned by the item in the project's [follow-up list](#register) with the command's last 40 lines in its body, and emits `needs_operator` for `post_finish_check`, which reaches each [`[notify]`](#notify) destination routing it. Neither undoes the merge or changes `finish`'s exit status. Nothing bounds how long it runs, as nothing bounds `[drive] merge_gate`.
 
 `post_check` is executed, like `merge_gate` and `worktree_setup`: see the paragraph closing [`[drive]`](#drive). A first element that is empty is a load error.
 
@@ -697,11 +697,12 @@ A project that wants a follow-up list without a tracker sets [`[register] backen
 
 ## `[forge]`
 
-| Key              | Default | Meaning                                                                                                                   |
-| ---------------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `infra_patterns` | `[]`    | Log lines that mark a failed job as the forge's infrastructure failing, added to the built-in list.                       |
-| `reruns`         | `2`     | How many times `drive` reruns one head's infrastructure failures before reading the next as the code's. `0` never reruns. |
-| `checks_wait`    | `10m`   | How long a head may show no check run at all before `drive` reports that no workflow ran on it, as a Go duration.         |
+| Key                | Default | Meaning                                                                                                                   |
+| ------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `infra_patterns`   | `[]`    | Log lines that mark a failed job as the forge's infrastructure failing, added to the built-in list.                       |
+| `failure_patterns` | `[]`    | Go regular expressions picking out the lines of a `code` failure's log that say what failed, added to the built-in list.  |
+| `reruns`           | `2`     | How many times `drive` reruns one head's infrastructure failures before reading the next as the code's. `0` never reruns. |
+| `checks_wait`      | `10m`   | How long a head may show no check run at all before `drive` reports that no workflow ran on it, as a Go duration.         |
 
 `[drive] merge_gate` cannot tell whose failure a red check is, so every one it sees goes back to the item as a send-back. Before the merge gate reads a pushed head, before the pull request opens and again at the merge when the forge has no auto-merge, `drive` waits for the head's checks to finish and classifies each red one (a conclusion of `failure`, `timed_out`, `startup_failure` or `cancelled`):
 
@@ -711,7 +712,22 @@ A project that wants a follow-up list without a tracker sets [`[register] backen
 | `trunk` | Not `infra`, and the trunk's latest completed run of the same check concluded failure         | parks the item `trunk_red`, naming the check and that run's URL, without sending anything back, and stops the drive, under [`report_trunk_red`](#supervise) |
 | `code`  | Anything else                                                                                 | lets the merge gate decide                                                                                                                                  |
 
-The built-in infrastructure lines, matched case-insensitively as substrings of the failed job's log: `toomanyrequests`, `rate limit exceeded`, `429 Too Many Requests`, `No space left on device`, `The runner has received a shutdown signal`, `lost communication with the server`, `Could not resolve host`, `Temporary failure in name resolution`, `connection reset by peer` and `TLS handshake timeout`. A check another app reported, rather than an Actions job, has no log drive reads, so only its conclusion and the trunk decide it, and an `infra` one there has no run to rerun and is read as `code`.
+The built-in infrastructure lines, matched case-insensitively as substrings of the failed job's log: `toomanyrequests`, `rate limit exceeded`, `429 Too Many Requests`, `No space left on device`, `The runner has received a shutdown signal`, `lost communication with the server`, `Could not resolve host`, `Temporary failure in name resolution`, `connection reset by peer`, `TLS handshake timeout` and `from the Go standard library`. The last is govulncheck's summary of a finding in the standard library: `actions/setup-go` installs the toolchain on the runner, so the patch release that fixes it arrives with a rerun once it is published, and no diff can supply it. A finding in a module reads `from 1 module` instead and stays `code`, since `go.mod` is the diff's to change. A check another app reported, rather than an Actions job, has no log drive reads, so only its conclusion and the trunk decide it, and an `infra` one there has no run to rerun and is read as `code`.
+
+For a `code` check, `drive` also reads what failed out of the same job log: up to 5 lines matching one of the failure patterns, each with its Actions timestamp, its `##[error]` annotation and its terminal colors stripped. The built-in patterns, matched as Go regular expressions against each stripped line:
+
+| Pattern                         | Matches                                               |
+| ------------------------------- | ----------------------------------------------------- |
+| `^--- FAIL`                     | A failed Go test                                      |
+| `^FAIL\b`                       | A failed Go test package                              |
+| `^\S+:\d+:\d+: .*\(\w[\w-]*\)$` | A golangci-lint finding, its linter named last        |
+| `^\S+\.\w+:\d+:\d+: `           | A compiler or `go vet` error                          |
+| `^Vulnerability #\d+`           | A govulncheck finding                                 |
+| `^\s*Found in: `                | The module or package version govulncheck found it in |
+| `^\s*Fixed in: `                | The version that fixes it                             |
+| `^panic: `                      | A Go panic                                            |
+
+A log matching none of them falls back to the last 5 non-blank lines before its first `make: ***` or `Error:` line. `failure_patterns` adds to the list, so a project whose test runner prints `ERROR <name>` adds `'^ERROR '`; a pattern that does not compile is refused at load. Those lines are what the [`gate_refused`](automation.md#drive---json) park carries when the merge gate then blames the diff: its reason names the check and the first line, its `detail` is `code`, its `evidence` is the lines, and the body sent back to the item adds them and the check's URL under the merge gate's output.
 
 `reruns` counts `gh run rerun` calls on one head across drives, from the ledger, so a later drive does not rerun a head the earlier one already spent. A head that needs more reruns than remain is read as `code`, and the merge gate sends it back. Beside a `code` failure, an `infra` one is recorded and not rerun, since the head is going back either way.
 
@@ -722,6 +738,67 @@ The policies decide who acts. `rerun_infra_failure` at `off` reads every `infra`
 A head with no check run at all after `checks_wait` is not red. `drive` reports `no workflow ran on this head`, records it, and lets the merge gate decide; a merge gate refusal that follows opens its reason with the same words, and so does the send-back when the merge gate blames the diff, because the fix is CI that fires on a branch push rather than a check that failed.
 
 Each classification is a ledger row (`{"id","head","check","class","evidence","rerun","date"}`, with `rerun` on a check drive reran) and a `check` event under [`drive --events`](automation.md#drive---events). Whatever drive cannot read (the check runs, a job, its log, the trunk's run) leaves the merge gate to answer, as it did before any of this existed.
+
+## `[usage]`
+
+| Key                 | Default  | Meaning                                                                                                              |
+| ------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| `weekly_budget`     | unset    | Your estimate of the weekly limit in weighted tokens, a positive integer. Needs `reset`.                             |
+| `reset`             | unset    | When the weekly limit starts over: a weekday, a 24-hour time and an IANA zone, as `"Sat 20:00 America/Los_Angeles"`. |
+| `session_max_hours` | `24`     | How many hours a session's usage rows may span before `status` lists it under `long_sessions`.                       |
+| `context_warn`      | `400000` | The largest context, in tokens, a session may reach before `status` lists it under `long_sessions`.                  |
+
+`status --json` and the built-in templates read the ledger's usage rows into a report-level [`usage`](automation.md#usage) object, which covers the last 7 days unless `reset` is set. With `reset`, the window runs from the most recent reset to now, so the total measures the same week the limit does. The weekday takes its three-letter or full English name in any case, and the time is computed on the zone's own calendar, so a 20:00 reset stays at 20:00 across a daylight-saving change.
+
+With `weekly_budget` as well, the report gains `budget` and `budget_used`, and both built-in templates show the fraction in their footer, in the warning color from 0.8 and the critical color from 1.0. The budget is your estimate of the limit in drover's weighting (`input + output + cache_create + 0.1 * cache_read`), not a figure the service publishes: the counts are tokens as the API reported them, not the subscription's quota accounting, so calibrate it against a week whose limit you hit. A good first value is the weighted total `status --json` shows for the week the limit last refused a run. `weekly_budget` without `reset` is refused at load, because a budget measured over a rolling window would never line up with the week the limit counts.
+
+The limit is per account, so `budget_used` sums every project in the [project registry](#the-project-registry), not only the one `status` runs in, counting each ledger once. A registered project whose config or ledger would not read is named in `budget_unread` and left out of the fraction, rather than counted as zero; a registered root that is gone is not a project and is skipped, as `status --all-projects` skips it. Set the table in the per-user file, where one budget serves every project, unless a project wants its own thresholds.
+
+`session_max_hours` and `context_warn` decide which sessions `status` names under [`long_sessions`](automation.md#usage), and both templates list them under "Needs you" with the reason each one qualified. A session open for days at a context near a million tokens is the opposite of the short, well-defined unit of work drover hands a run.
+
+### `[usage.weekly]` and `[usage.five_hour]`
+
+`weekly_budget` is an estimate in drover's own weighting. These two tables act on the figure the service itself reports. Claude Code writes a `rate_limit_event` into every headless log, and drover keeps the last one of each session on its usage row as [`rate_limit`](automation.md#writing-to-the-ledger-without-the-binary). Each window's level is the **percent of the window left**, `100 - utilization * 100`, as the service reports it in steps of 1%. It is not tokens and not dollars.
+
+| Key                | Type    | Range   | Default | Meaning                                                                                                                                                                                                                                                                         |
+| ------------------ | ------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `notify_remaining` | integer | 0 to 99 | unset   | The notify level. At or below it, `drive` emits one [`usage_warning`](automation.md#drive---events) per window per reset and sends it to each [`[notify]`](#notify) destination routing `usage_warning`. It does not pause or slow the drive. Unset sends none for this window. |
+| `pause_remaining`  | integer | 0 to 99 | unset   | The fail-safe level. At or below it, [`usage_admission`](#supervise) holds the drive: running sessions finish their stage, nothing new starts, and the drive pauses until the window resets or `drover drive --resume`. Unset holds nothing on this window.                     |
+
+`[usage.weekly]` is the seven-day window and `[usage.five_hour]` the five-hour one. When both keys of a table are set, `pause_remaining` must be below `notify_remaining`, so the notice comes before the hold; load refuses the pair otherwise, naming both values. `0` is a level, not unset: `pause_remaining = 0` holds once the window reads 100% used.
+
+Each warning is recorded as a ledger row naming the window and its reset, and drover reads every registered project's ledger for one before sending, so a restarted drive, a drive in another project on the same account, and a reading that dips and rises again send nothing twice. The newest reading among every registered project's usage rows is the one judged, because the limit is the account's. A reading taken before its window's reset counts as 100% left once the reset passes. A runner that writes no such event (codex, agy) leaves no reading, and nothing here acts for it.
+
+### `[usage.overage]`
+
+An account runs out twice, in sequence: first the weekly allotment, then any extra-usage credit bought to work past it. The credit has no remaining figure. Once the weekly window reads 100%, the reading says only whether overage is in use (`is_using_overage`) and, at the end, `out_of_credits`. drover sees the percent of each window and never a credit balance.
+
+| Key          | Type   | Range                    | Default   | Meaning                                                                                                                                                                                                                       |
+| ------------ | ------ | ------------------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`       | string | `pause`, `continue`      | `"pause"` | `pause` holds the drive as soon as a reading shows the weekly window rejected with overage in use, as `pause_remaining` would. `continue` keeps dispatching on purchased credit, bounded by `max_usd` when set.               |
+| `max_usd`    | number | above 0                  | unset     | Under `continue`, the summed `cost_usd` of usage rows whose reading was on overage since the weekly window began, across every project in the per-user registry, at which `usage_admission` holds the drive. Unset is no cap. |
+| `notify_usd` | number | above 0, below `max_usd` | unset     | Under `continue`, the same sum at which `drive` emits one `usage_warning` on the way to `max_usd`.                                                                                                                            |
+
+Entering overage emits a `usage_warning` with window `overage` once per weekly reset whenever `[usage.weekly] notify_remaining` is set, under either mode. Both dollar sums are the runners' **list price**, the `cost_usd` each session reported, not the credit the account was charged: treat `max_usd` as an approximate bound, set below what you bought. Under `continue`, a weekly `pause_remaining` still holds the drive before the allotment runs out; leave it unset to run straight onto purchased credit, or `drover drive --resume` past the hold.
+
+A session the service refused (the weekly window rejected with no overage, or `out_of_credits`) holds the drive the same way at any of these settings, rather than parking the item `runner_fault`: the item goes back to the head of the queue at the stage that was refused. [Running past the weekly allotment](operating.md#running-past-the-weekly-allotment) covers choosing the levels.
+
+### Worked example
+
+```toml
+# ~/.config/drover/config.toml: one account, every project.
+[usage.weekly]
+notify_remaining = 20   # tell me at 20% of the week left
+pause_remaining  = 5    # stop starting sessions at 5%
+
+[usage.five_hour]
+pause_remaining = 2
+
+[usage.overage]
+mode = "pause"          # the default: never spend purchased credit unattended
+```
+
+With this file, a drive whose newest reading says the week has 18% left sends one `usage_warning` and keeps going. At 5% it pauses with `needs_operator`; under `drive --for 48h`, a reset 30 hours away lifts the hold on its own at the reset, and under an unbounded drive it waits for `drover drive --resume`.
 
 ## `[register]`
 
@@ -789,49 +866,51 @@ A drive runs unattended, and what it parks still needs somebody: a conflict afte
 | Key          | Default             | Meaning                                                                                                                                                                                                                  |
 | ------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `template`   | unset               | The template [`drover supervise`](automation.md#the-supervisor) renders its prompt from, resolved like [`[prompts]`](#prompts) `implement`. Unset uses the built-in one; `drover supervise --dry-run` prints the result. |
-| `notify`     | unset               | An argv run once per `needs_operator` event, from the project root, with the event JSON on stdin and 30 seconds to finish. A notifier that fails or is missing is reported once per drive and never parks or stops it.   |
 | _action key_ | the catalog default | The policy for one action below.                                                                                                                                                                                         |
+
+`[supervise]` takes neither a `notify` argv nor an `ntfy` table: [`[notify]`](#notify) destinations do that work, and a config carrying either is refused at load with an error naming the key and `scripts/migrate-notify.sh`, which rewrites it in place.
 
 Every other key is an action from the catalog, set to a policy:
 
-| Policy       | Means                                                                        |
-| ------------ | ---------------------------------------------------------------------------- |
-| `auto`       | Drive does it.                                                               |
-| `supervisor` | A session `drover supervise` started may do it, and reports it.              |
-| `operator`   | drover stops, emits `needs_operator`, runs `notify`, and waits for a person. |
-| `off`        | Nothing happens. Today's park stands.                                        |
+| Policy       | Means                                                                                                                        |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `auto`       | Drive does it.                                                                                                               |
+| `supervisor` | A session `drover supervise` started may do it, and reports it.                                                              |
+| `operator`   | drover stops, emits `needs_operator`, sends it to each [`[notify]`](#notify) destination routing it, and waits for a person. |
+| `off`        | Nothing happens. Today's park stands.                                                                                        |
 
 The policies are ordered `off` < `operator` < `supervisor` < `auto`, and each action has a ceiling: a policy above it is a load error naming the key, the policy requested and the ceiling. An omitted key takes its default, and an unknown key is a load error. Each command listed beside an action is that action when a supervisor runs it, and refuses there with exit `3` unless the action is at `supervisor` or `auto`.
 
-| Action                        | Category     | Default      | Ceiling      | Command                        | What it is                                                                                                 |
-| ----------------------------- | ------------ | ------------ | ------------ | ------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `update_open_prs`             | merge        | `auto`       | `auto`       |                                | After a merge, merge the trunk into every other open drive pull request, run its verify command, and push. |
-| `retry_moved_trunk`           | merge        | `auto`       | `auto`       |                                | Retry, once, a merge gate that refused only because the trunk moved under the head.                        |
-| `resolve_conflict`            | merge        | `supervisor` | `auto`       |                                | Resolve a branch update merge conflict in the item's worktree.                                             |
-| `merge_drive_pr`              | merge        | `operator`   | `supervisor` | `finish`                       | Merge a pull request drive opened for an item, then finish it.                                             |
-| `merge_protected_paths`       | merge        | `operator`   | `supervisor` |                                | Merge a pull request that changes a [drive] protected_paths file.                                          |
-| `rerun_infra_failure`         | checks       | `auto`       | `auto`       |                                | Rerun a check that failed on the forge's infrastructure rather than on the code.                           |
-| `report_trunk_red`            | checks       | `operator`   | `auto`       |                                | Report a trunk that fails the verify command on its own, and stop dispatching.                             |
-| `post_finish_check`           | checks       | `off`        | `auto`       |                                | Run a live check after each finish.                                                                        |
-| `rerun_lost_review`           | sessions     | `auto`       | `auto`       |                                | Rerun, once, a review pass whose session died or was cut.                                                  |
-| `relaunch_after_runner_death` | sessions     | `supervisor` | `auto`       |                                | Relaunch an item whose implementing session died.                                                          |
-| `auth_expired`                | sessions     | `operator`   | `operator`   |                                | Stop when a runner's credentials expired.                                                                  |
-| `push_refused_by_hook`        | sessions     | `operator`   | `operator`   |                                | Stop when a pre-push hook refused the item's branch.                                                       |
-| `write_scaffold_requirements` | requirements | `supervisor` | `supervisor` |                                | Write the numbered requirements of a scaffold a review filed.                                              |
-| `triage_finding`              | requirements | `operator`   | `supervisor` |                                | Find an owner for a follow-up a drive's session filed that nothing is scheduled to carry.                  |
-| `close_changes`               | requirements | `supervisor` | `supervisor` | `close-changes`                | Close a sent-back section whose findings a later pass closed.                                              |
-| `accept`                      | requirements | `operator`   | `operator`   | `accept`                       | Accept an item's requirements.                                                                             |
-| `override_review_limit`       | requirements | `operator`   | `operator`   | `request-changes --over-limit` | Send an item back past [review] max_review_rounds.                                                         |
-| `move_requirement`            | requirements | `operator`   | `operator`   |                                | Move a numbered requirement from one item to another.                                                      |
-| `signoff`                     | requirements | `operator`   | `operator`   |                                | Meet a requirement only a person can meet.                                                                 |
-| `enqueue`                     | queue        | `supervisor` | `auto`       | `drive`                        | Queue the next drive.                                                                                      |
-| `pause_for_config_change`     | queue        | `operator`   | `supervisor` |                                | Pause a running drive to take a config change.                                                             |
-| `cleanup_interrupted_drive`   | queue        | `supervisor` | `auto`       |                                | Remove the worktrees and branches an interrupted drive left behind.                                        |
-| `host_load_admission`         | queue        | `off`        | `auto`       |                                | Hold dispatch while the host is loaded.                                                                    |
-| `drive_digest`                | queue        | `auto`       | `auto`       |                                | Summarize each drive when it exits.                                                                        |
-| `stale_citations`             | preflight    | `auto`       | `auto`       |                                | Report cited lines that no longer exist on the trunk before launching.                                     |
-| `worktree_links_gap`          | preflight    | `auto`       | `auto`       |                                | Report files the verify command reads that the worktree lacks.                                             |
-| `deps_lint`                   | preflight    | `auto`       | `auto`       |                                | Refuse a malformed deps line.                                                                              |
+| Action                        | Category     | Default      | Ceiling      | Command                        | What it is                                                                                                      |
+| ----------------------------- | ------------ | ------------ | ------------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `update_open_prs`             | merge        | `auto`       | `auto`       |                                | After a merge, merge the trunk into every other open drive pull request, run its verify command, and push.      |
+| `retry_moved_trunk`           | merge        | `auto`       | `auto`       |                                | Retry, once, a merge gate that refused only because the trunk moved under the head.                             |
+| `resolve_conflict`            | merge        | `supervisor` | `auto`       |                                | Resolve a branch update merge conflict in the item's worktree.                                                  |
+| `merge_drive_pr`              | merge        | `operator`   | `supervisor` | `finish`                       | Merge a pull request drive opened for an item, then finish it.                                                  |
+| `merge_protected_paths`       | merge        | `operator`   | `supervisor` |                                | Merge a pull request that changes a [drive] protected_paths file.                                               |
+| `rerun_infra_failure`         | checks       | `auto`       | `auto`       |                                | Rerun a check that failed on the forge's infrastructure rather than on the code.                                |
+| `report_trunk_red`            | checks       | `operator`   | `auto`       |                                | Report a trunk that fails the verify command on its own, and stop dispatching.                                  |
+| `post_finish_check`           | checks       | `off`        | `auto`       |                                | Run a live check after each finish.                                                                             |
+| `rerun_lost_review`           | sessions     | `auto`       | `auto`       |                                | Rerun, once, a review pass whose session died or was cut.                                                       |
+| `relaunch_after_runner_death` | sessions     | `supervisor` | `auto`       |                                | Relaunch an item whose implementing session died.                                                               |
+| `auth_expired`                | sessions     | `operator`   | `operator`   |                                | Stop when a runner's credentials expired.                                                                       |
+| `push_refused_by_hook`        | sessions     | `operator`   | `operator`   |                                | Stop when a pre-push hook refused the item's branch.                                                            |
+| `write_scaffold_requirements` | requirements | `supervisor` | `supervisor` |                                | Write the numbered requirements of a scaffold a review filed.                                                   |
+| `triage_finding`              | requirements | `operator`   | `supervisor` |                                | Find an owner for a follow-up a drive's session filed that nothing is scheduled to carry.                       |
+| `close_changes`               | requirements | `supervisor` | `supervisor` | `close-changes`                | Close a sent-back section whose findings a later pass closed.                                                   |
+| `accept`                      | requirements | `operator`   | `operator`   | `accept`                       | Accept an item's requirements.                                                                                  |
+| `override_review_limit`       | requirements | `operator`   | `operator`   | `request-changes --over-limit` | Send an item back past [review] max_review_rounds.                                                              |
+| `move_requirement`            | requirements | `operator`   | `operator`   |                                | Move a numbered requirement from one item to another.                                                           |
+| `signoff`                     | requirements | `operator`   | `operator`   |                                | Meet a requirement only a person can meet.                                                                      |
+| `enqueue`                     | queue        | `supervisor` | `auto`       | `drive`                        | Queue the next drive.                                                                                           |
+| `pause_for_config_change`     | queue        | `operator`   | `supervisor` |                                | Pause a running drive to take a config change.                                                                  |
+| `cleanup_interrupted_drive`   | queue        | `supervisor` | `auto`       |                                | Remove the worktrees and branches an interrupted drive left behind.                                             |
+| `host_load_admission`         | queue        | `off`        | `auto`       |                                | Hold dispatch while the host is loaded.                                                                         |
+| `usage_admission`             | queue        | `auto`       | `auto`       |                                | Hold dispatch at a `[usage]` pause level, on purchased credit, and on a quota refusal, and resume at the reset. |
+| `drive_digest`                | queue        | `auto`       | `auto`       |                                | Summarize each drive when it exits.                                                                             |
+| `stale_citations`             | preflight    | `auto`       | `auto`       |                                | Report cited lines that no longer exist on the trunk before launching.                                          |
+| `worktree_links_gap`          | preflight    | `auto`       | `auto`       |                                | Report files the verify command reads that the worktree lacks.                                                  |
+| `deps_lint`                   | preflight    | `auto`       | `auto`       |                                | Refuse a malformed deps line.                                                                                   |
 
 A drive judges every finding its sessions file when it notices it, after each item's result: each follow-up that appeared while the item ran, and each scaffold the backlog gained. Its coverage says whether anything will carry it:
 
@@ -854,25 +933,138 @@ Both keys work in the per-user config like every other `[supervise]` key: one `m
 
 `update_open_prs`, `retry_moved_trunk` and `resolve_conflict` change what drive does: see [Updating the other open pull requests](lifecycle.md#updating-the-other-open-pull-requests). `resolve_conflict` also decides the branch update drive makes before each implement session: at `auto` a conflict there goes to that session to resolve, at `supervisor` and `operator` it parks the item for whoever the hand-off names, and at `off` drive makes no branch update at dispatch at all. See [Updating the branch at dispatch](lifecycle.md#updating-the-branch-at-dispatch). For the rest, a policy decides who is told about the park the action owns and who may run the command beside it. The parks each action owns are listed under [`drive --events`](automation.md#drive---events).
 
-The four preflight and admission keys do change what drive does. Each check emits a `preflight` event, and `drive --dry-run` prints a preflight section naming what each found:
+The five preflight and admission keys do change what drive does. Each check emits a `preflight` event, and `drive --dry-run` prints a preflight section naming what each found:
 
-| Key                   | What drive checks                                                                                                                                                                                                                                                                                                                                                                                                                                                            | At `off`    | At `operator`                                                              | Otherwise                                                                                                                                                                                                                                                    |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `stale_citations`     | Each cited `path:line` or `path:start-end` in a queued item's body, against `origin/<trunk>` (the local trunk where origin has none), as the item is dispatched, and not again for an item a drive's re-exec carried over, which passed it when it was first dispatched: a file the trunk lacks, or a range past the file's last line. A citation with no slash (`go.mod:3`) is held to its range only where the trunk has the file, so `db.internal:5432` is never reported | not checked | the item parks `stale_citations` before any session, with `needs_operator` | printed under the item, which launches anyway                                                                                                                                                                                                                |
-| `deps_lint`           | A `deps:` value holding a comma, a YAML list bracket or quote, or an id that does not parse                                                                                                                                                                                                                                                                                                                                                                                  | not checked | refused                                                                    | `accept`, `run` and `drive` exit `3` naming the file, the line and the corrected form; `drover check` reports any value that is not space-separated bare ids as `BAD DEPS` with the same corrected form, and an id with no body as `MISSING DEP`, either way |
-| `worktree_links_gap`  | Files the item's verify command reads that git does not track in your checkout and no `worktree_links` entry carries: the untracked and ignored files under each path the command line names, or under `drive --dry-run` on Linux with `strace` on `PATH`, what the command opened when run once in your checkout                                                                                                                                                            | not checked | warned                                                                     | a warning before the first verify command run, naming the path and the `worktree_links` line that would carry it                                                                                                                                             |
-| `host_load_admission` | The 1-minute load average before each dispatch, against `[drive] max_load`                                                                                                                                                                                                                                                                                                                                                                                                   | not read    | not read                                                                   | at `auto`, dispatch holds while the load is above it, printing once per hold; a load that cannot be read never holds                                                                                                                                         |
+| Key                   | What drive checks                                                                                                                                                                                                                                                                                                                                                                                                                                                            | At `off`                                           | At `operator`                                                              | Otherwise                                                                                                                                                                                                                                                                                                                                                          |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `stale_citations`     | Each cited `path:line` or `path:start-end` in a queued item's body, against `origin/<trunk>` (the local trunk where origin has none), as the item is dispatched, and not again for an item a drive's re-exec carried over, which passed it when it was first dispatched: a file the trunk lacks, or a range past the file's last line. A citation with no slash (`go.mod:3`) is held to its range only where the trunk has the file, so `db.internal:5432` is never reported | not checked                                        | the item parks `stale_citations` before any session, with `needs_operator` | printed under the item, which launches anyway                                                                                                                                                                                                                                                                                                                      |
+| `deps_lint`           | A `deps:` value holding a comma, a YAML list bracket or quote, or an id that does not parse                                                                                                                                                                                                                                                                                                                                                                                  | not checked                                        | refused                                                                    | `accept`, `run` and `drive` exit `3` naming the file, the line and the corrected form; `drover check` reports any value that is not space-separated bare ids as `BAD DEPS` with the same corrected form, and an id with no body as `MISSING DEP`, either way                                                                                                       |
+| `worktree_links_gap`  | Files the item's verify command reads that git does not track in your checkout and no `worktree_links` entry carries: the untracked and ignored files under each path the command line names, or under `drive --dry-run` on Linux with `strace` on `PATH`, what the command opened when run once in your checkout                                                                                                                                                            | not checked                                        | warned                                                                     | a warning before the first verify command run, naming the path and the `worktree_links` line that would carry it                                                                                                                                                                                                                                                   |
+| `host_load_admission` | The 1-minute load average before each dispatch, against `[drive] max_load`                                                                                                                                                                                                                                                                                                                                                                                                   | not read                                           | not read                                                                   | at `auto`, dispatch holds while the load is above it, printing once per hold; a load that cannot be read never holds                                                                                                                                                                                                                                               |
+| `usage_admission`     | The newest `rate_limit` reading among every registered project's usage rows, before each dispatch and before each stage that launches a session, against [`[usage.weekly]`, `[usage.five_hour]` and `[usage.overage]`](#usageweekly-and-usagefive_hour)                                                                                                                                                                                                                      | not acted on; a quota refusal parks `runner_fault` | the drive holds and waits for `drover drive --resume`                      | the drive holds and pauses, emitting `paused` and `needs_operator` with `run` `drover drive --resume`; a hold whose reset falls inside `--for` or `--until` lifts on its own at the reset plus a minute, emitting `resumed`; a deadline that arrives first ends the drive with exit 0 and each held item's outcome `held`. `usage_warning` is sent at every policy |
 
 The path scan reads the command line alone, so a file a verify command reaches only through a `Makefile` or a script is not found that way; the traced run finds it and costs one run of the verify command.
 
-`drover config` prints every action's effective policy after the file, marked `default` where no file sets it. `drover init supervise` walks the catalog by category and offers each action the policies up to its ceiling; drover never rewrites `.drover.toml`, so it appends a `[supervise]` table when the file has none and prints one to paste over it when the file does. The printed table carries the existing `notify`, `template` and any key this build does not know as written, and the walk offers each action the policy the project's own file sets, so pressing return keeps it. `--defaults` resets the policies and still carries those lines. Values the per-user file supplies are never copied in. `drover agents` renders the effective table into the generated instructions.
+`drover config` prints every action's effective policy after the file, marked `default` where no file sets it. `drover init supervise` walks the catalog by category and offers each action the policies up to its ceiling; drover never rewrites `.drover.toml`, so it appends a `[supervise]` table when the file has none and prints one to paste over it when the file does. The printed table carries the existing `template` and any key this build does not know as written, and the walk offers each action the policy the project's own file sets, so pressing return keeps it. `--defaults` resets the policies and still carries those lines. Values the per-user file supplies are never copied in. `drover agents` renders the effective table into the generated instructions.
 
 ```toml
 [supervise]
-notify            = ["notify-send", "drover"]
 resolve_conflict  = "operator"   # nobody but a person touches a conflict here
 post_finish_check = "auto"
 ```
+
+## `[notify]`
+
+A drive runs unattended, so what it does has to reach somebody who is not watching the terminal. `[notify]` names the destinations its events go to, and each destination chooses which events it takes and how loudly. The table may sit in `.drover.toml` or in the per-user config: a per-user destination serves every project, a project destination of the same name wins over it key by key, and destinations of different names both apply.
+
+| Key            | Type     | Default | Meaning                                                                                                                                                                                                                                                                                                                                                                  |
+| -------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `coalesce`     | duration | `"0s"`  | Events of one kind for one destination that arrive within this window go out as one message listing their ids, such as `filed: B91 B91 B92`. `0s` is off. `needs_operator`, `needs_supervisor` and `exit` are never coalesced or delayed.                                                                                                                                |
+| `quiet_hours`  | string   | unset   | `"HH:MM-HH:MM"` in local time, which may cross midnight. Messages routed below `high` are held until the window ends, then sent as one message per destination. `needs_operator`, `needs_supervisor` and `exit` are never held. A drive that exits inside the window folds what it held into its exit message, sent at `min` unless `exit` is routed at `high` or above. |
+| `destinations` | table    | none    | One `[notify.destinations.<name>]` table per destination, keyed below. A drive with none sends nothing.                                                                                                                                                                                                                                                                  |
+
+Each destination takes:
+
+| Key          | Type     | Applies to | Default  | Meaning                                                                                                                                                                                                                                                                                                                       |
+| ------------ | -------- | ---------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`       | string   | both       | required | `ntfy` POSTs each routed event to an [ntfy](https://ntfy.sh) topic; `command` runs an argv with each routed event on stdin.                                                                                                                                                                                                   |
+| `events`     | table    | both       | required | An inline table mapping each event the destination takes to an ntfy priority: `min`, `low`, `default`, `high` or `urgent`. An event the table does not name is not sent there. Any event a drive emits may be named, and `exit_undone`, described below.                                                                      |
+| `url`        | string   | `ntfy`     | required | The topic URL, such as `https://ntfy.sh/<topic>`. It must be `https://` unless the host is a loopback address, must name a topic in its path, and may not carry credentials.                                                                                                                                                  |
+| `token_file` | string   | `ntfy`     | unset    | A file holding the access token, sent as `Authorization: Bearer <token>`. It must start with `/` or `~/`, and is read at every send, so a rotated token takes effect on the next message. Unset sends no token.                                                                                                               |
+| `argv`       | array    | `command`  | required | The command, run from the project root with 30 seconds to finish. It reads the event as one JSON line on stdin with `priority`, `message` (the body an ntfy destination would send) and, for a coalesced or held message, `folded` added, and `reminder` on a reminder. See [`drive --events`](automation.md#drive---events). |
+| `repeat`     | duration | both       | unset    | How often an unanswered `needs_operator` this destination took is sent again while the drive runs, at least `5m`. Unset sends each one once. See [Reminders](#reminders).                                                                                                                                                     |
+| `repeat_max` | integer  | both       | `6`      | The most reminders one `needs_operator` gets here. Read only where `repeat` is set.                                                                                                                                                                                                                                           |
+
+The events a drive emits are `started`, `queued`, `dispatched`, `preflight`, `stage`, `check`, `parked`, `filed`, `needs_operator`, `needs_supervisor`, `merged`, `paused`, `resumed`, `usage_warning` and `exit`, each described under [`drive --events`](automation.md#drive---events). `exit_undone` is a routing key rather than an event: an exit that leaves any item parked, skipped or held is sent at `exit_undone`'s priority instead of `exit`'s, and it defaults to `high` wherever `exit` is routed, so a drive that exited 0 with work left behind reaches the phone louder than one that finished everything.
+
+An unknown key, type, event name or priority, a malformed URL, a destination with no `type`, `events`, or the `url` or `argv` its type needs, a `coalesce` that is not a duration, a `quiet_hours` that is not two `HH:MM` times, a `repeat` under `5m` and a `repeat_max` that is not a positive integer are load errors naming the destination, the key and the file that wrote it.
+
+### Sending
+
+Sends to different destinations do not wait on each other or on the drive: each destination has a queue of its own, an ntfy send is bounded at 10 seconds and a command at 30. A send that fails, whether a non-2xx status, a timeout, an unreadable token file or a command exiting non-zero, is reported once per destination per drive on stderr, with the status and the body ntfy returned or the command's last lines, and never parks or stops the drive or the other destinations. A destination more than 256 messages behind drops the rest and says so once.
+
+An ntfy message carries `Title: drover: <project> <id>` (`drover: <project>` for an event with no item, and for a coalesced or held message), the routed `Priority`, `Tags: robot`, and a body written for its event:
+
+| Event                                | Body                                                                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `started`                            | The drive id, the queue in order, `--jobs` above 1, and the deadline or `no deadline`.                                                                 |
+| `merged`                             | The pull request's number and title.                                                                                                                   |
+| `parked`                             | The park, its detail and reason, then up to 5 lines of the park's evidence, which for a `gate_refused` park are the lines its check's log says failed. |
+| `needs_operator`, `needs_supervisor` | `<action>: <run>`, the action and the command to run.                                                                                                  |
+| `usage_warning`                      | The window, the percent of it left and its reset in local time.                                                                                        |
+| `exit`                               | The summary below.                                                                                                                                     |
+| any other                            | A line naming what happened: the stage, the check, the finding, the position.                                                                          |
+
+Where the event concerns a pull request drover recorded, the message sets ntfy's `Click` header to that pull request's URL, so tapping it opens the pull request. The repository address comes from one `gh repo view` per drive, the first time a message needs it.
+
+The exit message says what the drive left undone, within ntfy's 4096-byte limit:
+
+```text
+D10 exited 0: the queue drained
+1 merged · 1 parked · 1 skipped · 0 held
+F14 parked gate_refused (code): revive failed: internal/cmd/notify.go:28:16: var-declaration; sent back
+E72 skipped: blocked by F14 (parked gate_refused)
+48.2M weighted tokens
+```
+
+It names why the drive ended (the queue drained, the deadline arrived, `--max-items`, `drive --stop`, an interrupt, or a fault), its exit code, how many items merged, parked, skipped and held, each item that did not merge with its cause, and the weighted tokens of the usage rows its sessions wrote. Items past the limit are listed as `and N more`.
+
+### Reminders
+
+A `needs_operator` the operator misses leaves the queue idle until they look. A destination that sets `repeat` sends it again every `repeat`, up to `repeat_max` times, at the priority it first went out at, with the title suffixed `(reminder N of M)`, until it is answered. Each destination keeps its own count, and a destination without `repeat` sends it once.
+
+Before each reminder the drive reads the ledger, the backlog and its lease, and sends nothing for a `needs_operator` already answered. It counts as answered when:
+
+- the item it names merged (a done row), was run again (a stage row, from `drover drive <id>` or `drive --enqueue`), was accepted (the body row `drover accept` writes, on a body that no longer carries the stop marker), or was shelved;
+- for one a usage hold raised, the drive resumed from that pause, and a resume answers no other stop;
+- the drive exited.
+
+When a reminded `needs_operator` is answered while the drive runs, each destination that sent at least one reminder for it gets one message at `low`: `answered: <action> <id>`, where the action is `merged`, `rerun`, `accepted`, `shelved` or `resumed`. A destination that sent only the first message gets nothing more. The answer is read when the next reminder comes due, so the message trails the answer by up to `repeat`; past `repeat_max` the drive still reads at that interval, sending nothing until the answer.
+
+Reminders live in the drive process and nowhere else. A drive that exits, including one that re-executes onto a new binary, has nothing left to repeat, and the `exit` message is the last word on it. A `triage_finding` stop is raised by a follow-up's coverage, which the ledger does not record, so whether it names its one filing item or none, its filer's rows and a resume answer nothing and it repeats until `repeat_max` or the exit. So does any other `needs_operator` naming no item that no usage hold raised.
+
+### Tokens and testing
+
+The token appears in no output drover writes: not in an error, the event file, `--events`, or `drover config`, which prints each ntfy destination's `url`, its resolved `token_file` and whether that file exists and reads. A `token_file` that group or others can read draws one warning per destination per drive naming the path and `chmod 600`, and the send still goes out.
+
+`drover notify --test` sends one synthetic `needs_operator` event, id `TEST`, through every destination, whatever its `events` name, at its routed priority or `high` where it routes none. `--event <name>` sends a sample of that kind instead, rendered as the real one would be, at each destination's routed priority, to the destinations that route it. It prints each destination's HTTP or exit status, and exits 0 when every send succeeded, 1 when one failed and 2 when no destination is configured or none routes the `--event` named.
+
+### Example
+
+Two destinations: a phone that hears what needs a person, reminded every 15 minutes until somebody acts, and how each drive ended, and a desktop command that hears every merge. Overnight, merges wait for the morning and arrive as one message:
+
+```toml
+# ~/.config/drover/config.toml
+[notify]
+quiet_hours = "22:30-07:00"
+coalesce    = "2m"
+
+[notify.destinations.phone]
+type       = "ntfy"
+url        = "https://ntfy.example.com/drover"
+token_file = "~/.config/drover/ntfy-token"
+repeat     = "15m"
+events     = { needs_operator = "high", needs_supervisor = "default", parked = "default", exit = "low", exit_undone = "high", usage_warning = "high" }
+
+[notify.destinations.desk]
+type   = "command"
+argv   = ["notify-send", "drover"]
+events = { merged = "default", needs_operator = "default" }
+```
+
+A project that wants its own exits louder writes only the keys that differ, and keeps the per-user `type`, `url` and `token_file`. A key it writes replaces the per-user one whole, so its `events` names every event the phone should still hear:
+
+```toml
+# .drover.toml
+[notify.destinations.phone]
+events = { needs_operator = "urgent", needs_supervisor = "default", parked = "default", exit = "default", exit_undone = "high", usage_warning = "high" }
+```
+
+iOS delivers a notification from a self-hosted server instantly only when that server sets `upstream-base-url` (usually `https://ntfy.sh`), so Apple's push service is told a message is waiting. That is a setting in the ntfy server's own `server.yml`, not in drover; without it the iOS app picks messages up only when it next polls.
+
+### Migrating from `[supervise]`
+
+`[supervise] notify` and `[supervise.ntfy]` are refused at load. `scripts/migrate-notify.sh <file>`, in the drover repository, rewrites either in place in a project or per-user config: `notify = [...]` becomes a `command` destination named `command` routed `{ needs_operator = "default" }`, and `[supervise.ntfy]` an `ntfy` destination named `ntfy` carrying its `url`, `token_file`, and each of its `events` at its `priority`. It changes only those lines, writes through a temp file and a rename, follows a symlink to the file it names, and leaves a file with neither key untouched. The old `notify` argv also ran on `usage_warning` and on the `resumed` that lifts a usage hold; add `usage_warning` to the migrated destination's `events` to keep hearing it.
 
 ## Worked example
 

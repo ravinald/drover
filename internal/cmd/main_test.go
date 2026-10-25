@@ -78,6 +78,11 @@ func TestMain(m *testing.M) {
 	if err := os.Setenv("XDG_STATE_HOME", dir); err != nil {
 		panic(err)
 	}
+	// drive reads Claude Code's transcripts before and after every run, and a
+	// suite must never read the developer's.
+	if err := os.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(dir, "claude")); err != nil {
+		panic(err)
+	}
 	stubCache = filepath.Join(dir, "stubs")
 	if err := os.Mkdir(stubCache, 0o700); err != nil {
 		panic(err)

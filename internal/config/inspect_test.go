@@ -62,13 +62,14 @@ caveat_label = "legacy"
 // decodes. A table without a line here fails TestEveryOpenTableHasACase, so an
 // open table added to Config cannot go uncovered.
 var entry = map[string]struct{ name, value string }{
-	"verify":            {"docs", `"make docs"`},
-	"runners":           {"agy", `{ headless = ["agy"] }`},
-	"ids.namespaces":    {"B", `"bug"`},
-	"severity.ranks":    {"C", `"red"`},
-	"frontmatter.shape": {"severity", `"enum:C,H"`},
-	"numbered_files":    {"migrations", `"db/{n}_*.up.sql"`},
-	"supervise":         {"resolve_conflict", `"operator"`},
+	"verify":              {"docs", `"make docs"`},
+	"runners":             {"agy", `{ headless = ["agy"] }`},
+	"ids.namespaces":      {"B", `"bug"`},
+	"severity.ranks":      {"C", `"red"`},
+	"frontmatter.shape":   {"severity", `"enum:C,H"`},
+	"numbered_files":      {"migrations", `"db/{n}_*.up.sql"`},
+	"supervise":           {"resolve_conflict", `"operator"`},
+	"notify.destinations": {"desk", `{ type = "command", argv = ["notify-send"], events = { exit = "low" } }`},
 }
 
 // declaration is one way a file writes an open table. top is placed before

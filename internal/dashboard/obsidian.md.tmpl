@@ -26,8 +26,14 @@ Rendered {{time "2006-01-02 15:04 MST" .now}}
 {{- else}}<span class="drover-{{class .kind}}">{{class .kind}}</span>{{with .id}} [[#^{{anchor .}}|{{.}}]]{{end}}{{end}} {{.reason | esc | md}}
 {{- with .since}} · since {{ago .}}{{end}} · `{{.command}}`
 {{else -}}
-Nothing is waiting on you.
-{{end}}
+{{if not .long_sessions}}Nothing is waiting on you.
+{{end}}{{end}}
+{{- with .long_sessions}}
+### Long sessions
+
+{{range . -}}
+- `{{.session_id}}`{{with .id}} [[#^{{anchor .}}|{{.}}]]{{end}} {{.source}} · {{tokens .weighted}} tokens · {{.reason | esc | md}}
+{{end}}{{end}}
 ## Running drive
 
 {{$running := false -}}
@@ -55,7 +61,7 @@ Nothing is waiting on you.
 {{- with .severity}} · sev {{.}}{{end}}
 {{- with .deps}} · deps {{range $i, $d := .}}{{if $i}}, {{end}}[[#^{{anchor $d}}|{{$d}}]]{{end}}{{end}}
 {{- with .blocks}} · blocks {{range $i, $b := .}}{{if $i}}, {{end}}[[#^{{anchor $b}}|{{$b}}]]{{end}}{{end}}
-{{- with .pr}}{{$u := or .url (pr .number)}}{{with .number}} · PR {{if $u}}[#{{.}}]({{$u}}){{else}}#{{.}}{{end}}{{end}}{{end}} ^{{anchor .id}}
+{{- with .pr}}{{$u := or .url (pr .number)}}{{with .number}} · PR {{if $u}}[#{{.}}]({{$u}}){{else}}#{{.}}{{end}}{{end}}{{end}}{{template "spent" .}} ^{{anchor .id}}
 {{end}}
 {{end}}{{else -}}
 Nothing is open.
@@ -66,7 +72,7 @@ Nothing is open.
 {{range done .items -}}
 - **{{.id}}** {{.title | esc | md}} · <span class="drover-{{class (or .level "unaudited")}}">{{or .level "unaudited"}}</span>
 {{- with .pr}}{{$u := or .url (pr .number)}}{{with .number}} · PR {{if $u}}[#{{.}}]({{$u}}){{else}}#{{.}}{{end}}{{end}}{{end}}
-{{- with .finished}} · merged {{time "2006-01-02" .}}{{end}} ^{{anchor .id}}
+{{- with .finished}} · merged {{time "2006-01-02" .}}{{end}}{{template "spent" .}} ^{{anchor .id}}
 {{else -}}
 Nothing has merged yet.
 {{end}}
@@ -107,6 +113,13 @@ Red waits on a person, yellow is moving, gray is held by a paused drive, orange 
 | **follow-up** | An open follow-up nothing is scheduled to carry. |
 
 ---
+{{with .usage -}}
+Usage {{if eq .window "7d"}}over the last 7 days{{else}}since {{time "Mon 2006-01-02 15:04 MST" .window}}{{end}}: {{tokens .weighted}} weighted tokens · {{usd .cost_usd}} at list price
+{{- with .budget_used}} · {{$c := budget .}}{{if $c}}<span class="drover-{{$c}}">budget {{pct .}}</span>{{else}}budget {{pct .}}{{end}} of {{tokens $.usage.budget}} across every project{{end}}
+{{- with .budget_unread}} · not read: {{range $i, $p := .}}{{if $i}}; {{end}}{{$p | esc | md}}{{end}}{{end}}
+
+{{end -}}
 Rendered {{time "2006-01-02 15:04 MST" .now}} ({{.zone}}) · {{.project | esc | md}} · drover {{.version}}
 {{end -}}
 {{define "trendcells"}}{{with .finished}}{{.value}}{{else}}n/a{{end}} | {{with .cycle_time}}{{secs .median}} (n={{.n}}){{else}}n/a{{end}} | {{with .cycle_time}}{{secs .p90}}{{else}}n/a{{end}} | {{with .review_passes}}{{num .value}} (n={{.n}}){{else}}n/a{{end}} | {{with .changes_rate}}{{pct .value}} (n={{.n}}){{else}}n/a{{end}} | {{with .parks}}{{.value}}{{else}}n/a{{end}} | {{with .review_to_merge}}{{secs .median}} (n={{.n}}){{else}}n/a{{end}} | {{with .verify}}{{secs .median}} (n={{.n}}){{else}}n/a{{end}}{{end}}
+{{- define "spent"}} · tokens {{with .usage}}{{tokens .weighted}} · list {{usd .cost_usd}}{{else}}- · list -{{end}}{{end}}

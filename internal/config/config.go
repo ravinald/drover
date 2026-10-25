@@ -4,10 +4,12 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"os"
 	stdpath "path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -60,13 +62,15 @@ type Config struct {
 	Sequences   map[string]string      `toml:"numbered_files"`
 	GitHub      GitHub                 `toml:"github"`
 	Forge       Forge                  `toml:"forge"`
+	Usage       Usage                  `toml:"usage"`
 	Register    Register               `toml:"register"`
 	Backlog     Backlog                `toml:"backlog"`
 	Run         Run                    `toml:"run"`
 	Runners     map[string]runner.Spec `toml:"runners"`
-	// Supervise maps supervised action keys to policies, beside the two keys
-	// that are not actions: template and notify. Read it through Policy,
-	// SuperviseTemplate and Notify.
+	Notify      Notify                 `toml:"notify"`
+	// Supervise maps supervised action keys to policies, beside template, the
+	// one key that is not an action. Read it through Policy and
+	// SuperviseTemplate.
 	//
 	// A map rather than a struct because the action keys are a catalog the cmd
 	// package owns (RegisterActions), and walking it as an open table keeps a
@@ -582,6 +586,10 @@ type Forge struct {
 	// failed job's log, that mark it as the infrastructure failing. They add to
 	// the built-in list rather than replacing it.
 	InfraPatterns []string `toml:"infra_patterns"`
+	// FailurePatterns are regular expressions matched against each line of a
+	// failed job's log, with its timestamp stripped, that pick out the lines
+	// saying what failed. They add to the built-in list.
+	FailurePatterns []string `toml:"failure_patterns"`
 	// Reruns is how many times drive reruns one head's infrastructure failures
 	// before reading the next as the code's. 0 never reruns.
 	Reruns int `toml:"reruns"`
@@ -630,7 +638,243 @@ func (c *Config) validateForge(path string) error {
 			return fmt.Errorf("%s: forge.infra_patterns holds an empty pattern, which would match every log", path)
 		}
 	}
+	for _, p := range c.Forge.FailurePatterns {
+		if strings.TrimSpace(p) == "" {
+			return fmt.Errorf("%s: forge.failure_patterns holds an empty pattern, which would match every line", path)
+		}
+		if _, err := regexp.Compile(p); err != nil {
+			return fmt.Errorf("%s: forge.failure_patterns holds %q, which is not a Go regular expression: %w", path, p, err)
+		}
+	}
 	return nil
+}
+
+// Usage is how status reads the usage rows: the window its report-level totals
+// cover, the budget it measures them against, and when a session has run long
+// enough to name. Weekly, FiveHour and Overage are what drive does on the
+// account's own rate_limit reading. Read SessionMaxHours and ContextWarn through
+// UsageSessionMaxHours and UsageContextWarn, which resolve an undeclared key to
+// its default.
+type Usage struct {
+	// WeeklyBudget is the operator's estimate of the weekly limit in weighted
+	// tokens. The service publishes no such figure, so this is a guess, and 0
+	// means none was made.
+	WeeklyBudget int64 `toml:"weekly_budget"`
+	// Reset is when the weekly limit starts over, as "Sat 20:00
+	// America/Los_Angeles". Empty means the window is the last 7 days.
+	Reset string `toml:"reset"`
+	// SessionMaxHours is how long a session may run, first row to last, before
+	// status names it.
+	SessionMaxHours int `toml:"session_max_hours"`
+	// ContextWarn is the largest context, in tokens, a session may reach before
+	// status names it.
+	ContextWarn int64 `toml:"context_warn"`
+	// Weekly and FiveHour are the two levels drive acts on for each window
+	// Claude reports, and Overage what it does past the weekly allotment.
+	// Read them through UsageLevel and OverageMode, which tell unset from 0.
+	Weekly   UsageWindow  `toml:"weekly"`
+	FiveHour UsageWindow  `toml:"five_hour"`
+	Overage  UsageOverage `toml:"overage"`
+}
+
+// UsageWindow is [usage.weekly] or [usage.five_hour]: the percent of the window
+// left, as the service reports it, at which drive notifies and at which it
+// holds dispatch. Unset is no such step; 0 is a step at nothing left.
+type UsageWindow struct {
+	NotifyRemaining int `toml:"notify_remaining"`
+	PauseRemaining  int `toml:"pause_remaining"`
+}
+
+// UsageOverage is [usage.overage]: what drive does once the weekly allotment is
+// spent and sessions run on purchased credit, which no reading puts a figure
+// on. MaxUSD and NotifyUSD are list-price cost_usd summed, not what the
+// account was charged.
+type UsageOverage struct {
+	Mode      string  `toml:"mode"`
+	MaxUSD    float64 `toml:"max_usd"`
+	NotifyUSD float64 `toml:"notify_usd"`
+}
+
+// The [usage.overage] modes.
+const (
+	OveragePause    = "pause"
+	OverageContinue = "continue"
+)
+
+// The [usage] window tables, as a dotted key names them.
+const (
+	UsageWeekly   = "weekly"
+	UsageFiveHour = "five_hour"
+)
+
+// UsageLevel is [usage.<window>] notify_remaining or pause_remaining, and false
+// when no layer set it. step is "notify" or "pause".
+func (c *Config) UsageLevel(window, step string) (int, bool) {
+	key := "usage." + window + "." + step + "_remaining"
+	if !c.Declared(key) {
+		return 0, false
+	}
+	w := c.Usage.Weekly
+	if window == UsageFiveHour {
+		w = c.Usage.FiveHour
+	}
+	if step == "pause" {
+		return w.PauseRemaining, true
+	}
+	return w.NotifyRemaining, true
+}
+
+// OverageMode is [usage.overage] mode, or pause when unset.
+func (c *Config) OverageMode() string {
+	if c.Usage.Overage.Mode == "" {
+		return OveragePause
+	}
+	return c.Usage.Overage.Mode
+}
+
+// OverageUSD is [usage.overage] max_usd or notify_usd, and false when unset.
+// step is "max" or "notify".
+func (c *Config) OverageUSD(step string) (float64, bool) {
+	if !c.Declared("usage.overage." + step + "_usd") {
+		return 0, false
+	}
+	if step == "max" {
+		return c.Usage.Overage.MaxUSD, true
+	}
+	return c.Usage.Overage.NotifyUSD, true
+}
+
+// The [usage] defaults, applied where the key is read.
+const (
+	DefaultSessionMaxHours = 24
+	DefaultContextWarn     = 400000
+)
+
+// UsageSessionMaxHours is [usage] session_max_hours, or its default.
+func (c *Config) UsageSessionMaxHours() int {
+	if c.Usage.SessionMaxHours <= 0 {
+		return DefaultSessionMaxHours
+	}
+	return c.Usage.SessionMaxHours
+}
+
+// UsageContextWarn is [usage] context_warn, or its default.
+func (c *Config) UsageContextWarn() int64 {
+	if c.Usage.ContextWarn <= 0 {
+		return DefaultContextWarn
+	}
+	return c.Usage.ContextWarn
+}
+
+func (c *Config) validateUsage(path string) error {
+	if c.Declared("usage.weekly_budget") && c.Usage.WeeklyBudget <= 0 {
+		return fmt.Errorf("%s: usage.weekly_budget is %d: give a positive count of weighted tokens, or leave it unset for no budget", path, c.Usage.WeeklyBudget)
+	}
+	if c.Usage.WeeklyBudget > 0 && c.Usage.Reset == "" {
+		return fmt.Errorf("%s: usage.weekly_budget is measured from the limit's weekly reset, and usage.reset is unset: "+
+			"add one, as reset = \"Sat 20:00 America/Los_Angeles\"", path)
+	}
+	if c.Usage.Reset != "" {
+		if _, err := ParseReset(c.Usage.Reset); err != nil {
+			return fmt.Errorf("%s: usage.reset: %v", path, err)
+		}
+	}
+	if c.Declared("usage.session_max_hours") && c.Usage.SessionMaxHours <= 0 {
+		return fmt.Errorf("%s: usage.session_max_hours is %d: give a positive number of hours", path, c.Usage.SessionMaxHours)
+	}
+	if c.Declared("usage.context_warn") && c.Usage.ContextWarn <= 0 {
+		return fmt.Errorf("%s: usage.context_warn is %d: give a positive count of tokens", path, c.Usage.ContextWarn)
+	}
+	for _, window := range []string{UsageWeekly, UsageFiveHour} {
+		notify, nok := c.UsageLevel(window, "notify")
+		pause, pok := c.UsageLevel(window, "pause")
+		for _, l := range []struct {
+			step  string
+			v     int
+			isSet bool
+		}{{"notify", notify, nok}, {"pause", pause, pok}} {
+			if l.isSet && (l.v < 0 || l.v > 99) {
+				return fmt.Errorf("%s: usage.%s.%s_remaining is %d: give the percent of the window left, 0 to 99, or leave it unset for no such step",
+					path, window, l.step, l.v)
+			}
+		}
+		if nok && pok && pause >= notify {
+			return fmt.Errorf("%s: usage.%s.pause_remaining is %d and notify_remaining is %d: the pause has to come after the notice, so pause_remaining must be below notify_remaining",
+				path, window, pause, notify)
+		}
+	}
+	switch m := c.Usage.Overage.Mode; m {
+	case "", OveragePause, OverageContinue:
+	default:
+		return fmt.Errorf("%s: usage.overage.mode is %q: give %q or %q", path, m, OveragePause, OverageContinue)
+	}
+	maxUSD, mok := c.OverageUSD("max")
+	notifyUSD, nok := c.OverageUSD("notify")
+	if mok && maxUSD <= 0 {
+		return fmt.Errorf("%s: usage.overage.max_usd is %g: give a positive number of dollars, or leave it unset for no cap", path, maxUSD)
+	}
+	if nok && notifyUSD <= 0 {
+		return fmt.Errorf("%s: usage.overage.notify_usd is %g: give a positive number of dollars, or leave it unset for no notice", path, notifyUSD)
+	}
+	if mok && nok && notifyUSD >= maxUSD {
+		return fmt.Errorf("%s: usage.overage.notify_usd is %g and max_usd is %g: the notice has to come before the hold, so notify_usd must be below max_usd",
+			path, notifyUSD, maxUSD)
+	}
+	return nil
+}
+
+// Reset is a weekly instant: a weekday and a wall-clock time in a zone.
+type Reset struct {
+	Day          time.Weekday
+	Hour, Minute int
+	Zone         *time.Location
+}
+
+// ParseReset reads "<weekday> <HH:MM> <IANA zone>", as "Sat 20:00
+// America/Los_Angeles". The weekday takes its three-letter or full English
+// name, in any case.
+func ParseReset(v string) (Reset, error) {
+	f := strings.Fields(v)
+	if len(f) != 3 {
+		return Reset{}, fmt.Errorf("%q is not a weekday, a 24-hour time and a zone, as \"Sat 20:00 America/Los_Angeles\"", v)
+	}
+	var r Reset
+	day, ok := weekdays[strings.ToLower(f[0])]
+	if !ok {
+		return Reset{}, fmt.Errorf("%q: %q is not a weekday (Sun, Mon, Tue, Wed, Thu, Fri, Sat)", v, f[0])
+	}
+	r.Day = day
+	t, err := time.Parse("15:04", f[1])
+	if err != nil {
+		return Reset{}, fmt.Errorf("%q: %q is not a 24-hour time such as 20:00", v, f[1])
+	}
+	r.Hour, r.Minute = t.Hour(), t.Minute()
+	if r.Zone, err = time.LoadLocation(f[2]); err != nil || strings.EqualFold(f[2], "local") {
+		return Reset{}, fmt.Errorf("%q: %q is not an IANA zone such as America/Los_Angeles", v, f[2])
+	}
+	return r, nil
+}
+
+var weekdays = func() map[string]time.Weekday {
+	m := map[string]time.Weekday{}
+	for d := time.Sunday; d <= time.Saturday; d++ {
+		m[strings.ToLower(d.String())] = d
+		m[strings.ToLower(d.String()[:3])] = d
+	}
+	return m
+}()
+
+// Last is the most recent reset at or before now. It is computed on the zone's
+// own calendar, so a reset at 20:00 stays at 20:00 across a daylight-saving
+// change.
+func (r Reset) Last(now time.Time) time.Time {
+	local := now.In(r.Zone)
+	back := (int(local.Weekday()) - int(r.Day) + 7) % 7
+	at := time.Date(local.Year(), local.Month(), local.Day()-back, r.Hour, r.Minute, 0, 0, r.Zone)
+	if at.After(now) {
+		at = time.Date(local.Year(), local.Month(), local.Day()-back-7, r.Hour, r.Minute, 0, 0, r.Zone)
+	}
+	return at
 }
 
 // The register sources. A project picks exactly one: the read path is a single
@@ -864,10 +1108,12 @@ func loadRoot(root string) (*Config, error) {
 	}
 	c.sources = append(c.sources, path)
 
+	globalDests := maps.Clone(c.Notify.Destinations)
 	md, err := toml.DecodeFile(path, c)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	c.layerNotify(globalDests)
 	c.absorbDeclared(md, path, true)
 	// Checked before unknown keys, because the keys a stale config carries are
 	// unknown *as a consequence of* the version being old. Reporting
@@ -1061,12 +1307,7 @@ func (e *VersionError) Error() string { return e.msg }
 // Naming the project file for a version the per-user file declared sends the
 // reader to edit a file that says nothing about it.
 func (c *Config) versionPath(project string) string {
-	for i := len(c.layers) - 1; i >= 0; i-- {
-		if c.layers[i].declares("schema_version") {
-			return c.layers[i].path
-		}
-	}
-	return project
+	return c.writer("schema_version", project)
 }
 
 // versionMatches refuses a config this build cannot read. An older one is named
@@ -1130,6 +1371,9 @@ func (c *Config) validate(path string) error {
 	if err := c.validateForge(path); err != nil {
 		return err
 	}
+	if err := c.validateUsage(path); err != nil {
+		return err
+	}
 	if _, err := ParseZone(c.Status.Timezone); err != nil {
 		return fmt.Errorf("%s: status.timezone is %q: %v (known: UTC, local, or an IANA name such as America/Los_Angeles)",
 			path, c.Status.Timezone, err)
@@ -1173,6 +1417,9 @@ func (c *Config) validate(path string) error {
 		return err
 	}
 	if err := c.validateSupervise(path); err != nil {
+		return err
+	}
+	if err := c.validateNotify(path); err != nil {
 		return err
 	}
 	// A shape drover cannot read would check nothing while reading as though it
@@ -1230,10 +1477,14 @@ type ActionBounds struct {
 	Ceiling Policy
 }
 
-// The two [supervise] keys that are settings rather than action keys.
+// SuperviseTemplateKey is the [supervise] key that is a setting rather than an
+// action. SuperviseNotifyKey and SuperviseNtfyKey are the two [notify]
+// replaced, named so a config still carrying one is refused rather than read
+// as an action.
 const (
 	SuperviseTemplateKey = "template"
 	SuperviseNotifyKey   = "notify"
+	SuperviseNtfyKey     = "ntfy"
 )
 
 // actions is the catalog's bounds, keyed by action. The catalog lives in the
@@ -1264,18 +1515,6 @@ func (c *Config) SuperviseTemplate() string {
 	return c.Abs(s)
 }
 
-// Notify is the [supervise] notify argv, empty when unset.
-func (c *Config) Notify() []string {
-	raw, _ := c.Supervise[SuperviseNotifyKey].([]any)
-	out := make([]string, 0, len(raw))
-	for _, v := range raw {
-		if s, ok := v.(string); ok {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
 // validateSupervise refuses a [supervise] table drover would have to guess
 // about. A policy above its ceiling is the one that matters: the ceiling is
 // where a person has to stay in the loop, and a config that silently clamped
@@ -1294,17 +1533,8 @@ func (c *Config) validateSupervise(path string) error {
 				return fmt.Errorf("%s: supervise.template is %v: name a template file", path, v)
 			}
 			continue
-		case SuperviseNotifyKey:
-			raw, ok := v.([]any)
-			if !ok || len(raw) == 0 {
-				return fmt.Errorf("%s: supervise.notify is %v: give an argv, such as [\"notify-send\", \"drover\"]", path, v)
-			}
-			for _, a := range raw {
-				if _, ok := a.(string); !ok {
-					return fmt.Errorf("%s: supervise.notify holds %v, which is not a string", path, a)
-				}
-			}
-			continue
+		case SuperviseNotifyKey, SuperviseNtfyKey:
+			return removedNotifier(c.writer("supervise."+key, path), key)
 		}
 		s, _ := v.(string)
 		p := Policy(s)
