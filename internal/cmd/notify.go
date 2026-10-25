@@ -24,8 +24,8 @@ const ntfyWait = 10 * time.Second
 // through, apart so a test can move the deadline and watch the request without
 // sleeping or reaching a network.
 var (
-	ntfyClock                       = time.Now
-	ntfyTransport http.RoundTripper = http.DefaultTransport
+	ntfyClock     = time.Now
+	ntfyTransport = http.DefaultTransport
 )
 
 // ntfyResult is what one send came to: the status ntfy answered with, zero
