@@ -758,7 +758,11 @@ and its lease stay up. --resume reloads .drover.toml, the prompt and review
 templates and [verify], checks them as a launch does, and continues each item
 from where it was held; one whose verify command changed runs the new one
 before it goes on. A resume whose config or preflight fails exits 3 and the
-drive stays paused. --cleanup lists the worktrees under the drive tree
+drive stays paused. A running drive keeps the config it started or last
+resumed with: when .drover.toml on disk changes, it says so once per edit,
+with a "config changed on disk" line and a config_changed event naming the
+tables that differ, and applies nothing; --pause, then --resume, applies it.
+--cleanup lists the worktrees under the drive tree
 directory, the branches an item rendered under a branch template since
 changed, and the report stubs with no result; --cleanup --apply removes the
 clean worktrees no drive holds and the orphan branches holding no commit, and
@@ -815,8 +819,8 @@ lists them. --dry-run takes no id.
 
 --events, beside --json, also writes one event object per line as things
 happen: started, queued, dispatched, preflight, stage, check, parked, filed,
-needs_operator, needs_supervisor, merged, paused, resumed, usage_warning and
-exit. Each carries "event", which is how a reader tells it from an item's
+needs_operator, needs_supervisor, merged, paused, resumed, config_changed,
+usage_warning and exit. Each carries "event", which is how a reader tells it from an item's
 report, "ts", "drive", "id" where one item is meant, and "action" where a [supervise]
 catalog action produced it. A park whose action is at operator policy emits
 needs_operator. exit carries a summary: what merged, parked, skipped and was
@@ -1451,7 +1455,9 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 	// started it.
 	seq := 0
 	s.inputs = s.snapshotInputs(reviewer)
+	s.inputs.resumed = driveTakeover != ""
 	sched.inputs = s.inputs
+	publishConfig(s.inputs)
 	if driveJobs > 1 {
 		defer sched.watchInterrupt(ctx)()
 	}
@@ -1814,6 +1820,10 @@ func (s *session) driveQueue(ids []string) ([]backlog.Item, error) {
 // Ended is stamped on the named result rather than on d: every return copies d
 // first, so a deferred write to d reaches no caller.
 func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer string, named bool, deadline time.Time) (res DriveItem) {
+	if driveDispatching != nil {
+		driveDispatching(it.ID.Bare())
+	}
+	s.noticeConfig()
 	d := DriveItem{ID: it.ID.Bare(), Title: it.Title(), Started: time.Now().Format(time.RFC3339)}
 	// The last launch and what Run returned with it, which is where a park
 	// that names no detail of its own reads one from.
@@ -1938,6 +1948,7 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 	// that reloaded the config can name other runners, which the stages after
 	// it launch.
 	adopt := func(next string) []string {
+		s.noticeConfig()
 		changed := s.heldAt(ctx, it, next)
 		if len(changed) > 0 {
 			implementer, reviewer = s.runnerFor(it, driveRunner), s.inputs.reviewer

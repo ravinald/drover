@@ -315,7 +315,7 @@ B1 --json prints.`,
       "queue":["B3"],"running":["B2"],"jobs":1,"paused":true,
       "holds":[{"id":"B2","at":"review","verify":"make check"}]},
      "drives":[{"id":"D2","label":"night run","started":"2026-09-17T09:12:05Z","queued":["B2"],
-      "items":[{"id":"B2","outcome":""}],"running":true}],
+      "items":[{"id":"B2","outcome":""}],"running":true,"config_changed":true}],
      "usage":{"window":"2026-10-17T20:00:00-07:00","runs":9,
       "tokens":{"input":3000,"output":540000,"cache_create":4100000,"cache_read":170000000},
       "weighted":21643000,"cost_usd":104.2,
@@ -344,7 +344,8 @@ B1 --json prints.`,
   when its review stage should end, absent below 5 timed runs of a stage.
   drive is the drive that wrote the item's latest drive row, and drives is
   every drive the ledger records, newest first, as drover drives --json prints
-  them; the one the lease names carries "running": true.
+  them; the one the lease names carries "running": true, and "config_changed":
+  true when the .drover.toml on disk is no longer the one it runs under.
 
   usage on an item sums every usage row naming it, all time, and is absent on
   an item no usage row names. The top-level usage is the window's rows, the
@@ -1121,6 +1122,13 @@ func (s *session) printLease(w io.Writer, saidHere bool) {
 				holds = append(holds, h.ID+" before "+h.At)
 			}
 			fmt.Fprintf(w, "  held:    %s\n", strings.Join(holds, ", "))
+		}
+		if s.configDrift(l) {
+			since := "started"
+			if l.ConfigResumed {
+				since = "resumed"
+			}
+			fmt.Fprintf(w, "  config changed since this drive %s; --pause, then --resume, applies it\n", since)
 		}
 	}
 }

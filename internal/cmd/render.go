@@ -162,7 +162,7 @@ func (s *session) statusReport(scoped, tracker bool, now time.Time) StatusReport
 		s.attachDrive(rows, l, now)
 	}
 	if ds := s.ledger.Drives(); len(ds) > 0 {
-		drivesRunning(ds, l, busy && err == nil)
+		s.drivesRunning(ds, l, busy && err == nil)
 		report.Drives = ds
 	}
 	report.Trends = trends(s.ledger.Rows, now, s.location(), s.window)

@@ -321,9 +321,12 @@ type Drive struct {
 	// ids queued at launch with no outcome while it has none.
 	Items []Outcome `json:"items"`
 	// Running is the lease naming this drive, set by a caller that read it,
-	// and Paused that lease reading paused.
-	Running bool `json:"running,omitempty"`
-	Paused  bool `json:"paused,omitempty"`
+	// and Paused that lease reading paused. ConfigChanged is the config on
+	// disk differing from the one that lease says the drive runs under, which
+	// a running drive does not apply until a resume.
+	Running       bool `json:"running,omitempty"`
+	Paused        bool `json:"paused,omitempty"`
+	ConfigChanged bool `json:"config_changed,omitempty"`
 }
 
 // Drives folds the start and end rows into one Drive each, newest first.

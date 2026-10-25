@@ -3,16 +3,20 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/lease"
@@ -65,6 +69,9 @@ type driveInputs struct {
 	toml     []byte
 	prompt   string
 	review   string
+	// resumed is inputs a --resume loaded, rather than the launch: a re-exec
+	// onto a new binary is a resume too.
+	resumed bool
 }
 
 // snapshotInputs records what this drive runs under now, validating nothing:
@@ -322,8 +329,10 @@ func (s *session) answerControl(sched *driveSched) {
 			fmt.Fprintf(os.Stderr, "· drive --resume refused, and the drive stays paused: %v\n", err)
 			break
 		}
+		in.resumed = true
 		changed := s.inputs.changed(in, nil)
 		s.cfg, s.inputs = in.cfg, in
+		publishConfig(in)
 		s.backlog, s.ledger, s.shelf = next.backlog, next.ledger, next.shelf
 		events.reconfigure(in.cfg)
 		releaseUsage(sched)
@@ -590,4 +599,130 @@ func driveControl(ctx context.Context, args []string, timeoutSet bool) error {
 		return Refusal{fmt.Errorf("[supervise] cleanup_interrupted_drive is off in this project, so --apply removes nothing; --cleanup alone lists")}
 	}
 	return s.cleanupDrive(os.Stdout, driveApply)
+}
+
+// driveDispatching, when set, runs as an item is dispatched and before the
+// drive compares the config on disk. Tests set it; nothing else does.
+var driveDispatching func(id string)
+
+// noticeConfig reports a .drover.toml on disk that differs from the one this
+// drive runs under, once per distinct content, and applies nothing: a running
+// drive keeps the config it started or last resumed with, and taking an edit
+// stays --pause then --resume, under pause_for_config_change.
+//
+// The file is read under the schedule's lock so that two slots meeting the
+// same edit at once report it once.
+func (s *session) noticeConfig() {
+	if s.slot == nil {
+		return
+	}
+	q := s.slot.sched
+	q.mu.Lock()
+	in := q.inputs
+	if q.paused || in == nil {
+		q.mu.Unlock()
+		return
+	}
+	if q.configBase != in {
+		q.configBase, q.configSeen = in, ""
+	}
+	path := filepath.Join(in.cfg.Root, config.FileName)
+	raw, err := os.ReadFile(path) // #nosec G304 -- the project's own config
+	seen := ""
+	switch {
+	case err != nil:
+		seen = "error: " + err.Error()
+	case !bytes.Equal(raw, in.toml):
+		seen = configDigest(raw)
+	}
+	report := seen != "" && seen != q.configSeen
+	q.configSeen = seen
+	q.mu.Unlock()
+	if !report {
+		return
+	}
+
+	since := "started"
+	if in.resumed {
+		since = "last resumed"
+	}
+	ev := DriveEvent{Event: evConfigChanged}
+	if err != nil {
+		ev.Error = err.Error()
+		fmt.Fprintf(os.Stderr, "  ! config on disk will not read: %v; this drive goes on under the .drover.toml it %s with\n", err, since)
+		events.emit(ev)
+		return
+	}
+	at := "an unknown time"
+	if fi, serr := os.Stat(path); serr == nil {
+		at = fi.ModTime().Local().Format(time.DateTime)
+	}
+	line := fmt.Sprintf("  ! config changed on disk at %s: this drive still runs the .drover.toml it %s with; "+
+		"drover drive --pause, then --resume, applies it", at, since)
+	if _, lerr := config.LoadAt(in.cfg.Root); lerr != nil {
+		ev.Error = lerr.Error()
+		line += fmt.Sprintf("; the new file will not load, so a --resume refuses it: %v", lerr)
+	} else if ev.Tables = changedTables(in.toml, raw); len(ev.Tables) > 0 {
+		line += "; changed: " + strings.Join(ev.Tables, ", ")
+	} else {
+		line += "; no setting changed, only comments or layout"
+	}
+	fmt.Fprintln(os.Stderr, line)
+	events.emit(ev)
+}
+
+// configDigest is the SHA-256 of a config's bytes, hex, as the lease's
+// config_sha256 carries it.
+func configDigest(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+// changedTables names each top-level table, bracketed, and each top-level key
+// whose decoded contents differ between two configs, sorted. Comments and
+// layout differ in no table.
+func changedTables(was, now []byte) []string {
+	var a, b map[string]any
+	_, _ = toml.Decode(string(was), &a)
+	_, _ = toml.Decode(string(now), &b)
+	keys := map[string]bool{}
+	for k := range a {
+		keys[k] = true
+	}
+	for k := range b {
+		keys[k] = true
+	}
+	var out []string
+	for _, k := range slices.Sorted(maps.Keys(keys)) {
+		if reflect.DeepEqual(a[k], b[k]) {
+			continue
+		}
+		_, ta := a[k].(map[string]any)
+		_, tb := b[k].(map[string]any)
+		if ta || tb {
+			k = "[" + k + "]"
+		}
+		out = append(out, k)
+	}
+	return out
+}
+
+// publishConfig writes the digest of the config this drive runs under into its
+// lease, so status in another process can tell when the file moved on.
+func publishConfig(in *driveInputs) {
+	if held == nil || in == nil {
+		return
+	}
+	_ = held.Update(func(l *lease.Lease) { l.ConfigSHA256, l.ConfigResumed = configDigest(in.toml), in.resumed })
+}
+
+// configDrift reports whether the .drover.toml on disk differs from the one
+// the drive holding l runs under. A lease from a binary that never wrote the
+// digest, or a file that will not read, reports nothing.
+func (s *session) configDrift(l lease.Lease) bool {
+	if l.Command != "drive" || l.ConfigSHA256 == "" {
+		return false
+	}
+	raw, err := os.ReadFile(filepath.Join(s.cfg.Root, config.FileName)) // #nosec G304 -- the project's own config
+	return err == nil && configDigest(raw) != l.ConfigSHA256
 }

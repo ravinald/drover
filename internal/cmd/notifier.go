@@ -744,6 +744,14 @@ func noticeBody(e DriveEvent) string {
 		return "filed " + e.Kind + " " + e.Ref
 	case evPreflight:
 		return e.Action + ": " + e.Reason
+	case evConfigChanged:
+		switch {
+		case e.Error != "":
+			return "config changed on disk and will not load: " + e.Error
+		case len(e.Tables) > 0:
+			return "config changed on disk, not applied until --pause then --resume: " + strings.Join(e.Tables, ", ")
+		}
+		return "config changed on disk, not applied until --pause then --resume"
 	case evPaused, evResumed:
 		switch {
 		case e.Reason != "":
