@@ -150,6 +150,8 @@ func (q *driveSched) pause() {
 	defer q.mu.Unlock()
 	q.paused = true
 	q.publishHolds()
+	// An item already waiting for its trunk turn holds there from now on.
+	q.cond.Broadcast()
 }
 
 // resume releases every held item onto in, which each adopts at the boundary
@@ -317,6 +319,9 @@ func (s *session) answerControl(sched *driveSched) {
 			}
 			releaseUsage(sched)
 			sched.mu.Lock()
+			if sched.reexec == "" {
+				sched.reexecSince = time.Now()
+			}
 			sched.reexec = to.String()
 			sched.mu.Unlock()
 			fmt.Fprintf(os.Stderr, "· resumed by drive --resume onto %s, which replaced %s at %s; "+

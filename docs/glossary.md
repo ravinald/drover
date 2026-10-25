@@ -230,6 +230,7 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `paused`           | Event: the drive paused.                                                                                           |
 | `resumed`          | Event: the drive resumed, naming what changed.                                                                     |
 | `config_changed`   | Event: the `.drover.toml` on disk differs from the one the running drive uses, which it does not apply until a resume. |
+| `reexec_waiting`   | Event: a re-exec has waited past a minute on running items that do not hold.                                       |
 | `usage_warning`    | Event: the account crossed a `[usage]` notify level; sent once per window per reset, and it pauses nothing.        |
 | `exit`             | Event: the drive ended, with a summary of what it merged and what it left undone and why.                          |
 | `exit_undone`      | `[notify]` routing key: an exit that left an item parked, skipped or held.                                         |

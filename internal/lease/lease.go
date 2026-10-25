@@ -102,6 +102,10 @@ type Lease struct {
 	// once every running item holds, empty when it resumes where it is.
 	Holds  []Hold `json:"holds,omitempty"`
 	Reexec string `json:"reexec,omitempty"`
+	// ReexecWaiting is the line a drive writes when its re-exec has waited past
+	// a minute on running items that do not hold, naming each and its stage,
+	// and empty otherwise.
+	ReexecWaiting string `json:"reexec_waiting,omitempty"`
 	// ConfigSHA256 is the SHA-256 of the .drover.toml a drive runs under, hex,
 	// written at launch and by each resume that takes, and ConfigResumed that
 	// a resume wrote it. A drive keeps the config it read until a resume, so

@@ -26,7 +26,7 @@ import (
 // may name.
 var driveEventNames = []string{
 	evStarted, evQueued, evDispatched, evPreflight, evStage, evCheck, evParked, evFiled,
-	evNeedsOperator, evMerged, evPaused, evResumed, evConfigChanged, evUsageWarning, evExit,
+	evNeedsOperator, evMerged, evPaused, evResumed, evReexecWaiting, evConfigChanged, evUsageWarning, evExit,
 }
 
 // driveEventsPath is where a drive keeps its events, one object per line,

@@ -556,3 +556,28 @@ func TestTheTrunkLockWaitsThenReports(t *testing.T) {
 	}
 	release()
 }
+
+// A drive whose re-exec is waiting on an item that does not hold reads as
+// pausing to re-exec, with the line naming that item under it, rather than as
+// a bare pausing.
+func TestStatusNamesWhatAStalledReexecWaitsOn(t *testing.T) {
+	dir := leaseProject(t)
+	const line = "the re-exec onto v9 has waited 2m0s for 2 (in review) to hold at a stage boundary"
+	h, err := lease.Acquire(leasePath(t, dir), lease.Lease{Command: "drive", Root: dir, Paused: true,
+		Running: []string{"1", "2"}, Holds: []lease.Hold{{ID: "1", At: "implement"}}, Reexec: "v9", ReexecWaiting: line})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Release() })
+
+	out := capture(t, func() {
+		if err := execute(t, "status"); err != nil {
+			t.Fatalf("status: %v", err)
+		}
+	})
+	for _, want := range []string{"pausing to re-exec", "waiting:   " + line, "held:    1 before implement"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status does not say %q:\n%s", want, out)
+		}
+	}
+}

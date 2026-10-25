@@ -417,6 +417,8 @@ func TestEveryEventKindHasABody(t *testing.T) {
 		{DriveEvent{Event: evPaused}, "paused"},
 		{DriveEvent{Event: evPaused, Reason: "the weekly window is at 4%"}, "paused: the weekly window is at 4%"},
 		{DriveEvent{Event: evResumed, Changed: []string{"config"}}, "resumed, reloaded config"},
+		{DriveEvent{Event: evReexecWaiting, Reason: "the re-exec has waited 3m0s for E37 (in review)", Waiting: []WaitingItem{{ID: "E37", Stage: "review"}}},
+			"the re-exec has waited 3m0s for E37 (in review)"},
 		{DriveEvent{Event: evUsageWarning, Window: "weekly", Remaining: &two, ResetsAt: "2026-10-25T20:00:00-07:00"},
 			"weekly: 12% left, resets " + localTime("2026-10-25T20:00:00-07:00")},
 		{DriveEvent{Event: evExit, Drive: "D3", Code: &code, Summary: &ExitSummary{Merged: 2, Ended: endedDeadline}},

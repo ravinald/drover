@@ -1100,12 +1100,17 @@ func (s *session) printLease(w io.Writer, saidHere bool) {
 		// A paused drive lets an item finish the stage it is inside before it
 		// holds it, so "paused" is said only once nothing is still moving.
 		switch {
+		case l.Paused && len(moving) > 0 && l.ReexecWaiting != "":
+			what += "  pausing to re-exec"
 		case l.Paused && len(moving) > 0:
 			what += "  pausing"
 		case l.Paused:
 			what += "  paused"
 		}
 		fmt.Fprintf(w, "%s▸ also here: %s  pid %d  since %s%s\n", lead, what, l.PID, tableTime(l.Started, s.location()), where)
+		if l.Paused && len(moving) > 0 && l.ReexecWaiting != "" {
+			fmt.Fprintf(w, "  waiting:   %s\n", l.ReexecWaiting)
+		}
 		if len(moving) > 0 {
 			label := "running: "
 			if l.Paused {
