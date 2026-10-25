@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -58,7 +59,10 @@ type DriveEvent struct {
 	// Drive is the drive's id, taken with the lease. Absent only on the exit of
 	// a drive whose id would not allocate, because the ledger would not open.
 	Drive string `json:"drive,omitempty"`
-	ID    string `json:"id,omitempty"`
+	// Project is the project's name as `drover projects` lists it, so a
+	// notifier serving several projects need not work it out from where it runs.
+	Project string `json:"project"`
+	ID      string `json:"id,omitempty"`
 	// Action is the catalog key that produced the event, where one did.
 	Action string `json:"action,omitempty"`
 	Stage  string `json:"stage,omitempty"`
@@ -116,8 +120,9 @@ type DriveEvent struct {
 	*DriveTotals
 }
 
-// eventSink is where a drive's events go: stdout under --events, and the
-// [supervise] notify argv for each needs_operator whatever the flags.
+// eventSink is where a drive's events go: stdout under --events, the
+// [supervise] notify argv for each needs_operator, and [supervise.ntfy] for each
+// event it names, whatever the flags.
 //
 // Stage events arrive from every slot's goroutine, so writes are serialized
 // here. The writer is captured when the sink is made, because finishMerged points
@@ -131,6 +136,13 @@ type eventSink struct {
 	// notified records that a failing notifier was already reported, so a
 	// broken one costs one line per drive rather than one per event.
 	notified bool
+	// ntfy is [supervise.ntfy], sent only while ntfyOn. ntfyFailed and
+	// ntfyLoose are notified's two counterparts: one line per drive for a
+	// failing send, and one for a token file others can read.
+	ntfy       config.Ntfy
+	ntfyOn     bool
+	ntfyFailed bool
+	ntfyLoose  bool
 	// file is the drive's event file (driveEventsPath), opened for the drive
 	// id it carries. broken records that a write to it failed and was
 	// reported, after which the drive stops trying: the file is how a process
@@ -152,6 +164,7 @@ var driveEvents bool
 
 func newEventSink(cfg *config.Config, stream bool) *eventSink {
 	es := &eventSink{cfg: cfg, notify: cfg.Notify()}
+	es.ntfy, es.ntfyOn = cfg.Ntfy()
 	if stream {
 		es.w = os.Stdout
 	}
@@ -167,6 +180,7 @@ func (es *eventSink) emit(e DriveEvent) {
 		return
 	}
 	e.TS = time.Now().UTC().Format(time.RFC3339)
+	e.Project = es.cfg.Project
 	if d := activeDrive.Load(); d != nil {
 		e.Drive = d.id
 	}
@@ -190,6 +204,9 @@ func (es *eventSink) emit(e DriveEvent) {
 	}
 	if e.Event == evNeedsOperator {
 		es.runNotify(e)
+	}
+	if es.ntfyOn && slices.Contains(es.ntfy.Events, e.Event) {
+		es.sendNtfy(e)
 	}
 }
 
@@ -275,6 +292,7 @@ func (es *eventSink) reconfigure(cfg *config.Config) {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 	es.cfg, es.notify = cfg, cfg.Notify()
+	es.ntfy, es.ntfyOn = cfg.Ntfy()
 }
 
 // stage is the event for an item reaching one step.
@@ -298,25 +316,48 @@ func (es *eventSink) runNotify(e DriveEvent) {
 	if len(es.notify) == 0 {
 		return
 	}
+	out, err := runArgvNotifier(es.cfg.Root, es.notify, e)
+	if err != nil && !es.notified {
+		es.notified = true
+		if out != "" {
+			out = ": " + lastLines(out, 3)
+		}
+		fmt.Fprintf(os.Stderr, "· [supervise] notify %s failed (%v)%s; the drive goes on, and later failures are not reported\n",
+			strings.Join(es.notify, " "), err, out)
+	}
+}
+
+// runArgvNotifier runs one notifier argv with the event on stdin, bounded at
+// notifyWait, and returns what it printed, trimmed.
+func runArgvNotifier(dir string, argv []string, e DriveEvent) (string, error) {
 	payload, err := json.Marshal(e)
 	if err != nil {
-		return
+		return "", err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), notifyWait)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, es.notify[0], es.notify[1:]...) // #nosec G204 -- argv is project config, as [drive] merge_gate is
-	cmd.Dir = es.cfg.Root
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) // #nosec G204 -- argv is project config, as [drive] merge_gate is
+	cmd.Dir = dir
 	cmd.Stdin = bytes.NewReader(append(payload, '\n'))
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Run(); err != nil && !es.notified {
-		es.notified = true
-		msg := strings.TrimSpace(out.String())
-		if msg != "" {
-			msg = ": " + lastLines(msg, 3)
-		}
-		fmt.Fprintf(os.Stderr, "· [supervise] notify %s failed (%v)%s; the drive goes on, and later failures are not reported\n",
-			strings.Join(es.notify, " "), err, msg)
+	err = cmd.Run()
+	return strings.TrimSpace(out.String()), err
+}
+
+// sendNtfy posts one event to [supervise.ntfy]. Called with mu held, so a send
+// never overlaps a notifier or another send, and holds dispatch at most
+// ntfyWait.
+func (es *eventSink) sendNtfy(e DriveEvent) {
+	if loose := tokenLoose(es.ntfy.TokenFile); loose != "" && !es.ntfyLoose {
+		es.ntfyLoose = true
+		fmt.Fprintf(os.Stderr, "· [supervise.ntfy] %s; the send goes out\n", loose)
+	}
+	res, err := postNtfy(es.ntfy, e)
+	if err != nil && !es.ntfyFailed {
+		es.ntfyFailed = true
+		fmt.Fprintf(os.Stderr, "· [supervise.ntfy] POST %s failed (%v)%s; the drive goes on, and later failures are not reported\n",
+			es.ntfy.URL, err, res.bodyClause())
 	}
 }
 

@@ -823,16 +823,17 @@ A drive runs unattended, and what it parks still needs somebody: a conflict afte
 | ------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `template`   | unset               | The template [`drover supervise`](automation.md#the-supervisor) renders its prompt from, resolved like [`[prompts]`](#prompts) `implement`. Unset uses the built-in one; `drover supervise --dry-run` prints the result. |
 | `notify`     | unset               | An argv run once per `needs_operator` event, from the project root, with the event JSON on stdin and 30 seconds to finish. A notifier that fails or is missing is reported once per drive and never parks or stops it.   |
+| `ntfy`       | unset               | A table naming an [ntfy](https://ntfy.sh) topic each chosen event is POSTed to. See [`[supervise.ntfy]`](#supervisentfy). `notify` and `ntfy` may both be set, and both run.                                             |
 | _action key_ | the catalog default | The policy for one action below.                                                                                                                                                                                         |
 
 Every other key is an action from the catalog, set to a policy:
 
-| Policy       | Means                                                                        |
-| ------------ | ---------------------------------------------------------------------------- |
-| `auto`       | Drive does it.                                                               |
-| `supervisor` | A session `drover supervise` started may do it, and reports it.              |
-| `operator`   | drover stops, emits `needs_operator`, runs `notify`, and waits for a person. |
-| `off`        | Nothing happens. Today's park stands.                                        |
+| Policy       | Means                                                                                   |
+| ------------ | --------------------------------------------------------------------------------------- |
+| `auto`       | Drive does it.                                                                          |
+| `supervisor` | A session `drover supervise` started may do it, and reports it.                         |
+| `operator`   | drover stops, emits `needs_operator`, runs `notify` and `ntfy`, and waits for a person. |
+| `off`        | Nothing happens. Today's park stands.                                                   |
 
 The policies are ordered `off` < `operator` < `supervisor` < `auto`, and each action has a ceiling: a policy above it is a load error naming the key, the policy requested and the ceiling. An omitted key takes its default, and an unknown key is a load error. Each command listed beside an action is that action when a supervisor runs it, and refuses there with exit `3` unless the action is at `supervisor` or `auto`.
 
@@ -906,6 +907,32 @@ notify            = ["notify-send", "drover"]
 resolve_conflict  = "operator"   # nobody but a person touches a conflict here
 post_finish_check = "auto"
 ```
+
+### `[supervise.ntfy]`
+
+The drive sends to an [ntfy](https://ntfy.sh) topic itself, so reaching a phone takes a URL and a token file rather than a script. The table may sit in `.drover.toml` or in the per-user config, and where both write it the project's wins key by key: a per-user file naming the server and token serves every project, and one project can raise its priority without repeating the rest.
+
+| Key          | Default              | Meaning                                                                                                                                                                                                       |
+| ------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`        | required             | The topic URL, such as `https://ntfy.sh/<topic>`. It must be `https://` unless the host is a loopback address, must name a topic in its path, and may not carry credentials.                                  |
+| `token_file` | unset                | A file holding the access token, sent as `Authorization: Bearer <token>`. It must start with `/` or `~/`, and is read at every send, so a rotated token takes effect on the next event. Unset sends no token. |
+| `events`     | `["needs_operator"]` | The drive events that send: any of `needs_operator`, `needs_supervisor`, `parked` and `exit`.                                                                                                                 |
+| `priority`   | `"high"`             | ntfy's priority for every send: `min`, `low`, `default`, `high` or `urgent`.                                                                                                                                  |
+
+An unknown key, a malformed URL, an unknown event or priority, and a table with no `url` are load errors naming the key and the file that wrote it.
+
+Each send is a `POST` to `url` with `Title: drover: <project> <id>` (`drover: <project>` for an event with no item), `Priority`, `Tags: robot`, and a body of `<action>: <run>`, falling back to the event's `reason` and then to its name. It runs where `notify` runs, after the event is written, so sends never overlap and none holds dispatch longer than its 10-second bound. A send that fails, whether a non-2xx status, a timeout or an unreadable token file, is reported once per drive on stderr with the status and the body ntfy returned, and never parks or stops the drive.
+
+The token appears in no output drover writes: not in an error, the event file, `--events`, or `drover config`, which prints the `url`, the resolved `token_file` and whether that file exists and reads. A `token_file` that group or others can read draws one warning per drive naming the path and `chmod 600`, and the send still goes out. `drover notify --test` sends one synthetic `needs_operator` event through `notify` and `ntfy` alike, prints each one's exit or HTTP status, and exits 0 when all succeeded, 1 when one failed and 2 when neither is configured.
+
+```toml
+[supervise.ntfy]
+url        = "https://ntfy.example.com/drover"
+token_file = "~/.config/drover/ntfy-token"
+events     = ["needs_operator", "needs_supervisor"]
+```
+
+iOS delivers a notification from a self-hosted server instantly only when that server sets `upstream-base-url` (usually `https://ntfy.sh`), so Apple's push service is told a message is waiting. That is a setting in the ntfy server's own `server.yml`, not in drover; without it the iOS app picks messages up only when it next polls.
 
 ## Worked example
 

@@ -100,7 +100,7 @@ register backend; ` + "`drover check`" + ` does that.`,
 			return err
 		}
 		body := renderConfig(forReport, in.Root, global, in.Config.Verify["default"], written(in.Written()), in.Bare)
-		fmt.Print(body + notices(body, in) + addendumNote(in.Config) + configPolicies(in.Config))
+		fmt.Print(body + notices(body, in) + addendumNote(in.Config) + ntfyNote(in.Config) + configPolicies(in.Config))
 		return nil
 	},
 }
@@ -189,6 +189,33 @@ func addendumNote(cfg *config.Config) string {
 		return fmt.Sprintf("\n# [agents] addendum resolves to %s, which cannot be read: %v\n", path, errors.Unwrap(err))
 	}
 	return fmt.Sprintf("\n# [agents] addendum resolves to %s, readable\n", path)
+}
+
+// ntfyNote says where [supervise.ntfy] posts and whether its token_file reads,
+// layered from both files. The token is never read into it: the file's
+// readability is the question, and its contents are not this report's.
+func ntfyNote(cfg *config.Config) string {
+	n, on := cfg.Ntfy()
+	if !on {
+		return ""
+	}
+	out := fmt.Sprintf("\n# [supervise.ntfy] url = %s\n", n.URL)
+	if n.TokenFile == "" {
+		return out + "# [supervise.ntfy] token_file is unset: sends carry no Authorization header\n"
+	}
+	state := "readable"
+	if f, err := os.Open(n.TokenFile); err != nil { // #nosec G304 -- the path the config names, opened to answer whether it reads
+		state = "cannot be read: " + errors.Unwrap(err).Error()
+		if os.IsNotExist(err) {
+			state = "does not exist"
+		}
+	} else {
+		_ = f.Close()
+		if loose := tokenLoose(n.TokenFile); loose != "" {
+			state += ", but " + loose
+		}
+	}
+	return out + fmt.Sprintf("# [supervise.ntfy] token_file = %s, %s\n", n.TokenFile, state)
 }
 
 // pasteNote says how a line gets into the file. TOML refuses a second [table]

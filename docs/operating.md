@@ -69,12 +69,23 @@ drover watch --until needs_operator,exit
 
 `--detach` is `drive` with the terminal taken out of the picture: stdin on `/dev/null`, output in a log beside the drive's event file, and nothing tying it to the shell you started it from. `drover drive --enqueue <id>...` adds work to the running drive, `drover attach` follows it, and `drover drive --stop` drains it. `drover attach --session` shows what a running item is doing, each tool call and message of its session beneath the item's `stage` line, and `--item <id>` narrows it to one item.
 
-To be told rather than to watch, set `[supervise] notify` to a command that reaches you. drover runs it once for each `needs_operator` event, from the project root, with the event as JSON on stdin and 30 seconds to finish. The following entry raises a desktop notification; a script that forwards stdin to your phone works the same way:
+To be told rather than to watch, point `[supervise.ntfy]` at an [ntfy](https://ntfy.sh) topic your phone subscribes to. The drive POSTs each event the table names, `needs_operator` by default, with the project and item in the title and what to do in the body. The table works in the per-user config as well, so one entry serves every project:
+
+```toml
+[supervise.ntfy]
+url        = "https://ntfy.example.com/drover"
+token_file = "~/.config/drover/ntfy-token"
+events     = ["needs_operator", "needs_supervisor"]
+```
+
+For anything else, set `[supervise] notify` to a command that reaches you. drover runs it once for each `needs_operator` event, from the project root, with the event as JSON on stdin and 30 seconds to finish. The following entry raises a desktop notification:
 
 ```toml
 [supervise]
 notify = ["notify-send", "drover"]
 ```
+
+Both may be set, and both run. `drover notify --test` sends a test event through each and prints what it answered, so a wrong token turns up before a drive stops for you.
 
 This is the mode to settle into. The queue runs, the waiting costs nothing, and the only thing that reaches you is an event a person has to handle.
 
@@ -101,7 +112,7 @@ A drive meets situations it can't settle from the merge gate and the review alon
 | `operator`   | The drive emits `needs_operator`, runs `notify`, and waits for you.                |
 | `off`        | Nothing happens, and the item stays parked.                                        |
 
-**A project with no `[supervise]` table runs every action at its default, and several defaults are `supervisor`.** `resolve_conflict`, `relaunch_after_runner_death`, `write_scaffold_requirements`, `close_changes`, `enqueue` and `cleanup_interrupted_drive` all default there. With no `drover supervise` session running, those events park and wait, and `notify` doesn't fire for them, because it runs only on `needs_operator`. In practice someone notices the parks and starts handling them in whatever chat is open, and that chat becomes a supervisor nobody configured: the [long-lived session](cost.md#long-lived-sessions) that cost tracking catches later.
+**A project with no `[supervise]` table runs every action at its default, and several defaults are `supervisor`.** `resolve_conflict`, `relaunch_after_runner_death`, `write_scaffold_requirements`, `close_changes`, `enqueue` and `cleanup_interrupted_drive` all default there. With no `drover supervise` session running, those events park and wait, and `notify` doesn't fire for them, because it runs only on `needs_operator`; `[supervise.ntfy]` reaches you for them only when its `events` names `needs_supervisor`. In practice someone notices the parks and starts handling them in whatever chat is open, and that chat becomes a supervisor nobody configured: the [long-lived session](cost.md#long-lived-sessions) that cost tracking catches later.
 
 Decide each action once instead. The following command walks the catalog by category and offers each action only the policies it allows. It appends a `[supervise]` table to `.drover.toml` when the file has none, and prints one to paste over the existing table when it has one:
 
