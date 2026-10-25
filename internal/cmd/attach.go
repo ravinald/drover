@@ -25,7 +25,7 @@ import (
 // driveEventNames is every event a drive emits, which is what watch --until
 // may name.
 var driveEventNames = []string{
-	evStarted, evQueued, evDispatched, evPreflight, evStage, evCheck, evParked, evFiled,
+	evStarted, evQueued, evDispatched, evSkipped, evPreflight, evStage, evCheck, evParked, evFiled,
 	evNeedsOperator, evMerged, evPaused, evResumed, evReexecWaiting, evConfigChanged, evUsageWarning, evExit,
 }
 

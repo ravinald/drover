@@ -286,6 +286,8 @@ type Amendment struct {
 type Outcome struct {
 	ID      string `json:"id"`
 	Outcome string `json:"outcome"`
+	// Reason is why a skipped item was skipped, absent on every other outcome.
+	Reason string `json:"reason,omitempty"`
 }
 
 // DriveRowID is the id a drive's start and end rows carry. It holds no digit,

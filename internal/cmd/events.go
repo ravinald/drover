@@ -23,9 +23,13 @@ import (
 const (
 	// evStarted is the drive holding its lease with its queue read: what it
 	// will run, how many at once, and until when.
-	evStarted       = "started"
-	evQueued        = "queued"
-	evDispatched    = "dispatched"
+	evStarted    = "started"
+	evQueued     = "queued"
+	evDispatched = "dispatched"
+	// evSkipped is an item the drive took off its queue without attempting:
+	// its state was not one a drive attempts, or the dep it waited for stayed
+	// parked for the operator until nothing else was left to run.
+	evSkipped       = "skipped"
 	evStage         = "stage"
 	evParked        = "parked"
 	evFiled         = "filed"
@@ -80,8 +84,10 @@ type DriveEvent struct {
 	Stage  string `json:"stage,omitempty"`
 	// Log is the session log a stage launching a session streams to, as the
 	// launch banner prints it: relative to the project root, or under ~/.
-	Log    string `json:"log,omitempty"`
-	Park   string `json:"park,omitempty"`
+	Log  string `json:"log,omitempty"`
+	Park string `json:"park,omitempty"`
+	// State is the work state an item was read in, on skipped alone.
+	State  string `json:"state,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	// Detail is the park's detail token, on parked, as the item's report
 	// carries it.
@@ -428,6 +434,9 @@ func (es *eventSink) itemEvents(d DriveItem) {
 	if es == nil {
 		return
 	}
+	if d.Outcome == outcomeSkipped {
+		es.emit(DriveEvent{Event: evSkipped, ID: d.ID, State: d.Park, Reason: d.Reason, Slot: d.Slot})
+	}
 	if d.Outcome == outcomeParked {
 		ev := DriveEvent{Event: evParked, ID: d.ID, Park: d.Park, Reason: d.Reason, Detail: d.Detail, Evidence: d.Evidence, PR: d.PR, Slot: d.Slot}
 		if key := parkAction(d); key != "" {
@@ -449,6 +458,22 @@ func (es *eventSink) itemEvents(d DriveItem) {
 	if d.Merged {
 		es.emit(DriveEvent{Event: evMerged, ID: d.ID, PR: d.PR, Title: d.ID + ": " + d.Title})
 	}
+}
+
+// heldForOperator reports whether a park waits on the operator: its action is at
+// operator policy, so it emitted needs_operator, here or through the hand-off
+// that parked it. A dependent of one can wait for the operator's merge; a
+// dependent of any other park cannot expect one.
+func heldForOperator(cfg *config.Config, d DriveItem) bool {
+	if d.Outcome != outcomeParked {
+		return false
+	}
+	key := parkAction(d)
+	if key == "" {
+		return false
+	}
+	p, _ := cfg.Policy(key)
+	return p == polOperator
 }
 
 // needsOperator emits the stop for one action at operator policy. run is what

@@ -120,6 +120,8 @@ type handoff struct {
 	// Waived is every usage hold a resume released, so the resume that
 	// re-executed the drive does not leave it held again on the same reading.
 	Waived []string `json:"waived,omitempty"`
+	// Operator is each dep the drive holds its dependents for, with its park.
+	Operator map[string]string `json:"operator,omitempty"`
 }
 
 // takeoverArgs is args less the flags a previous re-exec or probe added, with
@@ -248,7 +250,7 @@ func reexecWaitingLine(to string, waited time.Duration, waiting []WaitingItem) s
 // between, and the new process reads the held items, the queue and the
 // handoff out of it. Called with q.mu held by reexecReady; it returns only
 // when the exec failed, with the drive still paused on the binary it has.
-func (s *session) reexec(q *driveSched, pending []queued, running map[int]queued, dispatched int, deadline time.Time, watch *findingWatch) {
+func (s *session) reexec(q *driveSched, pending []queued, running map[int]queued, dispatched int, deadline time.Time, watch *findingWatch, operator map[string]string) {
 	failed := func(err error) {
 		q.reexec = ""
 		q.mu.Unlock()
@@ -261,7 +263,7 @@ func (s *session) reexec(q *driveSched, pending []queued, running map[int]queued
 		failed(errors.New("the drive has no id to carry across"))
 		return
 	}
-	ho := handoff{From: startedFrom.String(), Dispatched: dispatched, Findings: watch.state(), Waived: q.usage.waivedKeys()}
+	ho := handoff{From: startedFrom.String(), Dispatched: dispatched, Findings: watch.state(), Waived: q.usage.waivedKeys(), Operator: operator}
 	if !deadline.IsZero() {
 		ho.Deadline = deadline.Format(time.RFC3339Nano)
 	}
@@ -368,7 +370,7 @@ func (s *session) driveTakeoverRun(ctx context.Context, reviewer string) error {
 	fmt.Fprintf(os.Stderr, "· drive %s re-executed onto %s, replacing %s; %d held items go on, then the queue\n",
 		d.id, startedFrom, ho.From, len(l.Holds))
 	events.emit(DriveEvent{Event: evResumed, Changed: []string{inputBinary}})
-	return s.driveQueued(ctx, pending, reviewer, deadline, ho.Dispatched, s.adoptFindingWatch(ho.Findings), ho.Waived)
+	return s.driveQueued(ctx, pending, reviewer, deadline, ho.Dispatched, s.adoptFindingWatch(ho.Findings), ho.Waived, ho.Operator)
 }
 
 // resumeHeld sends an item a re-exec carried over to the boundary it held at:

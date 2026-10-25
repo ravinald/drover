@@ -729,6 +729,12 @@ func noticeBody(e DriveEvent) string {
 			return fmt.Sprintf("dispatched to slot %d", e.Slot)
 		}
 		return "dispatched"
+	case evSkipped:
+		b := "skipped " + e.State
+		if e.Reason != "" {
+			b += ": " + e.Reason
+		}
+		return b
 	case evStage:
 		if e.Result != "" {
 			return e.Stage + ": " + e.Result

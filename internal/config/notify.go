@@ -38,7 +38,7 @@ const EventExitUndone = "exit_undone"
 // event a drive emits, and exit_undone.
 func NotifyEvents() []string {
 	return []string{
-		"started", "queued", "dispatched", "preflight", "stage", "check", "parked", "filed",
+		"started", "queued", "dispatched", "skipped", "preflight", "stage", "check", "parked", "filed",
 		"needs_operator", "needs_supervisor", "merged", "paused", "resumed", "reexec_waiting", "config_changed", "usage_warning",
 		"exit", EventExitUndone,
 	}

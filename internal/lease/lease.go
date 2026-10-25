@@ -81,6 +81,12 @@ type Lease struct {
 	Queue   []string `json:"queue,omitempty"`
 	Running []string `json:"running,omitempty"`
 	Jobs    int      `json:"jobs,omitempty"`
+	// Waiting is each queued id held on a dep that parked for the operator,
+	// and Skipped each id the drive took off its queue without attempting.
+	// The holder rewrites both with the queue, so another process can say
+	// why an item is not moving before the drive's end row says it.
+	Waiting []Wait `json:"waiting,omitempty"`
+	Skipped []Skip `json:"skipped,omitempty"`
 	// Closed is a drive that takes no more ids: it stopped, or its queue ran
 	// out and it is on its way out. Append refuses to write into one, because
 	// nothing would read what it wrote.
@@ -116,6 +122,18 @@ type Lease struct {
 	// Handoff is what a drive re-executing itself leaves for the process that
 	// takes its place, opaque here and cleared once that process has read it.
 	Handoff json.RawMessage `json:"handoff,omitempty"`
+}
+
+// Wait is one queued item held for its dep's merge: On is the dep.
+type Wait struct {
+	ID string `json:"id"`
+	On string `json:"on"`
+}
+
+// Skip is one item a drive skipped, with why.
+type Skip struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // Hold is one item a paused drive holds: the stage it goes on to, and the

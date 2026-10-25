@@ -402,6 +402,7 @@ func TestEveryEventKindHasABody(t *testing.T) {
 		{DriveEvent{Event: evStarted, Drive: "D10", Queue: []string{"B89"}, Jobs: 1}, "started D10: B89, no deadline"},
 		{DriveEvent{Event: evQueued, ID: "4", Position: 2}, "queued at position 2"},
 		{DriveEvent{Event: evDispatched, ID: "4", Slot: 2}, "dispatched to slot 2"},
+		{DriveEvent{Event: evSkipped, ID: "5", State: stateBlocked, Reason: "blocked by 4"}, "skipped blocked: blocked by 4"},
 		{DriveEvent{Event: evPreflight, Action: "deps_lint", Reason: "clean"}, "deps_lint: clean"},
 		{DriveEvent{Event: evStage, ID: "4", Stage: stageGate}, "gate"},
 		{DriveEvent{Event: evCheck, ID: "4", Check: "lint", Class: "code", Evidence: "x.go:3: unused\nmore"}, "check lint code: x.go:3: unused"},
