@@ -136,6 +136,25 @@ Both name a state rather than a transition, so both are idempotent: `accept` on 
 
 The marker is matched as a whole line outside any fenced block. An item quoting it in a config sample, which is routine in a backlog of items about intake, is somebody's accepted contract and not a scaffold.
 
+#### What accept checks
+
+`accept` is the last look before a body becomes the contract, so it reads the body for what a lint can see:
+
+| Check                                                                                                                                                                                                                                      | `accept`                                                                                                 | Elsewhere                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| An angle-bracket placeholder such as `<provider>`, in prose or in a code span with no space in it (`internal/<provider>/client.go`). A fenced block and a code span holding a space (`drover show <id>`) are syntax examples and not read. | Refused, naming each line, unless `--yes`.                                                               | `check` reports `PLACEHOLDER` on an accepted item until it merges.                                                                  |
+| A line carrying one of `[intake] hold_markers`, by default `OPERATOR DECISION PENDING` and `BEFORE ACCEPT`, outside a fenced block.                                                                                                        | Refused, naming each line, unless `--yes`.                                                               | `check` reports `HOLD MARKER` on an accepted item until it merges.                                                                  |
+| A path or name only the branch of an unmerged item waiting on this one has. See [Which way a split points](#which-way-a-split-points).                                                                                                     | Refused unless `--yes`.                                                                                  | `check` reports `BRANCH CYCLE`.                                                                                                     |
+| A cited directory in the project tree.                                                                                                                                                                                                     | One note per directory: under `drive --jobs` the item waits for any item citing a path below it. Exit 0. | `new` prints the same note and `check` reports `BROAD CITATION` for a top-level directory, both while the body is still a scaffold. |
+| The deps line, the stop marker and the actor.                                                                                                                                                                                              | Refused. `--yes` never overrides these.                                                                  |                                                                                                                                     |
+
+A passing mention is not a file the item touches. Open the paragraph with `<!-- drover: context -->` on its first line and its citations count for neither the note nor dispatch's overlap set, which `drive --dry-run --jobs N` shows in the pairs it holds apart. A numbered requirement line inside that paragraph still counts:
+
+```text
+<!-- drover: context -->
+Nothing in `backend/` parses a retail barcode today.
+```
+
 ### Change an accepted contract
 
 Once accepted, the numbered list is what every run and review is measured against, so no command a session can reach changes it: `request-changes`, `close-changes` and `invariant` each refuse a write that would move the count. When the contract itself is wrong (a requirement belongs to a different design, or to another item), the operator changes it with `amend`:
@@ -166,7 +185,7 @@ drover check
 
 Exit 0 clean, exit 2 on findings, exit 1 if it could not run the validation at all. Put it in CI; run it after any rename.
 
-Findings are `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `BAD TEMPLATE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH` and `HAND EDITED`. [Concepts](concepts.md#validation) says what each means.
+Findings are `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `BAD TEMPLATE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `PLACEHOLDER`, `HOLD MARKER`, `BROAD CITATION` and `HAND EDITED`. [Concepts](concepts.md#validation) says what each means.
 
 Then see where the item sits:
 

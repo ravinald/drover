@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -31,18 +32,28 @@ The lines under the marker are matched against intake's own text rather than
 scanned to the next blank, so a marker somebody typed by hand with a paragraph
 directly under it loses the marker line alone.
 
+A body that is not finished is refused, naming each line: an angle-bracket
+placeholder such as <provider>, in prose or in a code span with no space in it
+(a path like internal/<provider>/client.go), or a line carrying one of [intake]
+hold_markers, by default "OPERATOR DECISION PENDING" and "BEFORE ACCEPT". A
+fenced block, and a code span holding a space (drover show <id>), is a syntax
+example and is not read.
+
 A body that cites a directory in the project tree, as a path dispatch reads,
 gets one note per directory: under drive --jobs the item waits for any item
-citing a path below it. The note changes nothing and the exit stays 0.
+citing a path below it. The note changes nothing and the exit stays 0. A
+paragraph whose first line is <!-- drover: context --> cites nothing for that
+purpose, here or at dispatch, except for its numbered requirement lines.
 
 An item another unmerged item waits on is read against that item's branch:
 every path it cites with a line part, and every backticked name that looks like
 a function or type, that the trunk lacks and the waiting item's branch has. The
 accepted item runs from the trunk and cannot change that code, and the item
 waiting on it cannot merge first, so the two would deadlock. accept refuses
-it, names each citation, and changes nothing. --yes overrides that refusal,
-which is the one accept makes about the body's content. It never overrides the
-stop-marker or actor checks, or a deps line drover would misread.
+it, names each citation, and changes nothing. --yes overrides that refusal
+and the unfinished-body one, which are the two accept makes about the body's
+content. It never overrides the stop-marker or actor checks, or a deps line
+drover would misread.
 
 Idempotent. An item with no marker is already accepted: that is reported and
 exits 0, because the operator named a state rather than a transition.
@@ -63,6 +74,7 @@ the last line lists the ids that were not accepted.`,
   drover accept B1                  # again: already accepted, exit 0
   drover accept B45 B46 E28         # each in turn; a bad id is named and skipped
   drover accept B59 --yes           # past the deadlock refusal, having read it
+  drover accept B60 --yes           # past a placeholder or hold line, having read it
 
   The three steps around it:
 
@@ -135,14 +147,28 @@ func (s *session) acceptOne(bare string) error {
 	// Three-index slice: appending onto lines[:at] would otherwise write
 	// through the backing array and shift the file under itself.
 	kept := append(lines[:at:at], lines[at+n:]...)
+	if holds := bodyHolds(kept, s.cfg.Intake.Holds()); len(holds) > 0 && !acceptYes {
+		where := rel(s.cfg.Root, it.Path)
+		msgs := make([]string, len(holds))
+		for i, h := range holds {
+			// Nothing is written, so the author opens the file with the marker
+			// block still in it: a line below the block sits n lines further down.
+			line := h.line
+			if line > at {
+				line += n
+			}
+			msgs[i] = fmt.Sprintf("%s:%d carries %s", where, line, h.what)
+		}
+		return Refusal{fmt.Errorf("%s\nNothing was accepted. The body is not finished: fill in or remove each line above,\n"+
+			"or accept anyway: drover accept %s --yes", strings.Join(msgs, "\n"), it.ID.Bare())}
+	}
 	if err := s.writeBody(it, kept); err != nil {
 		return err
 	}
 	fmt.Printf("accepted: %s (stop marker deleted from %s)\n",
 		it.ID.Bare(), rel(s.cfg.Root, it.Path))
 	for _, dir := range s.citedDirs(strings.Join(kept[bodyStart(kept):], "\n")) {
-		fmt.Printf("note: %s cites the directory %s; under drive --jobs it waits for any item citing a path below it\n",
-			it.ID.Bare(), dir)
+		fmt.Printf("note: %s\n", dirNote(it.ID.Bare(), dir))
 	}
 	if !s.mirroring() {
 		return nil
@@ -183,18 +209,134 @@ func (s *session) prefixedHint(bare string, err error) error {
 		err, strings.Join(near, " and "), plural(len(near), "ends", "end"), bare, near[0])
 }
 
-// citedDirs is every path citedPaths finds in body that is a directory in the
-// project tree. Dispatch holds such an item apart from every item citing a path
-// below it, and cannot tell a directory named for context from one the item
-// will edit, so accept tells the writer while the body is still theirs to change.
+// citedDirs is every path overlapPaths finds in body that is a directory in
+// the project tree. Dispatch holds such an item apart from every item citing a
+// path below it, and cannot tell a directory named for context from one the
+// item will edit, so accept tells the writer while the body is still theirs to
+// change.
 func (s *session) citedDirs(body string) []string {
 	var dirs []string
-	for _, p := range citedPaths(body) {
+	for _, p := range overlapPaths(body) {
 		if fi, err := os.Stat(filepath.Join(s.cfg.Root, p)); err == nil && fi.IsDir() {
 			dirs = append(dirs, p)
 		}
 	}
 	return dirs
+}
+
+// topDirs is the subset of citedDirs at the top level of the repository: the
+// citations that hold an item apart from most of the tree. check and new name
+// these before accept, since accept is the moment the body stops being the
+// author's to rewrite freely.
+func (s *session) topDirs(body string) []string {
+	var top []string
+	for _, d := range s.citedDirs(body) {
+		if !strings.Contains(d, "/") {
+			top = append(top, d)
+		}
+	}
+	return top
+}
+
+// dirNote is the consequence of citing dir, the sentence accept, check and new
+// all print.
+func dirNote(id, dir string) string {
+	return fmt.Sprintf("%s cites the directory %s; under drive --jobs it waits for any item citing a path below it", id, dir)
+}
+
+// placeholderSlot is an angle-bracket slot an author meant to fill in: <provider>,
+// <role>. Letters, digits and hyphens only, so <!-- --> and <https://...> are
+// not one.
+var placeholderSlot = regexp.MustCompile(`<[A-Za-z0-9-]+>`)
+
+// bodyHold is one line that says a body is not finished.
+type bodyHold struct {
+	// line is 1-based within the lines handed to bodyHolds.
+	line int
+	what string
+	// marker is set for a hold-marker line, unset for a placeholder.
+	marker bool
+}
+
+// bodyHolds is every line from the body start on that carries a placeholder
+// or a hold marker. A fenced block is a syntax example and is skipped whole.
+// So is an inline code span holding a space, which is a command example
+// (`drover show <id>`); a span without one is a path the run will be told to
+// edit (`internal/<provider>/client.go`), and is read like prose.
+func bodyHolds(lines []string, markers []string) []bodyHold {
+	var out []bodyHold
+	fenced := false
+	for i := bodyStart(lines); i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			fenced = !fenced
+			continue
+		}
+		if fenced {
+			continue
+		}
+		text := withoutCommandSpans(lines[i])
+		for _, m := range markers {
+			if m != "" && strings.Contains(text, m) {
+				out = append(out, bodyHold{i + 1, fmt.Sprintf("the hold marker %q", m), true})
+			}
+		}
+		for _, p := range placeholderSlot.FindAllString(text, -1) {
+			out = append(out, bodyHold{i + 1, "the placeholder " + p, false})
+		}
+	}
+	return out
+}
+
+// withoutCommandSpans blanks every inline code span on line whose content
+// holds a space, leaving the rest as written. A span opens on a run of
+// backticks and closes on the next run of the same length; an unclosed run is
+// literal text.
+func withoutCommandSpans(line string) string {
+	var b strings.Builder
+	for i := 0; i < len(line); {
+		if line[i] != '`' {
+			b.WriteByte(line[i])
+			i++
+			continue
+		}
+		j := i
+		for j < len(line) && line[j] == '`' {
+			j++
+		}
+		tick := line[i:j]
+		end := closingRun(line, j, len(tick))
+		if end < 0 {
+			b.WriteString(tick)
+			i = j
+			continue
+		}
+		if content := line[j:end]; !strings.Contains(content, " ") {
+			b.WriteString(tick + content + tick)
+		}
+		i = end + len(tick)
+	}
+	return b.String()
+}
+
+// closingRun is the index of the next run of exactly n backticks at or after
+// from, or -1.
+func closingRun(line string, from, n int) int {
+	for i := from; i < len(line); {
+		if line[i] != '`' {
+			i++
+			continue
+		}
+		j := i
+		for j < len(line) && line[j] == '`' {
+			j++
+		}
+		if j-i == n {
+			return i
+		}
+		i = j
+	}
+	return -1
 }
 
 var unacceptCmd = &cobra.Command{
@@ -327,6 +469,6 @@ func bodyStart(lines []string) int {
 
 func init() {
 	acceptCmd.Flags().BoolVar(&acceptYes, "yes", false,
-		"accept past a refusal about the body's content (a citation only a waiting item's branch has); never past the stop-marker or actor checks")
+		"accept past a refusal about the body's content (a placeholder, a hold line, a citation only a waiting item's branch has); never past the stop-marker or actor checks")
 	root.AddCommand(acceptCmd, unacceptCmd)
 }

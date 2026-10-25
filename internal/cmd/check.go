@@ -133,6 +133,15 @@ wording, so never match on it.
   ORPHAN ROW          a ledger row names an id with no body, or one that will not parse
   NO REQUIREMENTS     an accepted, unmerged item whose body has no top-level "N. "
                       lines
+  PLACEHOLDER         an accepted, unmerged item whose body carries an angle-bracket
+                      placeholder such as <provider> outside a fenced block or a
+                      code span holding a space
+  HOLD MARKER         an accepted, unmerged item whose body carries a line matching
+                      [intake] hold_markers outside a fenced block
+  BROAD CITATION      a scaffold whose body cites a directory at the top of the
+                      repository, so under drive --jobs it waits for any item
+                      citing a path below it. A paragraph opened with
+                      <!-- drover: context --> cites nothing
   HAND EDITED         an accepted, unmerged item whose body changed since drover last
                       recorded its digest, outside any live session; record it with
                       amend (requirements) or touch (prose) before driving it
@@ -713,6 +722,54 @@ func (s *session) checkReport() CheckReport {
 			Path:    rel(s.cfg.Root, it.Path),
 			ID:      it.ID.Bare(),
 		})
+	}
+
+	// An accepted body that still says it is not finished: a placeholder the
+	// run would fill by guessing, or the author's own hold line. accept refuses
+	// both, so one here was accepted with --yes, before accept looked, or
+	// edited in afterwards. A merged body is history and nothing can act on it.
+	for _, it := range s.backlog.Items {
+		if s.isScaffold(it) || s.done(it.ID.Bare()) {
+			continue
+		}
+		lines, err := bodyLines(it.Path)
+		if err != nil {
+			continue
+		}
+		for _, h := range bodyHolds(lines, s.cfg.Intake.Holds()) {
+			f := Finding{
+				Kind:   "PLACEHOLDER",
+				Detail: "fill it in or remove it; a run handed this body invents the value",
+			}
+			if h.marker {
+				f = Finding{
+					Kind:   "HOLD MARKER",
+					Detail: "the author marked this body not ready; do what the line says, then delete it",
+				}
+			}
+			f.Message = fmt.Sprintf("%s:%d carries %s", rel(s.cfg.Root, it.Path), h.line, h.what)
+			f.Path, f.Line, f.ID = rel(s.cfg.Root, it.Path), h.line, it.ID.Bare()
+			add(f)
+		}
+	}
+
+	// A scaffold citing a top-level directory. Under drive --jobs it would run
+	// beside nothing citing a path below that directory, which in most trees is
+	// most items. Reported while the body is still a scaffold, because the
+	// author is still writing it: accept's own note arrives after the fact.
+	for _, it := range s.backlog.Items {
+		if !s.isScaffold(it) || s.done(it.ID.Bare()) {
+			continue
+		}
+		for _, dir := range s.topDirs(it.Body) {
+			add(Finding{
+				Kind:    "BROAD CITATION",
+				Message: dirNote(it.ID.Bare(), dir),
+				Detail:  "cite the files instead, or open the paragraph with " + contextMarker + " if the mention is background",
+				Path:    rel(s.cfg.Root, it.Path),
+				ID:      it.ID.Bare(),
+			})
+		}
 	}
 
 	// A body edited by hand since drover last recorded its digest. drive reads

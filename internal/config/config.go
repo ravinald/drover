@@ -372,6 +372,23 @@ type Intake struct {
 	// requirements. Those requirements become the audit checklist, so one lifted
 	// mechanically from a bug report is a checkbox nobody can falsify.
 	StopMarker string `toml:"stop_marker"`
+	// HoldMarkers are texts an author writes into a body to say it is not
+	// ready to accept: "OPERATOR DECISION PENDING", "BEFORE ACCEPT". accept
+	// refuses a body with one on a line, and check reports one in an accepted
+	// item. Unset means DefaultHoldMarkers; an empty list turns the check off.
+	HoldMarkers []string `toml:"hold_markers"`
+}
+
+// DefaultHoldMarkers is what [intake] hold_markers means when a project does
+// not set it.
+var DefaultHoldMarkers = []string{"OPERATOR DECISION PENDING", "BEFORE ACCEPT"}
+
+// Holds is the hold markers in force, the default where the key is unset.
+func (i Intake) Holds() []string {
+	if i.HoldMarkers == nil {
+		return DefaultHoldMarkers
+	}
+	return i.HoldMarkers
 }
 
 // Agents shapes what `drover agents` generates.

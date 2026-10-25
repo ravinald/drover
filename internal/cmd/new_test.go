@@ -94,6 +94,12 @@ func TestNewScaffoldsAnItemRunRefusesUntilAccepted(t *testing.T) {
 		t.Errorf("run --dry-run exited %d (%v), want %d — the scaffold is not inert",
 			Code(err), err, ExitRefused)
 	}
+	// The scaffold's own <role> is a placeholder, so accept refuses it until a
+	// human writes the role in.
+	if err := execute(t, "accept", "B1"); Code(err) != ExitRefused {
+		t.Fatalf("accept on an untouched scaffold exited %d (%v), want %d", Code(err), err, ExitRefused)
+	}
+	write(t, path, strings.Replace(string(body), "<role>", "resolver maintainer", 1))
 	capture(t, func() {
 		if err := execute(t, "accept", "B1"); err != nil {
 			t.Fatalf("accept: %v", err)

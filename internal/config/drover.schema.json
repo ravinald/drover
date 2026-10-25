@@ -304,6 +304,12 @@
         "stop_marker": {
           "type": "string",
           "description": "Holds a scaffolded item inert until a human writes its requirements. drover refuses to launch or preview an item whose body contains it."
+        },
+        "hold_markers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["OPERATOR DECISION PENDING", "BEFORE ACCEPT"],
+          "description": "Texts that say a body is not ready to accept. accept refuses a body with one on a line unless given --yes, and check reports one in an accepted, unmerged item. An empty list turns the check off."
         }
       }
     },

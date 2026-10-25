@@ -289,7 +289,47 @@ type queued struct {
 }
 
 func newQueued(it backlog.Item, named bool) queued {
-	return queued{it: it, named: named, paths: citedPaths(it.Body)}
+	return queued{it: it, named: named, paths: overlapPaths(it.Body)}
+}
+
+// contextMarker opens a paragraph whose citations are background rather than
+// files the item touches.
+const contextMarker = "<!-- drover: context -->"
+
+// requirementLine is a top-level numbered line, which report --save turns into
+// an audit checkbox. Its citations always count: a requirement names what the
+// item must change, whatever paragraph it sits in.
+var requirementLine = regexp.MustCompile(`^\d+\.[ \t]`)
+
+// overlapPaths is what dispatch and accept read as the paths an item touches:
+// citedPaths over the body with every context paragraph left out. A passing
+// mention of a top-level directory would otherwise hold the item apart from
+// every item citing anything below it, and the regex cannot tell a mention from
+// an edit, so the author says which.
+func overlapPaths(body string) []string {
+	return citedPaths(withoutContext(body))
+}
+
+// withoutContext drops each paragraph, a run of non-blank lines, whose first
+// line is contextMarker, keeping any numbered requirement line inside it.
+func withoutContext(body string) string {
+	lines := strings.Split(body, "\n")
+	kept := make([]string, 0, len(lines))
+	skipping := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "":
+			skipping = false
+		case trimmed == contextMarker && (i == 0 || strings.TrimSpace(lines[i-1]) == ""):
+			skipping = true
+			continue
+		case skipping && !requirementLine.MatchString(line):
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
 }
 
 // heldApart is a later item waiting on an earlier one, and why: both cite one

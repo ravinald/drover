@@ -118,6 +118,9 @@ deleting the first.`,
 		if newFoundIn != "" {
 			fmt.Printf("  found while working %s, which the body now names\n\n", newFoundIn)
 		}
+		for _, dir := range s.topDirs(body) {
+			fmt.Printf("  note: %s\n\n", dirNote(id.Bare(), dir))
+		}
 		fmt.Printf("NEXT — a human writes the numbered requirements:\n")
 		fmt.Printf("  $EDITOR %s\n", rel(s.cfg.Root, path))
 		fmt.Printf("  drover accept %s\n", id.Bare())

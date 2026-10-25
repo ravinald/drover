@@ -272,6 +272,9 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `NO VERIFY`           | `[verify] default` is empty.                                                          |
 | `UNDECLARED KEY`      | A config key names a frontmatter key `[frontmatter]` does not declare.                |
 | `NO REQUIREMENTS`     | An accepted item has no numbered requirements.                                        |
+| `PLACEHOLDER`         | An accepted item's body still carries a `<placeholder>`.                              |
+| `HOLD MARKER`         | An accepted item's body still carries an `[intake] hold_markers` line.                |
+| `BROAD CITATION`      | A scaffold cites a top-level directory, which serializes it under `--jobs`.           |
 | `HAND EDITED`         | An accepted item's body changed outside drover since its last digest.                 |
 | `UNREADABLE`          | A backlog file did not parse.                                                         |
 | `BAD VALUE`           | An item's value fails what `[frontmatter]` declares the key may hold.                 |
