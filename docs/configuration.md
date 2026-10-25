@@ -1035,12 +1035,12 @@ argv   = ["notify-send", "drover"]
 events = { merged = "default", needs_operator = "default" }
 ```
 
-A project that wants its own exits louder writes only what differs, and keeps the rest of the per-user destination:
+A project that wants its own exits louder writes only the keys that differ, and keeps the per-user `type`, `url` and `token_file`. A key it writes replaces the per-user one whole, so its `events` names every event the phone should still hear:
 
 ```toml
 # .drover.toml
 [notify.destinations.phone]
-events = { needs_operator = "urgent", exit = "default" }
+events = { needs_operator = "urgent", needs_supervisor = "default", parked = "default", exit = "default", exit_undone = "high", usage_warning = "high" }
 ```
 
 iOS delivers a notification from a self-hosted server instantly only when that server sets `upstream-base-url` (usually `https://ntfy.sh`), so Apple's push service is told a message is waiting. That is a setting in the ntfy server's own `server.yml`, not in drover; without it the iOS app picks messages up only when it next polls.
