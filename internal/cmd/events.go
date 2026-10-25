@@ -14,12 +14,16 @@ import (
 	"time"
 
 	"github.com/ravinald/drover/internal/config"
+	"github.com/ravinald/drover/internal/gh"
 )
 
 // The event types `drive --events` writes. Documented with a sample each in
 // docs/automation.md; a wrapper keys on these, so renaming one is a breaking
 // change to the stream.
 const (
+	// evStarted is the drive holding its lease with its queue read: what it
+	// will run, how many at once, and until when.
+	evStarted    = "started"
 	evQueued     = "queued"
 	evDispatched = "dispatched"
 	// evSkipped is an item the drive took off its queue without attempting:
@@ -38,6 +42,15 @@ const (
 	evExit            = "exit"
 	evPaused          = "paused"
 	evResumed         = "resumed"
+	// evReexecWaiting is a resume onto a replaced binary that has waited past
+	// a minute for running items to hold, naming them.
+	evReexecWaiting = "reexec_waiting"
+	// evConfigChanged is a .drover.toml on disk that differs from the one the
+	// drive runs under, once per distinct content. It applies nothing.
+	evConfigChanged = "config_changed"
+	// evUsageWarning is a [usage] notify level crossed, sent once per window
+	// per reset. It pauses nothing.
+	evUsageWarning = "usage_warning"
 )
 
 // The stages a stage event names. implement and review are ledger stages; the
@@ -62,11 +75,17 @@ type DriveEvent struct {
 	// Drive is the drive's id, taken with the lease. Absent only on the exit of
 	// a drive whose id would not allocate, because the ledger would not open.
 	Drive string `json:"drive,omitempty"`
-	ID    string `json:"id,omitempty"`
+	// Project is the project's name as `drover projects` lists it, so a
+	// notifier serving several projects need not work it out from where it runs.
+	Project string `json:"project"`
+	ID      string `json:"id,omitempty"`
 	// Action is the catalog key that produced the event, where one did.
 	Action string `json:"action,omitempty"`
 	Stage  string `json:"stage,omitempty"`
-	Park   string `json:"park,omitempty"`
+	// Log is the session log a stage launching a session streams to, as the
+	// launch banner prints it: relative to the project root, or under ~/.
+	Log  string `json:"log,omitempty"`
+	Park string `json:"park,omitempty"`
 	// State is the work state an item was read in, on skipped alone.
 	State  string `json:"state,omitempty"`
 	Reason string `json:"reason,omitempty"`
@@ -94,15 +113,39 @@ type DriveEvent struct {
 	Position int `json:"position,omitempty"`
 	// Head, Check, Class and Evidence are one red check drive classified, or a
 	// head no check ran on, on check alone, as the ledger row records them.
+	// Evidence is also a park's, on parked.
 	Head     string `json:"head,omitempty"`
 	Check    string `json:"check,omitempty"`
 	Class    string `json:"class,omitempty"`
 	Evidence string `json:"evidence,omitempty"`
 	// Code is the drive's exit status, on exit alone.
 	Code *int `json:"code,omitempty"`
+	// Summary is what the drive left done and undone, on exit alone.
+	Summary *ExitSummary `json:"summary,omitempty"`
+	// Queue, Jobs and Deadline are the drive's queue in order, its --jobs, and
+	// the instant --for or --until bounds it at in local time, RFC 3339, on
+	// started alone. Deadline is absent on an unbounded drive.
+	Queue    []string `json:"queue,omitempty"`
+	Jobs     int      `json:"jobs,omitempty"`
+	Deadline string   `json:"deadline,omitempty"`
+	// Title is the merged pull request's title, on merged alone.
+	Title string `json:"title,omitempty"`
 	// Changed is which inputs a resume reloaded differ from those before it,
 	// on resumed alone: config, prompt, review, verify, binary.
 	Changed []string `json:"changed,omitempty"`
+	// Tables is which top-level tables of the config on disk differ from the
+	// one the drive runs under, and Error why that file will not read or load,
+	// on config_changed alone.
+	Tables []string `json:"tables,omitempty"`
+	Error  string   `json:"error,omitempty"`
+	// Window, Remaining and ResetsAt are the usage level behind a
+	// usage_warning, and behind the paused, needs_operator and resumed that
+	// usage_admission emits: weekly, five_hour, overage or overage_usd, the
+	// percent of that window left (absent for overage, which has no figure),
+	// and its reset in local time, RFC 3339.
+	Window    string `json:"window,omitempty"`
+	Remaining *int   `json:"remaining,omitempty"`
+	ResetsAt  string `json:"resets_at,omitempty"`
 	// Kind, Ref, FiledBy, Owners, Coverage, BlockedOn and Ambiguous are one
 	// finding a session filed, on filed and on the triage_finding stop, as the
 	// filing item's report carries it.
@@ -113,26 +156,33 @@ type DriveEvent struct {
 	Coverage  string              `json:"coverage,omitempty"`
 	BlockedOn map[string][]string `json:"blocked_on,omitempty"`
 	Ambiguous bool                `json:"ambiguous,omitempty"`
+	// Waiting is each running item a re-exec still waits on to hold, with the
+	// stage it was last seen in, on reexec_waiting alone.
+	Waiting []WaitingItem `json:"waiting,omitempty"`
 	// DriveTotals is the drive's findings, on exit alone, and absent on the
 	// exit of a drive that never reached its queue.
 	*DriveTotals
 }
 
-// eventSink is where a drive's events go: stdout under --events, and the
-// [supervise] notify argv for each needs_operator whatever the flags.
+// WaitingItem is one running item a re-exec waits on, and the stage its last
+// stage event named: empty when it has emitted none since its dispatch.
+type WaitingItem struct {
+	ID    string `json:"id"`
+	Stage string `json:"stage,omitempty"`
+}
+
+// eventSink is where a drive's events go: stdout under --events, and each
+// [notify] destination that routes the event, whatever the flags.
 //
 // Stage events arrive from every slot's goroutine, so writes are serialized
 // here. The writer is captured when the sink is made, because finishMerged points
 // os.Stdout at stderr while finish runs and an event emitted from another slot in
 // that window would otherwise land on the wrong stream.
 type eventSink struct {
-	mu     sync.Mutex
-	w      io.Writer
-	cfg    *config.Config
-	notify []string
-	// notified records that a failing notifier was already reported, so a
-	// broken one costs one line per drive rather than one per event.
-	notified bool
+	mu       sync.Mutex
+	w        io.Writer
+	cfg      *config.Config
+	notifier *notifier
 	// file is the drive's event file (driveEventsPath), opened for the drive
 	// id it carries. broken records that a write to it failed and was
 	// reported, after which the drive stops trying: the file is how a process
@@ -141,9 +191,13 @@ type eventSink struct {
 	broken bool
 	// seq is the last line the event file holds, as this process knows it.
 	seq int
-	// totals is what the exit event reports about findings, set once the
-	// drive's queue is done.
-	totals *DriveTotals
+	// totals is what the exit event reports about findings, and summary what
+	// it reports about items, both set once the drive's queue is done.
+	totals  *DriveTotals
+	summary *ExitSummary
+	// stages is the stage each item's last stage event named since its
+	// dispatch, which is where a re-exec reports an item it waits on.
+	stages map[string]string
 }
 
 // events is the running drive's sink, nil outside a drive that launches.
@@ -153,7 +207,7 @@ var events *eventSink
 var driveEvents bool
 
 func newEventSink(cfg *config.Config, stream bool) *eventSink {
-	es := &eventSink{cfg: cfg, notify: cfg.Notify()}
+	es := &eventSink{cfg: cfg, notifier: newNotifier(cfg)}
 	if stream {
 		es.w = os.Stdout
 	}
@@ -169,11 +223,13 @@ func (es *eventSink) emit(e DriveEvent) {
 		return
 	}
 	e.TS = time.Now().UTC().Format(time.RFC3339)
+	e.Project = es.cfg.Project
 	if d := activeDrive.Load(); d != nil {
 		e.Drive = d.id
 	}
 	es.mu.Lock()
 	defer es.mu.Unlock()
+	es.track(e)
 	if e.Drive != "" {
 		es.openLocked(e.Drive, false)
 		es.seq++
@@ -187,11 +243,44 @@ func (es *eventSink) emit(e DriveEvent) {
 		}
 		es.toFile(line)
 	}
+	es.notifier.route(e)
 	if e.Event == evExit {
 		es.closeFile()
+		es.notifier.close()
 	}
-	if e.Event == evNeedsOperator {
-		es.runNotify(e)
+}
+
+// settle sends what this sink's destinations still hold and waits for them,
+// for a sink that will see no exit: one made outside a drive, or a drive about
+// to re-execute, whose goroutines go with the process.
+func (es *eventSink) settle() {
+	if es == nil {
+		return
+	}
+	es.notifier.close()
+}
+
+// flushNotify sends what coalescing and quiet hours hold now and waits for it,
+// leaving the destinations open for a drive that goes on.
+func (es *eventSink) flushNotify() {
+	if es == nil {
+		return
+	}
+	es.notifier.flush()
+}
+
+// forge names the repository a pull request's Click header links under,
+// resolved through gh the first time a message needs it.
+func (es *eventSink) forge(labels gh.Labels) {
+	if es == nil {
+		return
+	}
+	es.notifier.forge = func() string {
+		u, err := gh.RepoURL(labels)
+		if err != nil {
+			return ""
+		}
+		return u
 	}
 }
 
@@ -269,14 +358,41 @@ func (es *eventSink) closeFile() {
 }
 
 // reconfigure points the sink at the config a resume loaded, so a policy and
-// the notifier are read from the file as it now stands.
+// the destinations are read from the file as it now stands.
 func (es *eventSink) reconfigure(cfg *config.Config) {
 	if es == nil {
 		return
 	}
 	es.mu.Lock()
 	defer es.mu.Unlock()
-	es.cfg, es.notify = cfg, cfg.Notify()
+	es.cfg = cfg
+	es.notifier.reload(cfg)
+}
+
+// track keeps the stage each item is in. An update_branch carrying a result is
+// a catch-up of another item's open pull request, not a step that item took.
+// Called with mu held.
+func (es *eventSink) track(e DriveEvent) {
+	switch {
+	case e.ID == "":
+	case e.Event == evDispatched:
+		delete(es.stages, e.ID)
+	case e.Event == evStage && e.Result == "":
+		if es.stages == nil {
+			es.stages = map[string]string{}
+		}
+		es.stages[e.ID] = e.Stage
+	}
+}
+
+// stageOf is the stage id's last stage event named, empty when it named none.
+func (es *eventSink) stageOf(id string) string {
+	if es == nil {
+		return ""
+	}
+	es.mu.Lock()
+	defer es.mu.Unlock()
+	return es.stages[id]
 }
 
 // stage is the event for an item reaching one step.
@@ -284,36 +400,32 @@ func (es *eventSink) stage(id, stage string) {
 	es.emit(DriveEvent{Event: evStage, ID: id, Stage: stage})
 }
 
+// session is the stage event for a step that launches a session, naming the
+// log it streams to.
+func (es *eventSink) session(id, stage, log string) {
+	es.emit(DriveEvent{Event: evStage, ID: id, Stage: stage, Log: log})
+}
+
 // notifyWait bounds one notifier run. A notifier that hangs would otherwise
 // hold the dispatcher, and with it every item waiting for a slot.
 const notifyWait = 30 * time.Second
 
-// runNotify hands one needs_operator event to [supervise] notify on stdin.
-// Called with mu held, so notifiers never overlap.
-func (es *eventSink) runNotify(e DriveEvent) {
-	if len(es.notify) == 0 {
-		return
-	}
-	payload, err := json.Marshal(e)
+// runArgvNotifier runs one notifier argv with the payload on stdin as one JSON
+// line, bounded at notifyWait, and returns what it printed, trimmed.
+func runArgvNotifier(dir string, argv []string, p NotifyPayload) (string, error) {
+	payload, err := json.Marshal(p)
 	if err != nil {
-		return
+		return "", err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), notifyWait)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, es.notify[0], es.notify[1:]...) // #nosec G204 -- argv is project config, as [drive] merge_gate is
-	cmd.Dir = es.cfg.Root
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) // #nosec G204 -- argv is project config, as [drive] merge_gate is
+	cmd.Dir = dir
 	cmd.Stdin = bytes.NewReader(append(payload, '\n'))
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
-	if err := cmd.Run(); err != nil && !es.notified {
-		es.notified = true
-		msg := strings.TrimSpace(out.String())
-		if msg != "" {
-			msg = ": " + lastLines(msg, 3)
-		}
-		fmt.Fprintf(os.Stderr, "· [supervise] notify %s failed (%v)%s; the drive goes on, and later failures are not reported\n",
-			strings.Join(es.notify, " "), err, msg)
-	}
+	err = cmd.Run()
+	return strings.TrimSpace(out.String()), err
 }
 
 // itemEvents emits what one finished item amounted to: its park, the operator
@@ -326,7 +438,7 @@ func (es *eventSink) itemEvents(d DriveItem) {
 		es.emit(DriveEvent{Event: evSkipped, ID: d.ID, State: d.Park, Reason: d.Reason, Slot: d.Slot})
 	}
 	if d.Outcome == outcomeParked {
-		ev := DriveEvent{Event: evParked, ID: d.ID, Park: d.Park, Reason: d.Reason, Detail: d.Detail, PR: d.PR, Slot: d.Slot}
+		ev := DriveEvent{Event: evParked, ID: d.ID, Park: d.Park, Reason: d.Reason, Detail: d.Detail, Evidence: d.Evidence, PR: d.PR, Slot: d.Slot}
 		if key := parkAction(d); key != "" {
 			p, _ := es.cfg.Policy(key)
 			ev.Action, ev.Policy = key, string(p)
@@ -340,11 +452,11 @@ func (es *eventSink) itemEvents(d DriveItem) {
 			case ev.Action == "signoff":
 				run = d.signoff
 			}
-			es.needsOperator(d.ID, ev.Action, d.Reason, run)
+			es.needsOperator(d.ID, ev.Action, d.Reason, run, d.PR)
 		}
 	}
 	if d.Merged {
-		es.emit(DriveEvent{Event: evMerged, ID: d.ID, PR: d.PR})
+		es.emit(DriveEvent{Event: evMerged, ID: d.ID, PR: d.PR, Title: d.ID + ": " + d.Title})
 	}
 }
 
@@ -366,13 +478,14 @@ func heldForOperator(cfg *config.Config, d DriveItem) bool {
 
 // needsOperator emits the stop for one action at operator policy. run is what
 // the operator has to do where the park knows better than the catalog's
-// sentence, and empty to take that sentence.
-func (es *eventSink) needsOperator(id, key, reason, run string) {
+// sentence, and empty to take that sentence. pr is the pull request the stop
+// concerns, 0 for none, and is what a notifier links the message to.
+func (es *eventSink) needsOperator(id, key, reason, run string, pr int) {
 	if run == "" {
 		run = strings.ReplaceAll(action(key).operator, "{id}", id)
 	}
 	es.emit(DriveEvent{Event: evNeedsOperator, ID: id, Action: key, Policy: string(polOperator),
-		Reason: reason, Run: run})
+		Reason: reason, Run: run, PR: pr})
 }
 
 // handOff emits the stop for an action drive leaves to somebody else:
@@ -420,7 +533,7 @@ func (es *eventSink) filed(f FiledFinding) {
 	es.emit(ev)
 	switch {
 	case scaffold && config.Policy(ev.Policy) == polOperator:
-		es.needsOperator(f.Ref, ev.Action, "a session filed this scaffold, and its requirements are unwritten", "")
+		es.needsOperator(f.Ref, ev.Action, "a session filed this scaffold, and its requirements are unwritten", "", 0)
 	case !scaffold && f.uncovered():
 		es.triage(f)
 	}
@@ -462,6 +575,16 @@ var coverageMeaning = map[string]string{
 	coverageUnowned:  "no owner link names an owner, so no run carries it",
 }
 
+// setSummary records what the exit event reports about the drive's items.
+func (es *eventSink) setSummary(s *ExitSummary) {
+	if es == nil {
+		return
+	}
+	es.mu.Lock()
+	defer es.mu.Unlock()
+	es.summary = s
+}
+
 // setTotals records the findings the exit event reports.
 func (es *eventSink) setTotals(t DriveTotals) {
 	if es == nil {
@@ -479,9 +602,19 @@ func (es *eventSink) exit(err error) {
 	}
 	code := Code(err)
 	es.mu.Lock()
-	totals := es.totals
+	totals, summary := es.totals, es.summary
 	es.mu.Unlock()
-	ev := DriveEvent{Event: evExit, Code: &code, DriveTotals: totals}
+	if summary == nil {
+		summary = &ExitSummary{Ended: endedDrained}
+	}
+	sum := *summary
+	if err != nil && sum.Ended == endedDrained {
+		sum.Ended = endedFault
+	}
+	if d := activeDrive.Load(); d != nil {
+		sum.Weighted = driveWeighted(es.cfg.Abs(es.cfg.Paths.Ledger), d.id)
+	}
+	ev := DriveEvent{Event: evExit, Code: &code, DriveTotals: totals, Summary: &sum}
 	if err != nil {
 		ev.Reason = err.Error()
 	}

@@ -21,6 +21,7 @@ import (
 var (
 	requestChangesFile      string
 	requestChangesOverLimit bool
+	requestChangesYes       bool
 )
 
 var requestChangesCmd = &cobra.Command{
@@ -55,6 +56,15 @@ the merge until drover signoff records each.
 The section is replaced rather than appended to. The body is a prompt, not a
 history: a run reads it as current instructions and cannot tell a closed finding
 from an open one.
+
+Nor will it write evidence that describes a contract the body does not hold.
+Evidence naming a requirement by number (R9, "requirement 9") the body's list
+lacks is refused, and so is evidence saying requirements were removed or
+replaced when no drover amend has changed the list since the last round. Both
+are a heuristic over prose, read outside code fences: a prompt to look, not a
+proof. Amend the contract first, or correct the evidence. With --over-limit,
+which only the operator can pass, it warns instead and writes once --yes says
+you looked.
 
 The replaced text is not lost. Each round is kept beside the saved reports as
 <stem>-<slug>.changes-N.md, and both prompts list the earlier ones as headlines
@@ -129,6 +139,12 @@ change the numbered requirements, refuses evidence whose only findings are
 				}
 				fmt.Printf("  ! %s is at [review] max_review_rounds (%d of %d) and --over-limit sent it back anyway.\n",
 					it.ID.Bare(), n, limit)
+			}
+		}
+
+		if why := s.contractContradictions(it, text); len(why) > 0 {
+			if err := contradictionRefusal(it.ID.Bare(), why, requestChangesOverLimit, requestChangesYes); err != nil {
+				return err
 			}
 		}
 
@@ -260,6 +276,108 @@ func operatorOnlyFindings(it backlog.Item, text string) (ops []backlog.Requireme
 		return nil, nil
 	}
 	return ops, structure
+}
+
+// requirementWord is a requirement named in prose, as "requirement 6".
+var requirementWord = regexp.MustCompile(`(?i)\brequirement\s+#?(\d+)\b`)
+
+// removalClaim is evidence saying the contract lost or swapped a requirement:
+// "removed R4", "requirement 4 was dropped", "requirements were replaced". It
+// wants the verb next to the requirement, so "R4's dead code was removed",
+// which is about code, does not match.
+var removalClaim = regexp.MustCompile(`(?i)\b(?:removed|dropped|deleted|struck|withdrawn|replaced)\s+(?:the\s+)?(?:requirements?|R\d+)\b` +
+	`|\b(?:requirements?(?:\s+#?\d+)?|R\d+)\s+(?:has|have|was|were|is|are)\s+(?:been\s+)?(?:removed|dropped|deleted|struck|withdrawn|replaced)\b`)
+
+// contractContradictions is each way evidence describes a contract the body
+// does not hold: a requirement number the list lacks, and a claim that
+// requirements were removed or replaced when no amend row follows the item's
+// last changes row, which is the only sanctioned way the count moves. A number
+// an amend since that row took away is the amended contract being described,
+// not contradicted, so it passes. A
+// heuristic over prose with fenced blocks left out, because pasted output
+// carries tokens that look like R12: it exists to make somebody look before a
+// run is told to strip code a standing requirement still demands.
+func (s *session) contractContradictions(it backlog.Item, text string) []string {
+	have := map[int]bool{}
+	reqs := it.Requirements()
+	for _, r := range reqs {
+		have[r.Num] = true
+	}
+	prose := unfenced(text)
+	amendedFrom := s.amendedSinceRound(it.ID.Bare())
+	var why []string
+	seen := map[int]bool{}
+	for _, re := range []*regexp.Regexp{requirementRef, requirementWord} {
+		for _, m := range re.FindAllStringSubmatch(prose, -1) {
+			n, err := strconv.Atoi(m[1])
+			if err != nil || have[n] || seen[n] || n <= amendedFrom {
+				continue
+			}
+			seen[n] = true
+			why = append(why, fmt.Sprintf("it names %s, and the body's list has no requirement %d", m[0], n))
+		}
+	}
+	if m := removalClaim.FindString(prose); m != "" && amendedFrom == 0 {
+		why = append(why, fmt.Sprintf("it says %q, and the body still holds %d requirement(s) with no drover amend since the last round", m, len(reqs)))
+	}
+	return why
+}
+
+// amendedSinceRound is the largest requirement count an amend row after id's
+// last changes row replaced, or after any row when it has none, and zero when
+// no amend follows. Each amend row records at least one requirement before it.
+func (s *session) amendedSinceRound(id string) int {
+	from := 0
+	for _, r := range s.ledger.Rows {
+		switch {
+		case r.ID != id:
+		case r.Changes != "":
+			from = 0
+		case r.Amend != nil:
+			from = max(from, r.Amend.From, 1)
+		}
+	}
+	return from
+}
+
+// unfenced is text with every fenced block dropped.
+func unfenced(text string) string {
+	var out []string
+	fenced := false
+	for _, l := range strings.Split(text, "\n") {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
+			fenced = !fenced
+			continue
+		}
+		if !fenced {
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// contradictionRefusal refuses evidence that contradicts the contract, or
+// under --over-limit warns and lets --yes through. The over-limit caller is the
+// operator, who may know the contract is about to change; a reviewer is not,
+// and the evidence it wrote is what has to change.
+func contradictionRefusal(id string, why []string, overLimit, yes bool) error {
+	list := "    " + strings.Join(why, "\n    ")
+	if overLimit {
+		fmt.Fprintf(os.Stderr, "  ! the evidence for %s may describe a contract the body does not hold:\n%s\n", id, list)
+		if yes {
+			return nil
+		}
+		return Refusal{fmt.Errorf(
+			"nothing was written: a run told this would act on requirements its body does not carry.\n"+
+				"Change the contract first with drover amend %s -f <requirements> --reason \"<why>\", "+
+				"or pass --yes once you have looked", id)}
+	}
+	return Refusal{fmt.Errorf(
+		"the evidence for %s describes a contract the body does not hold:\n%s\n\n"+
+			"Nothing was written. This is a heuristic over the evidence's prose, so look before changing anything:\n"+
+			"correct the evidence to name the requirements the body carries, or, if the contract itself should change,\n"+
+			"that is the operator's: drover amend %s -f <requirements> --reason \"<why>\"", id, list, id)}
 }
 
 // leadingWord is a heading's first word, lowercased and without the #s or the
@@ -491,5 +609,7 @@ func init() {
 		"the evidence to write, or - for stdin (required)")
 	requestChangesCmd.Flags().BoolVar(&requestChangesOverLimit, "over-limit", false,
 		"send it back although the item is at [review] max_review_rounds; the operator's call, refused inside a launched session")
+	requestChangesCmd.Flags().BoolVar(&requestChangesYes, "yes", false,
+		"with --over-limit, write evidence drover warned contradicts the item's requirements")
 	root.AddCommand(requestChangesCmd)
 }

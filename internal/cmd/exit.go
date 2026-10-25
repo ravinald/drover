@@ -15,8 +15,8 @@ const (
 	// ExitError: drover could not do the thing. Unreadable config, no such item,
 	// gh unreachable, a git command that failed.
 	ExitError = 1
-	// ExitFindings: drover ran and reported findings against the project. Only
-	// check exits this way.
+	// ExitFindings: drover ran and reported findings against the project:
+	// check, and notify --test finding no destination configured.
 	ExitFindings = 2
 	// ExitRefused: drover ran and a rule it enforces refused the operation. The
 	// tree and the ledger are untouched.

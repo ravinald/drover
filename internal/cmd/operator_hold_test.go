@@ -226,6 +226,11 @@ func TestAHeldDependentSkipsWhenNothingElseIsLeftToRun(t *testing.T) {
 			t.Errorf("item 2 was dispatched: %+v", e)
 		case e.Event == evExit:
 			exit = i + 1
+			if e.Summary == nil || !slices.ContainsFunc(e.Summary.Undone, func(u UndoneItem) bool {
+				return u.ID == "2" && len(u.BlockedBy) == 1 && u.BlockedBy[0].ID == "1"
+			}) {
+				t.Errorf("exit summary %+v, want item 2 undone and blocked by 1", e.Summary)
+			}
 		}
 	}
 	for i, e := range evs {
@@ -296,7 +301,7 @@ func TestADependentOfAnOtherwiseParkedDepSkipsWithAnEvent(t *testing.T) {
 	}
 	ds := []ledger.Drive{{ID: "D1", Items: []ledger.Outcome{{ID: "1"}, {ID: "2"}, {ID: "3"}}}}
 	l.Drive = "D1"
-	drivesRunning(ds, l, true)
+	s.drivesRunning(ds, l, true)
 	if ds[0].Items[1] != (ledger.Outcome{ID: "2", Outcome: outcomeSkipped, Reason: "blocked by 1"}) {
 		t.Errorf("drives --json mid-drive reads item 2 as %+v, want skipped blocked by 1", ds[0].Items[1])
 	}

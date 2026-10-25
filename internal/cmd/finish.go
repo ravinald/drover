@@ -877,8 +877,9 @@ func (s *session) postFinish(it backlog.Item, trunk string) {
 		return
 	}
 	pr := ""
-	if n, _ := s.ledger.PR(id); n > 0 {
-		pr = strconv.Itoa(n)
+	prNum, _ := s.ledger.PR(id)
+	if prNum > 0 {
+		pr = strconv.Itoa(prNum)
 	}
 	sha, err := resolveCommit(s.cfg.Root, "origin/"+trunk)
 	if err != nil {
@@ -915,11 +916,13 @@ func (s *session) postFinish(it backlog.Item, trunk string) {
 	} else {
 		fmt.Printf("    filed %s against %s\n", where, id)
 	}
-	sink := events
-	if sink == nil {
-		sink = newEventSink(s.cfg, false)
+	if events != nil {
+		events.needsOperator(id, "post_finish_check", "[finish] post_check failed: "+why, "", prNum)
+		return
 	}
-	sink.needsOperator(id, "post_finish_check", "[finish] post_check failed: "+why, "")
+	sink := newEventSink(s.cfg, false)
+	sink.needsOperator(id, "post_finish_check", "[finish] post_check failed: "+why, "", prNum)
+	sink.settle()
 }
 
 // fileFollowUp files a follow-up owned by one item, in whichever follow-up list

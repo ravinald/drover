@@ -27,6 +27,8 @@ import (
 //	           later read of that head finds it green
 //	infratrunk the first head read fails build with no step run; every other
 //	           head fails vuln, which main fails too
+//	joblog     build fails with $DROVER_TEST_CHECKS_LOG as its job log
+//	stdvuln    as joblog until its run is rerun, then green
 //
 // gh run rerun counts into reruns.
 func checksForge(t *testing.T, scenario string) string {
@@ -53,6 +55,7 @@ case "$*" in
     case "$DROVER_TEST_CHECKS_SCENARIO" in
       ratelimit) echo '2026-10-17T01:02:03.4567890Z Error response from daemon: toomanyrequests: You have reached your pull rate limit.' ;;
       disk) echo '2026-10-17T01:02:03.4567890Z write /tmp/go-build: No space left on device' ;;
+      joblog|stdvuln) cat "$DROVER_TEST_CHECKS_LOG" ;;
       *) echo '2026-10-17T01:02:03.4567890Z GO-2026-6617 found in golang.org/x/net' ;;
     esac ;;
   *'/actions/jobs/'*)
@@ -90,7 +93,7 @@ case "$*" in
       infratrunk)
         [ -f "$DROVER_TEST_CHECKS_STATE/first" ] || echo "$sha" > "$DROVER_TEST_CHECKS_STATE/first"
         if [ "$(cat "$DROVER_TEST_CHECKS_STATE/first")" = "$sha" ]; then id=40; name=build; else name=vuln; fi ;;
-      ratelimit) [ "$reruns" -gt 0 ] && { echo '{"total_count":1,"check_runs":[{"id":'$id',"name":"build","status":"completed","conclusion":"success"}]}' ; exit 0 ; } ; name=build ;;
+      ratelimit|stdvuln) [ "$reruns" -gt 0 ] && { echo '{"total_count":1,"check_runs":[{"id":'$id',"name":"build","status":"completed","conclusion":"success"}]}' ; exit 0 ; } ; name=build ;;
       trunk|behind|pending) name=vuln ;;
       *) name=build ;;
     esac
@@ -397,7 +400,7 @@ func TestAGateRefusalIsSaidBeforeTheNextItemStarts(t *testing.T) {
 	if at < 0 {
 		t.Fatalf("no park line for item 1 on stderr:\n%s", stderr)
 	}
-	if want := "  ! 1 parked gate_refused at " + headOf(t, rows) + ": the merge gate blamed this diff; sent back"; line != want {
+	if want := "  ! 1 parked gate_refused at " + headOf(t, rows) + ": vuln failed: no infrastructure line in its log, and main does not fail it; sent back"; line != want {
 		t.Errorf("park line %q, want %q", line, want)
 	}
 	if banner := strings.Index(stderr, "==> 2 · implement"); banner < 0 || banner < at {
@@ -565,5 +568,156 @@ git -c user.name=r -c user.email=r@example.invalid -c commit.gpgsign=false commi
 	}
 	if strings.Contains(stderr, "still red at the end of the drive") {
 		t.Errorf("a stopped drive re-checked:\n%s", stderr)
+	}
+}
+
+// F14's two real red Gate logs: a lint finding on ae30c3c and a govulncheck
+// finding on d9108ba. Each is read down to the lines that say what failed,
+// without the timestamp, the ##[error] annotation or the colors.
+func TestFailureLinesReadF14sLogs(t *testing.T) {
+	cases := []struct {
+		log  string
+		want []string
+	}{
+		{"testdata/f14-revive-ae30c3c.log", []string{
+			"internal/cmd/notify.go:28:16: var-declaration: should omit type http.RoundTripper from declaration of var ntfyTransport; it will be inferred from the right-hand side (revive)",
+		}},
+		{"testdata/f14-govulncheck-d9108ba.log", []string{
+			"Vulnerability #1: GO-2026-6809",
+			"Found in: crypto/x509@go1.26.9",
+			"Fixed in: crypto/x509@go1.26.10",
+		}},
+	}
+	s := &session{cfg: &config.Config{}}
+	for _, c := range cases {
+		b, err := os.ReadFile(c.log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := failureLines(string(b), s.failurePatterns()); strings.Join(got, "\n") != strings.Join(c.want, "\n") {
+			t.Errorf("%s: failure lines\n%q\nwant\n%q", c.log, got, c.want)
+		}
+	}
+}
+
+// A log no pattern matches is read back from the make target that gave up,
+// and a [forge] failure_patterns entry is matched beside the built-in ones.
+func TestFailureLinesFallBackAndTakeConfiguredPatterns(t *testing.T) {
+	log := strings.Join([]string{
+		"2026-10-17T01:02:03.0000000Z ##[group]Run make check",
+		"2026-10-17T01:02:03.0000000Z one",
+		"2026-10-17T01:02:03.0000000Z ",
+		"2026-10-17T01:02:03.0000000Z two",
+		"2026-10-17T01:02:03.0000000Z three",
+		"2026-10-17T01:02:03.0000000Z four",
+		"2026-10-17T01:02:03.0000000Z five",
+		"2026-10-17T01:02:03.0000000Z six",
+		"2026-10-17T01:02:03.0000000Z make: *** [Makefile:9: check] Error 1",
+		"2026-10-17T01:02:03.0000000Z after",
+	}, "\n")
+	s := &session{cfg: &config.Config{}}
+	if got, want := failureLines(log, s.failurePatterns()), []string{"two", "three", "four", "five", "six"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("fallback lines %q, want %q", got, want)
+	}
+	s.cfg.Forge.FailurePatterns = []string{`^f\w+$`}
+	if got := failureLines(log, s.failurePatterns()); strings.Join(got, ",") != "four,five" {
+		t.Errorf("configured pattern read %q, want four and five", got)
+	}
+	if got := failureLines("nothing failed here\n", s.failurePatterns()); got != nil {
+		t.Errorf("a log with no failure line and no make error read %q, want nil", got)
+	}
+}
+
+// govulncheck's standard-library finding is the runner's toolchain, which the
+// diff cannot change; one in a module is the code's.
+func TestAStandardLibraryVulnerabilityIsInfra(t *testing.T) {
+	b, err := os.ReadFile("testdata/f14-govulncheck-d9108ba.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := infraLine(string(b), infraPatterns); got != "Your code is affected by 1 vulnerability from the Go standard library." {
+		t.Errorf("infra line %q, want govulncheck's standard-library summary", got)
+	}
+	b, err = os.ReadFile("testdata/f14-revive-ae30c3c.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := infraLine(string(b), infraPatterns); got != "" {
+		t.Errorf("the lint log read infra on %q", got)
+	}
+	if got := infraLine("Your code is affected by 2 vulnerabilities from 1 module and the Go standard library.", infraPatterns); got != "" {
+		t.Errorf("a module vulnerability beside a standard-library one read infra on %q", got)
+	}
+}
+
+// The stdlib finding goes through rerun_infra_failure: rerun, and merged once
+// the rerun is green, with no round spent.
+func TestAStandardLibraryVulnerabilityIsRerun(t *testing.T) {
+	logPath, err := filepath.Abs("testdata/f14-govulncheck-d9108ba.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ghLog := checksForge(t, "stdvuln")
+	t.Setenv("DROVER_TEST_CHECKS_LOG", logPath)
+
+	got := driveAll(t)[0]
+	if got.Outcome != outcomeMergedByGate || got.Rounds != 0 {
+		t.Fatalf("item 1 is %s/%s rounds=%d (%s), want merged by the merge gate with no round", got.Outcome, got.Park, got.Rounds, got.Reason)
+	}
+	if n := reruns(t, ghLog); n != 1 {
+		t.Errorf("gh run rerun ran %d times, want 1", n)
+	}
+	if cs := checkRows(t); len(cs) != 1 || cs[0].Class != ledger.ClassInfra {
+		t.Errorf("classification rows %+v, want one infra row", cs)
+	}
+}
+
+// D10's F14 park: a code failure the merge gate blames on the diff names the
+// check and its first failure line in the reason, carries the class as its
+// detail and the lines as its evidence, on the park row, the parked event and
+// in the body sent back with the run's URL.
+func TestACodeFailureParkSaysWhatFailed(t *testing.T) {
+	t.Cleanup(func() { driveEvents = false })
+	logPath, err := filepath.Abs("testdata/f14-revive-ae30c3c.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checksForge(t, "joblog")
+	t.Setenv("DROVER_TEST_CHECKS_LOG", logPath)
+	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
+	const line = "internal/cmd/notify.go:28:16: var-declaration: should omit type http.RoundTripper from declaration of var ntfyTransport; it will be inferred from the right-hand side (revive)"
+
+	evs, _, _ := driveEventsOf(t)
+	var parked *DriveEvent
+	for i, e := range evs {
+		if e.Event == evParked && e.ID == "1" {
+			parked = &evs[i]
+		}
+	}
+	if parked == nil || parked.Park != parkGateRefused || parked.Detail != ledger.ClassCode ||
+		!strings.HasPrefix(parked.Reason, "build failed: "+line) || parked.Evidence != line {
+		t.Fatalf("item 1 parked %+v, want gate_refused, detail code, the lint line in reason and evidence", parked)
+	}
+	l, err := ledger.Load("ledger.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row *ledger.Row
+	for i, r := range l.Rows {
+		if r.ID == "1" && r.Park == parkGateRefused {
+			row = &l.Rows[i]
+		}
+	}
+	if row == nil || row.Detail != ledger.ClassCode || row.Evidence != line {
+		t.Errorf("park row %+v, want detail code and the lint line as evidence", row)
+	}
+	body, err := os.ReadFile("work/01-first.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"The merge gate refused this branch.", "build failed (https://github.com/o/r/actions/runs/500/job/30). Its log:", line} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("sent-back body lacks %q:\n%s", want, body)
+		}
 	}
 }

@@ -133,6 +133,18 @@ wording, so never match on it.
   ORPHAN ROW          a ledger row names an id with no body, or one that will not parse
   NO REQUIREMENTS     an accepted, unmerged item whose body has no top-level "N. "
                       lines
+  PLACEHOLDER         an accepted, unmerged item whose body carries an angle-bracket
+                      placeholder such as <provider> outside a fenced block or a
+                      code span holding a space
+  HOLD MARKER         an accepted, unmerged item whose body carries a line matching
+                      [intake] hold_markers outside a fenced block
+  BROAD CITATION      a scaffold whose body cites a directory at the top of the
+                      repository, so under drive --jobs it waits for any item
+                      citing a path below it. A paragraph opened with
+                      <!-- drover: context --> cites nothing
+  HAND EDITED         an accepted, unmerged item whose body changed since drover last
+                      recorded its digest, outside any live session; record it with
+                      amend (requirements) or touch (prose) before driving it
   NO DISPOSITION      a merged item's closes key names an issue nobody judged, so
                       finish wrote nothing to the tracker and whoever filed it got
                       silence
@@ -142,6 +154,12 @@ wording, so never match on it.
   BAD DEPS            a deps line written as a YAML list, bracketed or quoted, so
                       drover reads none of its ids. The finding prints the line that
                       parses; an id it names with no body is MISSING DEP as well
+  BRANCH CYCLE        an unmerged item depends on one whose body cites a path, or a
+                      backticked function or type name, that the trunk lacks and
+                      the dependent's branch has. The dep runs from the trunk and
+                      cannot change that code, and the dependent cannot merge
+                      first, so neither finishes. Names are a whole-word git grep
+                      over the cited files, a heuristic
   MISSING REPORT      a report named in the ledger is no longer at that path
   BAD REGISTER        [register] backend = "file" and the register file is on disk and
                       will not read. An absent file is an empty follow-up list,
@@ -706,6 +724,74 @@ func (s *session) checkReport() CheckReport {
 		})
 	}
 
+	// An accepted body that still says it is not finished: a placeholder the
+	// run would fill by guessing, or the author's own hold line. accept refuses
+	// both, so one here was accepted with --yes, before accept looked, or
+	// edited in afterwards. A merged body is history and nothing can act on it.
+	for _, it := range s.backlog.Items {
+		if s.isScaffold(it) || s.done(it.ID.Bare()) {
+			continue
+		}
+		lines, err := bodyLines(it.Path)
+		if err != nil {
+			continue
+		}
+		for _, h := range bodyHolds(lines, s.cfg.Intake.Holds()) {
+			f := Finding{
+				Kind:   "PLACEHOLDER",
+				Detail: "fill it in or remove it; a run handed this body invents the value",
+			}
+			if h.marker {
+				f = Finding{
+					Kind:   "HOLD MARKER",
+					Detail: "the author marked this body not ready; do what the line says, then delete it",
+				}
+			}
+			f.Message = fmt.Sprintf("%s:%d carries %s", rel(s.cfg.Root, it.Path), h.line, h.what)
+			f.Path, f.Line, f.ID = rel(s.cfg.Root, it.Path), h.line, it.ID.Bare()
+			add(f)
+		}
+	}
+
+	// A scaffold citing a top-level directory. Under drive --jobs it would run
+	// beside nothing citing a path below that directory, which in most trees is
+	// most items. Reported while the body is still a scaffold, because the
+	// author is still writing it: accept's own note arrives after the fact.
+	for _, it := range s.backlog.Items {
+		if !s.isScaffold(it) || s.done(it.ID.Bare()) {
+			continue
+		}
+		for _, dir := range s.topDirs(it.Body) {
+			add(Finding{
+				Kind:    "BROAD CITATION",
+				Message: dirNote(it.ID.Bare(), dir),
+				Detail:  "cite the files instead, or open the paragraph with " + contextMarker + " if the mention is background",
+				Path:    rel(s.cfg.Root, it.Path),
+				ID:      it.ID.Bare(),
+			})
+		}
+	}
+
+	// A body edited by hand since drover last recorded its digest. drive reads
+	// that as a reviewer writing findings by hand and parks the next clean pass,
+	// so an operator's legitimate edit has to be recorded before it is driven.
+	// An item a live session is working is mid-flight rather than hand edited.
+	running := s.sessionItems()
+	for _, it := range s.backlog.Items {
+		if running[it.ID.Bare()] {
+			continue
+		}
+		if what, fix := s.handEdit(it); what != "" {
+			add(Finding{
+				Kind:    "HAND EDITED",
+				Message: what,
+				Detail:  fix,
+				Path:    rel(s.cfg.Root, it.Path),
+				ID:      it.ID.Bare(),
+			})
+		}
+	}
+
 	// The shelf carries ids, never items: a retired body is not parsed as one, so
 	// nothing on it can be UNREADABLE. It answers two questions below, both of
 	// which a missing id turns into a wrong answer rather than a smaller one.
@@ -818,6 +904,36 @@ func (s *session) checkReport() CheckReport {
 		}
 		if malformed {
 			add(s.badDeps(it))
+		}
+	}
+
+	// A dep whose body cites code only the dependent's branch has: the dep
+	// runs from the trunk and cannot change it, and the dependent cannot merge
+	// first. Read here as well as at split and accept, so a pair written before
+	// either checked, or by hand, is still found. Unmerged pairs only: once
+	// either side merges the wait is over.
+	for _, it := range s.backlog.Items {
+		if s.done(it.ID.Bare()) {
+			continue
+		}
+		for _, d := range it.Deps() {
+			if state, _ := s.resolve(d); state != idReadable || s.done(d) {
+				continue
+			}
+			dep, err := s.item(d)
+			if err != nil {
+				continue
+			}
+			for _, msg := range s.branchOnly(dep, it) {
+				add(Finding{
+					Kind:    "BRANCH CYCLE",
+					Message: msg,
+					Detail: fmt.Sprintf("%s runs from the trunk and %s cannot merge before it: %s, or rewrite %s to stand on the trunk alone",
+						d, it.ID.Bare(), flipDeps(d, []string{it.ID.Bare()}), d),
+					Path: rel(s.cfg.Root, dep.Path),
+					ID:   d,
+				})
+			}
 		}
 	}
 

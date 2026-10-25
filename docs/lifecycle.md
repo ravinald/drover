@@ -22,26 +22,27 @@ write ─> check ─> run ─> review ─> audit ─> open-pr ─> merge ─> fi
 
 ### The whole loop, and who may run each step
 
-| Step                                               | Command                                                 | A launched session may run it                                                                 |
-| -------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Take in a tracker issue                            | `drover intake <n>`                                     | no: it relabels a live issue                                                                  |
-| Draft the requirements                             | `drover draft <id>`                                     | yes: it writes one body and clears no marker                                                  |
-| Accept the contract                                | `drover accept <id>...`                                 | no: a run cannot accept its own requirements                                                  |
-| Implement                                          | `drover run <id> --headless`                            | no: a session cannot launch another                                                           |
-| Review                                             | `drover review <id> --runner <x> --headless`            | no, for the same reason                                                                       |
+| Step                                               | Command                                                 | A launched session may run it                                                                  |
+| -------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Take in a tracker issue                            | `drover intake <n>`                                     | no: it relabels a live issue                                                                   |
+| Draft the requirements                             | `drover draft <id>`                                     | yes: it writes one body and clears no marker                                                   |
+| Accept the contract                                | `drover accept <id>...`                                 | no: a run cannot accept its own requirements                                                   |
+| Change an accepted contract                        | `drover amend <id> -f <file> --reason "<why>"`          | no: a session would be moving the target it is measured against                                |
+| Implement                                          | `drover run <id> --headless`                            | no: a session cannot launch another                                                            |
+| Review                                             | `drover review <id> --runner <x> --headless`            | no, for the same reason                                                                        |
 | Send the review's findings back to the branch      | `drover request-changes <id> -f <file>`                 | **yes**: it rewrites one section of the body and appends a body digest row and a `changes` row |
-| Record a property every later pass must keep       | `drover invariant <id> -f <file>`                       | **yes**: it appends to one section of the body, and writes no ledger row but its body digest  |
-| Close a block whose findings the branch fixed      | `drover close-changes <id>`                             | **yes**: it rewrites that section, and writes no ledger row but its body digest               |
-| Move work a contract never named into its own item | `drover split <id> --into <kind> "<title>" -f <file>`   | **yes**: it scaffolds one item and blocks this one on it                                      |
-| Link an issue this run fixed                       | `drover link <id> <n>`                                  | **yes**: it rewrites one frontmatter line and reads the tracker to check the number           |
-| Judge each `closes` issue                          | `drover resolve <id> <n> <disposition> --code-by <who>` | **yes**: it writes one ledger row and writes to no tracker                                    |
-| Correct what the review returned                   | `drover run <id> --headless`, then review again         | no                                                                                            |
-| Record how hard anyone looked                      | `drover audit <id> <level> --code-by <who>`             | **yes**, at the level your authorship allows                                                  |
-| Open the pull request                              | `drover open-pr <id>`                                   | no: an open one says the branch may merge, and no session says that about its own work        |
-| Meet an `[operator]` requirement                   | `drover signoff <id> <n> "<what was checked>"`          | no: it certifies a requirement the session was told not to attempt                            |
-| Merge                                              | your forge                                              | not applicable                                                                                |
-| Record the merge, write the tracker                | `drover finish <id>`                                    | no: the operator merges, so the operator records it                                           |
-| Confirm nothing was left unjudged                  | `drover check`                                          | yes: it is read-only                                                                          |
+| Record a property every later pass must keep       | `drover invariant <id> -f <file>`                       | **yes**: it appends to one section of the body, and writes no ledger row but its body digest   |
+| Close a block whose findings the branch fixed      | `drover close-changes <id>`                             | **yes**: it rewrites that section, and writes no ledger row but its body digest                |
+| Move work a contract never named into its own item | `drover split <id> --into <kind> "<title>" -f <file>`   | **yes**: it scaffolds one item and blocks one of the two on the other                          |
+| Link an issue this run fixed                       | `drover link <id> <n>`                                  | **yes**: it rewrites one frontmatter line and reads the tracker to check the number            |
+| Judge each `closes` issue                          | `drover resolve <id> <n> <disposition> --code-by <who>` | **yes**: it writes one ledger row and writes to no tracker                                     |
+| Correct what the review returned                   | `drover run <id> --headless`, then review again         | no                                                                                             |
+| Record how hard anyone looked                      | `drover audit <id> <level> --code-by <who>`             | **yes**, at the level your authorship allows                                                   |
+| Open the pull request                              | `drover open-pr <id>`                                   | no: an open one says the branch may merge, and no session says that about its own work         |
+| Meet an `[operator]` requirement                   | `drover signoff <id> <n> "<what was checked>"`          | no: it certifies a requirement the session was told not to attempt                             |
+| Merge                                              | your forge                                              | not applicable                                                                                 |
+| Record the merge, write the tracker                | `drover finish <id>`                                    | no: the operator merges, so the operator records it                                            |
+| Confirm nothing was left unjudged                  | `drover check`                                          | yes: it is read-only                                                                           |
 
 Three commands carry the mechanical core (`run`, `review`, `finish`). The loop is not complete without `audit`, which is the only record of whether anyone checked, and `check`, which reports the issue nobody judged.
 
@@ -135,6 +136,47 @@ Both name a state rather than a transition, so both are idempotent: `accept` on 
 
 The marker is matched as a whole line outside any fenced block. An item quoting it in a config sample, which is routine in a backlog of items about intake, is somebody's accepted contract and not a scaffold.
 
+#### What accept checks
+
+`accept` is the last look before a body becomes the contract, so it reads the body for what a lint can see:
+
+| Check                                                                                                                                                                                                                                      | `accept`                                                                                                 | Elsewhere                                                                                                                           |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| An angle-bracket placeholder such as `<provider>`, in prose or in a code span with no space in it (`internal/<provider>/client.go`). A fenced block and a code span holding a space (`drover show <id>`) are syntax examples and not read. | Refused, naming each line, unless `--yes`.                                                               | `check` reports `PLACEHOLDER` on an accepted item until it merges.                                                                  |
+| A line carrying one of `[intake] hold_markers`, by default `OPERATOR DECISION PENDING` and `BEFORE ACCEPT`, outside a fenced block.                                                                                                        | Refused, naming each line, unless `--yes`.                                                               | `check` reports `HOLD MARKER` on an accepted item until it merges.                                                                  |
+| A path or name only the branch of an unmerged item waiting on this one has. See [Which way a split points](#which-way-a-split-points).                                                                                                     | Refused unless `--yes`.                                                                                  | `check` reports `BRANCH CYCLE`.                                                                                                     |
+| A cited directory in the project tree.                                                                                                                                                                                                     | One note per directory: under `drive --jobs` the item waits for any item citing a path below it. Exit 0. | `new` prints the same note and `check` reports `BROAD CITATION` for a top-level directory, both while the body is still a scaffold. |
+| The deps line, the stop marker and the actor.                                                                                                                                                                                              | Refused. `--yes` never overrides these.                                                                  |                                                                                                                                     |
+
+A passing mention is not a file the item touches. Open the paragraph with `<!-- drover: context -->` on its first line and its citations count for neither the note nor dispatch's overlap set, which `drive --dry-run --jobs N` shows in the pairs it holds apart. A numbered requirement line inside that paragraph still counts:
+
+```text
+<!-- drover: context -->
+Nothing in `backend/` parses a retail barcode today.
+```
+
+### Change an accepted contract
+
+Once accepted, the numbered list is what every run and review is measured against, so no command a session can reach changes it: `request-changes`, `close-changes` and `invariant` each refuse a write that would move the count. When the contract itself is wrong (a requirement belongs to a different design, or to another item), the operator changes it with `amend`:
+
+```bash
+drover amend 7 -f reqs.md --reason "R4 belongs to the cache redesign"
+drover amend 7 -f reqs7.md --reason "R4 moves to 9" --moved 9     # a move is amend on both
+drover amend 9 -f reqs9.md --reason "R4 of 7 lands here" --moved 7
+```
+
+The file is the new numbered list and nothing else. `amend` replaces the body's one contiguous list in place, keeps the list it replaced beside the saved reports as `<stem>-<slug>.amend-N.md` with the reason, and appends a body row carrying the new digest and an `amend` row naming the count before and after, the reason and, with `--moved`, the other item. It refuses a scaffold (write its list by hand and `accept` it), a merged item, and a list that prose splits in two. It is the operator's: it refuses inside any session drover launched, supervisor included, because `move_requirement` sits at `operator` with no higher ceiling.
+
+Do it before sending the item back. `request-changes` refuses evidence that names a requirement by number (`R3`, "requirement 3") the body's list does not hold, unless an `amend` since the last round removed it, and evidence that says requirements were removed or replaced when no `amend` has run since the last round. That is a heuristic over the evidence's prose, read outside code fences: a prompt to look, not a proof. Under `--over-limit` it warns instead and writes with `--yes`.
+
+An edit by hand works on the file and breaks the review that follows. Every drover command that writes a body records its digest, and `drive` reads a body that no longer matches the last one recorded as a reviewer writing findings by hand, so the next clean pass parks `body_edited`. `drover check` reports such an item as `HAND EDITED`, and `drive` parks it `hand_edited` before launching any session, until the edit is recorded: `amend` for a change to the numbered requirements, or `touch` for prose.
+
+```bash
+drover touch 7 --reason "reworded the background paragraph"
+```
+
+`touch` appends one body row carrying the current digest and the reason, and keeps nothing else, so a requirements change recorded with it leaves no trace of the list it replaced. It is the operator's under the same refusals as `amend`. A scaffold is never reported, since writing its requirements by hand is the workflow, and neither is an item with no digest on record, nor one a live session in this checkout is working.
+
 ## 2. Check
 
 ```bash
@@ -143,7 +185,7 @@ drover check
 
 Exit 0 clean, exit 2 on findings, exit 1 if it could not run the validation at all. Put it in CI; run it after any rename.
 
-Findings are `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `BAD TEMPLATE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED` and `SEQUENCE CLASH`. [Concepts](concepts.md#validation) says what each means.
+Findings are `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `BAD TEMPLATE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `PLACEHOLDER`, `HOLD MARKER`, `BROAD CITATION` and `HAND EDITED`. [Concepts](concepts.md#validation) says what each means.
 
 Then see where the item sits:
 
@@ -267,6 +309,27 @@ A section ends at the next `##` line, so evidence written with `-f` has its own 
 
 Each round's evidence is kept beside the saved reports as `<stem>-<slug>.changes-N.md`, and both prompts list the earlier rounds as headlines with their paths. The ledger's `changes` row is a digest, which separates a review repeating itself from one finding something new and says nothing about either round; the list says what the rounds were about. That matters because the pattern is the diagnosis: five send-backs reading "record the cache hit", "persist by key", "compare the metadata", "take it from the open handle", "publish by rename" are one guarantee nobody stated, and each of them on its own reads as a clean fix to a real defect.
 
+### Which way a split points
+
+`drover split` writes the dependency between the two items, and `--after` and `--before` choose its direction.
+
+- **`--after`** (the default): the item split waits on the new one. Its `deps:` line gains the new id, and it stays blocked until the new item merges. Use it when the new item's work stands on the trunk alone, which is the usual case: a shared subsystem this item tripped over, fixable from a fresh checkout of the trunk.
+- **`--before`**: the new item waits on the item split. The scaffold's own `deps:` line names the original, which gains no dep and may merge first; whatever already blocked it still does, and `split` says so. Use it when the new item's fix reaches code only the original's branch has written, such as call sites of a function the original added.
+
+Choose wrong and the two deadlock. The new item runs from the trunk, so it cannot change code that exists only on the original's branch, and the original cannot merge until the new item does. So drover reads the new item's citations against the trunk and against the original's branch: every path cited with a line part (the same citations `stale_citations` reads), and every backticked name that looks like a function or type, found with a whole-word `git grep` over those cited files on each ref. The names are a heuristic: a definition in a file the body never cites is missed, and a word spelled like a name can match.
+
+Each citation only the branch has is reported as `B cites X, which only A's branch has; with --after these items deadlock`:
+
+| Where                 | What happens                                                                                                                        |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `split` under --after | A warning on stderr. The scaffold is still written, because its proposal is still being edited.                                     |
+| `accept` of the split | A refusal, and nothing is accepted. `drover accept <id> --yes` overrides it, and only it: never the stop marker or the actor check. |
+| `check`               | A `BRANCH CYCLE` finding for any unmerged dependency, split or not, so a pair written before this check existed is still found.     |
+
+Every one of the three prints the same remedy, naming the ids: `drop B2 from the deps line of 1, and add 1 to B2's`. That is a hand edit of two `deps:` lines. Shelving the new item and splitting again is not a remedy, because `shelve` refuses an id another item's `deps:` line names, and under `--after` the original names it.
+
+The scaffold records the direction in a line under the stop marker (`Split from 1 with --after: 1 waits on this item.`), and `drover show` names it on both items. `show` takes the direction from the two `deps:` lines rather than that record, so a pair flipped by hand reads `--before` and notes that the split recorded `--after`.
+
 ### A block the branch closed is closed, not sent back
 
 The pass that finds every finding in the block closed says so with `drover close-changes <id>`, which replaces the section with the statement that it is closed and writes no `changes` row, only the digest of the body it wrote. `-f <file>` carries what the reviewer traced, per finding, below that statement.
@@ -315,7 +378,7 @@ Each runner comes from its own key: `[run] draft_runner`, `[run] default_runner`
 
 **The one step no agent performs** is the second row: a human reads the drafted list and runs `drover accept`. Until they do, `run` refuses the item and so does `--dry-run`. That is the boundary drover does not automate, and `accept` is a command rather than a flag precisely so that no runner's argv can carry it.
 
-Nor can its environment. drover exports `DROVER_ACTOR=agent` into every session it launches, and `accept` refuses there, exit 3. So do `unaccept`, `signoff`, `intake`, `finish`, `mark-merged`, `unmark-merged`, `open-pr`, `drive` and `supervise`, each for a reason `drover --help` prints beside it, and a launched session cannot launch another. `env -u DROVER_ACTOR` defeats all of it: it stops a command being run because it appeared in a code block, not one being run on purpose. `audit` is deliberately exempt. A review session is independent of the implement session, drover launched both, and the actor variable cannot tell them apart. The session id in `DROVER_SESSION`, recorded on each stage row, can, and that is what `--code-by agent` resolves against.
+Nor can its environment. drover exports `DROVER_ACTOR=agent` into every session it launches, and `accept` refuses there, exit 3. So do `unaccept`, `amend`, `touch`, `signoff`, `intake`, `finish`, `mark-merged`, `unmark-merged`, `open-pr`, `drive` and `supervise`, each for a reason `drover --help` prints beside it, and a launched session cannot launch another. `env -u DROVER_ACTOR` defeats all of it: it stops a command being run because it appeared in a code block, not one being run on purpose. `audit` is deliberately exempt. A review session is independent of the implement session, drover launched both, and the actor variable cannot tell them apart. The session id in `DROVER_SESSION`, recorded on each stage row, can, and that is what `--code-by agent` resolves against.
 
 `review` does not switch branches. It runs before the merge, on the branch `run` left the tree on.
 
@@ -408,7 +471,7 @@ drover signoff F5 6 "ssh dev-guest-1 'systemctl is-active webapp' printed active
 | `0`      | appends a `post_finish` ledger row carrying the first line of its output                                       |
 | non-zero | files a follow-up owned by the item, prints where, and emits `needs_operator` (the `post_finish_check` action) |
 
-Neither undoes the merge or changes finish's exit: the trunk already carries the commit, and a failed check is work somebody owes on it rather than a reason to pretend the item was never finished. Under `[register] backend = "none"`, or `--no-tracker` with the tracker backend, nothing is filed and the line says so. Outside a drive, `needs_operator` reaches `[supervise] notify` and nothing else. See [`[finish]`](configuration.md#finish).
+Neither undoes the merge or changes finish's exit: the trunk already carries the commit, and a failed check is work somebody owes on it rather than a reason to pretend the item was never finished. Under `[register] backend = "none"`, or `--no-tracker` with the tracker backend, nothing is filed and the line says so. Outside a drive, `needs_operator` reaches each [`[notify]`](configuration.md#notify) destination routing it, and nothing else. See [`[finish]`](configuration.md#finish).
 
 ### When the forge has no auto-merge
 

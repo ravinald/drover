@@ -9,10 +9,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/lease"
 	"github.com/ravinald/drover/internal/ledger"
@@ -224,5 +226,179 @@ func TestFindingsFiledBeforeAReexecAreReportedAfterIt(t *testing.T) {
 	if st.totals == nil || st.totals.FindingsByCoverage[coverageScaffold] != 1 ||
 		st.totals.FindingsByCoverage[coverageQueued]+st.totals.FindingsByCoverage[coverageUnqueued] != 1 {
 		t.Errorf("totals = %+v, want the row and the scaffold counted\n%s", st.totals, stdout)
+	}
+}
+
+// trunkWaitStubs replaces the review stub with one keyed on a REVIEW-ID-<n>
+// marker in the brief: item 1's first review waits for the file sendBack
+// names and then sends the item back, and every other review passes. Each
+// review is counted in reviews/<id>.
+func trunkWaitStubs(t *testing.T) (sendBack, reviews string) {
+	t.Helper()
+	rev, err := exec.LookPath("rev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sendBack = filepath.Join(t.TempDir(), "send-back")
+	reviews = t.TempDir()
+	t.Setenv("DROVER_TEST_SEND_BACK", sendBack)
+	t.Setenv("DROVER_TEST_REVIEWS", reviews)
+	stub(t, rev, `#!/bin/sh
+echo '{"type":"result","subtype":"success","is_error":false}'
+id=$(printf '%s' "$*" | sed -n 's/.*REVIEW-ID-\([0-9][0-9]*\).*/\1/p' | head -n 1)
+n=$(cat "$DROVER_TEST_REVIEWS/$id" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "$DROVER_TEST_REVIEWS/$id"
+if [ "$id" = 1 ] && [ $n -eq 1 ]; then
+  while [ ! -e "$DROVER_TEST_SEND_BACK" ]; do sleep 0.05; done
+  printf '{"id":"1","changes":"send it back","date":"2026-10-23"}\n' >> "$DROVER_ROOT/ledger.jsonl"
+  exit 0
+fi
+printf '{"id":"%s","level":"reviewed","code_by":"agent","independent":true,"date":"2026-10-23"}\n' "$id" >> "$DROVER_ROOT/ledger.jsonl"
+`)
+	return sendBack, reviews
+}
+
+func reviewCount(t *testing.T, reviews, id string) int {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(reviews, id)) // #nosec G304 -- the test's own counter
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	return n
+}
+
+// An item waiting for its trunk turn behind a held item holds there, so a
+// resume onto a replaced binary re-executes rather than waiting on it forever.
+// Item 2's review passes while item 1, dispatched first, is still in review;
+// item 1 is sent back and a pause holds it before its implement run. After the
+// re-exec item 2 goes on from its trunk stage, unreviewed again, and takes its
+// turn after item 1.
+func TestAReexecAdoptsAnItemWaitingForItsTrunkTurn(t *testing.T) {
+	resetDrive(t)
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, _ := forge(t, ghLog)
+	t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
+	write(t, filepath.Join(dir, "work", "01-first.md"), "---\ntitle: First\ndeps:\n---\n\n1. Do it. REVIEW-ID-1\n")
+	write(t, filepath.Join(dir, "work", "02-second.md"), "---\ntitle: Second\ndeps:\n---\n\n1. Do it too. REVIEW-ID-2\n")
+	if err := ledger.Append(filepath.Join(dir, "ledger.jsonl"),
+		ledger.Row{ID: "2", Changes: "earlier", Date: ledger.Today()}); err != nil {
+		t.Fatal(err)
+	}
+	sendBack, reviews := trunkWaitStubs(t)
+
+	bin := filepath.Join(t.TempDir(), "drover")
+	asDrover(t, bin, 1)
+	var stdout, stderr bytes.Buffer
+	c := exec.Command(bin, "drive", "1", "2", "--jobs", "2", "--json")
+	c.Env = append(os.Environ(), envAsDrover+"=1")
+	c.Stdout, c.Stderr = &stdout, &stderr
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- c.Wait() }()
+	t.Cleanup(func() {
+		_ = c.Process.Kill()
+		<-exited
+	})
+
+	path := mustLeasePath(t)
+	passed := func() bool {
+		s, err := open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return slices.ContainsFunc(s.ledger.Rows, func(r ledger.Row) bool { return r.ID == "2" && r.Pass == passPassed })
+	}
+	for deadline := time.Now().Add(60 * time.Second); !passed(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("item 2's review never passed\n%s", stderr.String())
+		}
+	}
+	// From the pass row to the wait in enter is a ledger write and a lock;
+	// the pause has to land after it for this to be the trunk wait.
+	time.Sleep(time.Second)
+	if err := pauseDrive(io.Discard); err != nil {
+		t.Fatalf("--pause: %v", err)
+	}
+	write(t, sendBack, "")
+	waitLease(t, path, func(l lease.Lease) bool {
+		return slices.ContainsFunc(l.Holds, func(h lease.Hold) bool { return h.ID == "1" && h.At == ledger.StageImplement }) &&
+			slices.ContainsFunc(l.Holds, func(h lease.Hold) bool { return h.ID == "2" && h.At == stageCatchUp && h.Verify != "" })
+	})
+
+	asDrover(t, bin, 2)
+	if err := resumeDrive(io.Discard); err != nil {
+		t.Fatalf("--resume: %v\n%s", err, stderr.String())
+	}
+	select {
+	case err := <-exited:
+		exited <- err
+		if err != nil {
+			t.Fatalf("drive: %v\n%s", err, stderr.String())
+		}
+	case <-time.After(2 * time.Minute):
+		t.Fatalf("the drive never re-executed and finished\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "drive D1 re-executed onto") {
+		t.Fatalf("the drive never re-executed:\n%s", stderr.String())
+	}
+	var rows []DriveItem
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		var d DriveItem
+		if strings.Contains(line, `"outcome"`) && json.Unmarshal([]byte(line), &d) == nil {
+			rows = append(rows, d)
+		}
+	}
+	if len(rows) != 2 || rows[0].ID != "1" || rows[1].ID != "2" || !rows[0].Finished || !rows[1].Finished {
+		t.Fatalf("rows %+v, want 1 then 2, both finished\n%s", rows, stderr.String())
+	}
+	if n := reviewCount(t, reviews, "2"); n != 1 {
+		t.Errorf("item 2 was reviewed %d times, want once: it held at its trunk stage", n)
+	}
+}
+
+// A re-exec that has waited past reexecPatience on a running item that does
+// not hold says so once, naming the item and its stage, and again only after
+// another reexecPatience.
+func TestAStalledReexecNamesWhatItWaitsOn(t *testing.T) {
+	var out bytes.Buffer
+	prev := events
+	events = &eventSink{w: &out, cfg: &config.Config{}}
+	t.Cleanup(func() { events = prev })
+	events.stage("1", ledger.StageImplement)
+	events.stage("2", ledger.StageReview)
+
+	q := newDriveSched()
+	now := time.Now()
+	q.paused, q.reexec, q.reexecSince = true, "v9 (built 2026-10-23T00:00:00Z)", now
+	q.holds["1"] = lease.Hold{ID: "1", At: ledger.StageImplement}
+	running := map[int]queued{
+		1: {it: backlog.Item{ID: backlog.ID{Num: 1}}, seq: 0},
+		2: {it: backlog.Item{ID: backlog.ID{Num: 2}}, seq: 1},
+	}
+
+	sayReexecWaiting(q, running, now.Add(30*time.Second))
+	sayReexecWaiting(q, running, now.Add(reexecPatience+time.Second))
+	sayReexecWaiting(q, running, now.Add(reexecPatience+30*time.Second))
+
+	var got []DriveEvent
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var e DriveEvent
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatal(err)
+		}
+		if e.Event == evReexecWaiting {
+			got = append(got, e)
+		}
+	}
+	if len(got) != 1 || !slices.Equal(got[0].Waiting, []WaitingItem{{ID: "2", Stage: ledger.StageReview}}) ||
+		!strings.Contains(got[0].Reason, "2 (in review)") {
+		t.Fatalf("reexec_waiting events %+v, want one naming 2 in review", got)
+	}
+	sayReexecWaiting(q, running, now.Add(2*reexecPatience+2*time.Second))
+	if n := strings.Count(out.String(), evReexecWaiting); n != 2 {
+		t.Errorf("%d reexec_waiting events after a second minute, want 2", n)
 	}
 }

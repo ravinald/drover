@@ -14,6 +14,7 @@ import (
 
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/lease"
+	"github.com/ravinald/drover/internal/prompts"
 )
 
 // driveSched is what lets a drive run items side by side: an ordered trunk
@@ -50,6 +51,9 @@ type driveSched struct {
 	// running item is among them.
 	holds  map[string]lease.Hold
 	reexec string
+	// reexecSince is when the resume set reexec, and reexecSaid when the drive
+	// last reported the items that re-exec still waits on.
+	reexecSince, reexecSaid time.Time
 	// conflicted is every item this drive already handed a trunk conflict to a
 	// session for. A second conflict on one of them parks for a person: the
 	// trunk is moving faster than the item's rounds can follow it.
@@ -60,6 +64,14 @@ type driveSched struct {
 	// of it, and the trunk's branch protection does not change between merges.
 	trunkResults map[string]trunkResult
 	forgeWait    *forgeWait
+	// usage is usage_admission's hold, read by the dispatcher and by every
+	// item at each stage that launches a session.
+	usage *usageGate
+	// configSeen is the last on-disk .drover.toml this drive reported as
+	// differing from configBase, the inputs it compared against: a digest, or
+	// the read error. A resume replaces inputs, which restarts the comparison.
+	configSeen string
+	configBase *driveInputs
 }
 
 func newDriveSched() *driveSched {
@@ -81,10 +93,29 @@ const parkDrained = "stopped"
 
 // enter waits for seq's turn at the trunk stage and holds the stage. It returns
 // the drain cause instead when the drive is stopping, holding nothing.
-func (q *driveSched) enter(seq int) error {
+//
+// The wait is a stage boundary, so while the drive is paused the item is in
+// holds at at. The turn follows an earlier item that may itself be held, and a
+// re-exec waits for every running item to hold: without the entry it would
+// wait on this one for a turn that comes only after the re-exec.
+func (q *driveSched) enter(seq int, at lease.Hold) error {
 	q.mu.Lock()
+	holding := false
 	for q.next != seq && q.stop == nil {
+		if q.paused != holding {
+			holding = q.paused
+			if holding {
+				q.holds[at.ID] = at
+			} else {
+				delete(q.holds, at.ID)
+			}
+			q.publishHolds()
+		}
 		q.cond.Wait()
+	}
+	if holding {
+		delete(q.holds, at.ID)
+		q.publishHolds()
 	}
 	stop := q.stop
 	q.mu.Unlock()
@@ -190,12 +221,13 @@ func (s *session) drained(next string) string {
 // item when the drive stops before its turn comes. A stop fn raises drains the
 // schedule before the turn passes on, so the next item in line never catches up
 // to a trunk this one just found red.
-func (s *session) inTrunkStage(fn func() DriveItem, park func(cause, why string) DriveItem) DriveItem {
+func (s *session) inTrunkStage(it backlog.Item, fn func() DriveItem, park func(cause, why string) DriveItem) DriveItem {
 	if s.slot == nil {
 		return fn()
 	}
 	q, seq := s.slot.sched, s.slot.seq
-	if cause := q.enter(seq); cause != nil {
+	at := lease.Hold{ID: it.ID.Bare(), At: stageCatchUp, Verify: prompts.SelectVerify(s.cfg.Verify, it.Meta)}
+	if cause := q.enter(seq, at); cause != nil {
 		return park(parkDrained, fmt.Sprintf(
 			"the drive stopped while this item waited for the trunk (%v); its review passed, and nothing was updated, verified, opened as a pull request or merged", cause))
 	}
@@ -278,10 +310,53 @@ type queued struct {
 	paths []string
 	// hold is where a re-exec found the item held, nil otherwise.
 	hold *lease.Hold
+	// seq is the item's dispatch number once dispatched, which orders its turn
+	// at the trunk stage.
+	seq int
 }
 
 func newQueued(it backlog.Item, named bool) queued {
-	return queued{it: it, named: named, paths: citedPaths(it.Body)}
+	return queued{it: it, named: named, paths: overlapPaths(it.Body)}
+}
+
+// contextMarker opens a paragraph whose citations are background rather than
+// files the item touches.
+const contextMarker = "<!-- drover: context -->"
+
+// requirementLine is a top-level numbered line, which report --save turns into
+// an audit checkbox. Its citations always count: a requirement names what the
+// item must change, whatever paragraph it sits in.
+var requirementLine = regexp.MustCompile(`^\d+\.[ \t]`)
+
+// overlapPaths is what dispatch and accept read as the paths an item touches:
+// citedPaths over the body with every context paragraph left out. A passing
+// mention of a top-level directory would otherwise hold the item apart from
+// every item citing anything below it, and the regex cannot tell a mention from
+// an edit, so the author says which.
+func overlapPaths(body string) []string {
+	return citedPaths(withoutContext(body))
+}
+
+// withoutContext drops each paragraph, a run of non-blank lines, whose first
+// line is contextMarker, keeping any numbered requirement line inside it.
+func withoutContext(body string) string {
+	lines := strings.Split(body, "\n")
+	kept := make([]string, 0, len(lines))
+	skipping := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "":
+			skipping = false
+		case trimmed == contextMarker && (i == 0 || strings.TrimSpace(lines[i-1]) == ""):
+			skipping = true
+			continue
+		case skipping && !requirementLine.MatchString(line):
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
 }
 
 // heldApart is a later item waiting on an earlier one, and why: both cite one

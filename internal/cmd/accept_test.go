@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ravinald/drover/internal/backlog"
+	"github.com/ravinald/drover/internal/config"
 )
 
 // scaffold is what intake writes: the marker on its own line at the top of the
@@ -495,5 +498,214 @@ func TestAcceptNoteAndDispatchHoldAgree(t *testing.T) {
 	_, held := planWaves([]queued{newQueued(other, true), newQueued(b1, true)}, 2)
 	if len(held) != 1 || held[0].why != "both cite internal/cmd" {
 		t.Errorf("planWaves held = %+v, want B1 held on internal/cmd", held)
+	}
+}
+
+// unfinished is a scaffold whose prose is the given text, under the marker block.
+func unfinished(prose string) string {
+	return "---\ntitle: Unfinished\ndeps:\n---\n\n" +
+		"STOP: requirements not yet written\n" +
+		"drover refuses to launch this item while this line is present. Delete it\n" +
+		"once the list below is real.\n\n" +
+		prose + "\n\nRequirements:\n\n1. Do the work.\n"
+}
+
+// What a placeholder is depends on where it sits: a path still to be chosen is
+// one, a usage example is not.
+func TestBodyHolds(t *testing.T) {
+	cases := []struct {
+		name, line string
+		want       []string
+	}{
+		{"placeholder in a path span", "Write `internal/<provider>/client.go`.", []string{"the placeholder <provider>"}},
+		{"placeholder in prose", "Call the <provider> API.", []string{"the placeholder <provider>"}},
+		{"command example span", "Run `drover show <id>` first.", nil},
+		{"double-tick command span", "Run ``drover show <id>`` first.", nil},
+		{"context marker", "<!-- drover: context -->", nil},
+		{"autolink", "See <https://example.com/x>.", nil},
+		{"hold line", "OPERATOR DECISION PENDING: do not accept until a provider is chosen", []string{`the hold marker "OPERATOR DECISION PENDING"`}},
+		{"hold mid-line", "OPERATOR STEP BEFORE ACCEPT: measure X", []string{`the hold marker "BEFORE ACCEPT"`}},
+		{"hold quoted in a command span", "Set `hold_markers = [\"BEFORE ACCEPT\"]` here.", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			lines := []string{"---", "title: x", "---", "", c.line}
+			var got []string
+			for _, h := range bodyHolds(lines, config.DefaultHoldMarkers) {
+				if h.line != 5 {
+					t.Errorf("line %d, want 5", h.line)
+				}
+				got = append(got, h.what)
+			}
+			if strings.Join(got, "|") != strings.Join(c.want, "|") {
+				t.Errorf("bodyHolds(%q) = %q, want %q", c.line, got, c.want)
+			}
+		})
+	}
+	fenced := []string{"Usage:", "", "```", "drover show <id>", "OPERATOR DECISION PENDING", "```"}
+	if got := bodyHolds(fenced, config.DefaultHoldMarkers); len(got) != 0 {
+		t.Errorf("a fenced usage example was reported: %+v", got)
+	}
+	if got := bodyHolds([]string{"OPERATOR DECISION PENDING"}, []string{}); len(got) != 0 {
+		t.Errorf("hold_markers = [] still reported a hold: %+v", got)
+	}
+}
+
+// accept is the operator's last look before a body becomes the contract. A
+// placeholder or a hold line accepted is a run that invents what the author
+// had not decided.
+func TestAcceptRefusesAnUnfinishedBody(t *testing.T) {
+	cases := []struct {
+		name, prose string
+		refused     string // a line the refusal must carry, empty when accepted
+	}{
+		{"placeholder in a path", "Act as a maintainer. Add `internal/<provider>/client.go`.",
+			"work/B01-unfinished.md:10 carries the placeholder <provider>"},
+		{"hold line", "OPERATOR DECISION PENDING: do not accept until a provider is chosen",
+			`work/B01-unfinished.md:10 carries the hold marker "OPERATOR DECISION PENDING"`},
+		{"fenced usage example", "Act as a maintainer. Usage:\n\n```\ndrover show <id>\n```", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Cleanup(func() { acceptYes = false })
+			dir := markerProject(t, map[string]string{"B01-unfinished.md": unfinished(c.prose)})
+			t.Chdir(dir)
+			path := filepath.Join(dir, "work", "B01-unfinished.md")
+
+			var err error
+			capture(t, func() { err = acceptCmd.RunE(acceptCmd, []string{"B1"}) })
+			if c.refused == "" {
+				if err != nil {
+					t.Fatalf("accept refused a finished body: %v", err)
+				}
+				return
+			}
+			if err == nil || Code(err) != ExitRefused {
+				t.Fatalf("accept = %v, want a refusal", err)
+			}
+			if !strings.Contains(err.Error(), c.refused) || !strings.Contains(err.Error(), "drover accept B1 --yes") {
+				t.Errorf("the refusal does not name the line and the override:\n%v", err)
+			}
+			if b, _ := os.ReadFile(path); !strings.Contains(string(b), "STOP: requirements not yet written") { // #nosec G304 -- written by this test
+				t.Fatal("a refused accept deleted the marker")
+			}
+
+			acceptYes = true
+			capture(t, func() { err = acceptCmd.RunE(acceptCmd, []string{"B1"}) })
+			if err != nil {
+				t.Fatalf("accept --yes: %v", err)
+			}
+			if b, _ := os.ReadFile(path); strings.Contains(string(b), "STOP: requirements not yet written") { // #nosec G304 -- written by this test
+				t.Error("accept --yes left the marker")
+			}
+		})
+	}
+}
+
+func kindsOf(t *testing.T, kind string) []string {
+	t.Helper()
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, f := range s.checkReport().Findings {
+		if f.Kind == kind {
+			out = append(out, f.Message)
+		}
+	}
+	return out
+}
+
+// check reads the same lines on an accepted item, which got past accept with
+// --yes or by a hand edit afterwards. A merged body is history.
+func TestCheckReportsHoldsOnAcceptedUnmergedItems(t *testing.T) {
+	body := "---\ntitle: Accepted\ndeps:\n---\n\nAdd `internal/<provider>/client.go`.\n\n" +
+		"OPERATOR STEP BEFORE ACCEPT: measure X\n\n1. Do it.\n"
+	dir := markerProject(t, map[string]string{
+		"B01-accepted.md": body,
+		"B02-merged.md":   strings.Replace(body, "Accepted", "Merged", 1),
+		"B03-scaffold.md": unfinished("Add `internal/<provider>/client.go`."),
+	})
+	write(t, filepath.Join(dir, "ledger.jsonl"), `{"id":"B2","merged":true,"date":"2026-01-01"}`+"\n")
+	t.Chdir(dir)
+
+	if got := kindsOf(t, "PLACEHOLDER"); len(got) != 1 || got[0] != "work/B01-accepted.md:6 carries the placeholder <provider>" {
+		t.Errorf("PLACEHOLDER = %q, want B1's line 6 alone", got)
+	}
+	if got := kindsOf(t, "HOLD MARKER"); len(got) != 1 || !strings.HasPrefix(got[0], "work/B01-accepted.md:8 ") {
+		t.Errorf("HOLD MARKER = %q, want B1's line 8 alone", got)
+	}
+}
+
+// A passing mention of a top-level directory serializes an item under --jobs.
+// check says so while the body is a scaffold, and a context paragraph takes the
+// mention out of the overlap set everywhere it is read.
+func TestTopLevelDirectoryCitation(t *testing.T) {
+	mention := "Nothing in `backend/` parses a retail barcode."
+	marked := "<!-- drover: context -->\n" + mention
+	dir := markerProject(t, map[string]string{
+		"B01-mention.md": unfinished(mention),
+		"B02-marked.md":  unfinished(marked),
+		"B03-other.md":   "---\ntitle: Other\ndeps:\n---\n\n1. Change `backend/scan.go`.\n",
+	})
+	if err := os.MkdirAll(filepath.Join(dir, "backend"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+
+	want := "B1 cites the directory backend; under drive --jobs it waits for any item citing a path below it"
+	if got := kindsOf(t, "BROAD CITATION"); len(got) != 1 || got[0] != want {
+		t.Errorf("BROAD CITATION = %q, want B1 alone", got)
+	}
+
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := func(id string) backlog.Item {
+		it, err := s.item(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return it
+	}
+	other := newQueued(item("B3"), true)
+	for _, c := range []struct {
+		id   string
+		held bool
+	}{{"B1", true}, {"B2", false}} {
+		_, held := planWaves([]queued{other, newQueued(item(c.id), true)}, 2)
+		if got := len(held) == 1; got != c.held {
+			t.Errorf("%s held apart from B3 = %v (%+v), want %v", c.id, got, held, c.held)
+		}
+	}
+	if got := s.citedDirs(item("B2").Body); len(got) != 0 {
+		t.Errorf("accept's note reads a context paragraph: %q", got)
+	}
+
+	// A requirement inside a context paragraph is still a requirement.
+	req := "<!-- drover: context -->\nBackground on `docs/`.\n1. Change `backend/scan.go`.\n"
+	if got := overlapPaths(req); len(got) != 1 || got[0] != "backend/scan.go" {
+		t.Errorf("overlapPaths = %q, want the requirement's path alone", got)
+	}
+}
+
+// new is the first moment a body exists, and the cheapest one to rewrite it.
+func TestNewNotesATopLevelDirectory(t *testing.T) {
+	dir := newProject(t)
+	if err := os.MkdirAll(filepath.Join(dir, "backend"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { newFile = "" })
+	newFile = filepath.Join(t.TempDir(), "finding.md")
+	write(t, newFile, "Nothing in `backend/` parses a retail barcode.\n")
+	out := capture(t, func() {
+		if err := execute(t, "new", "bug", "barcodes"); err != nil {
+			t.Fatalf("new: %v", err)
+		}
+	})
+	if !strings.Contains(out, "note: B1 cites the directory backend; under drive --jobs") {
+		t.Errorf("new did not note the top-level directory:\n%s", out)
 	}
 }
