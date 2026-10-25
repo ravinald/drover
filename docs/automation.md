@@ -242,6 +242,23 @@ A drive that exits before it holds the lease (a refusal, a preflight that fails)
 2026-10-18T09:40:52Z  exit           code=0 seq=4
 ```
 
+`--session` prints, beneath each `stage` event that carries a [`log`](#drive---events), what that session is doing as its log grows: one line per tool call or block of text, indented under the item and prefixed with its id, so items running at once under `--jobs` stay apart. `attach` follows each log by offset as it follows the event file, opened for reading only, and stops at the same item's next event, reading the log once more to its last whole line first. Replaying a drive already under way, it reads the logs of sessions still running when it started and of every session launched after; a session that finished before `attach` started keeps its `stage` line alone, so attaching to a long drive does not print hours of old logs. A log not written yet is waited for, and one that will not read is named once on stderr with the error while `attach` goes on with the events. What a line says depends on the runner: a Claude tool call is its name and the first of its `command`, `file_path`, `pattern` or `url` inputs, a codex one is a `command_execution` or `file_change` item, an agy one is the tool step it opens; Claude and codex text is each message the session writes, and agy, which streams text in fragments, yields none. Each summary is one line, cut at 160 characters with a trailing `...`.
+
+```text
+2026-10-24T22:40:11Z  stage          F14 stage=implement log=~/.cache/drover/webapp/F14-ntfy.20261024-154011.123456789.jsonl seq=7
+                                     F14 > Read internal/cmd/events.go
+                                     F14 > Bash make build && make check
+                                     F14 · The verify command passes; committing.
+```
+
+Under `--json --session` each activity is one object keyed `activity`, never `event`, so a reader filtering on `event` sees the drive's stream unchanged. `activity` is `tool` or `text`, `tool` is the tool's name on a `tool` entry alone, and `text` is the summary above. `ts` is the time `attach` read the line, not the time the session wrote it: codex and agy stamp none of their lines, and one clock across runners keeps the entries of items running at once in the order they were read.
+
+```json
+{ "activity": "tool", "ts": "2026-10-24T22:41:02Z", "drive": "D8", "id": "F14", "stage": "implement", "tool": "Bash", "text": "Bash make build && make check" }
+```
+
+`--item <id>` limits `attach`, with or without `--session`, to one item's events and the `exit`. An id the drive has not dispatched or queued is not an error, since it may be enqueued later: `attach` prints nothing for it until it appears.
+
 **`drover watch [drive id] --until <event,...>`** blocks until the drive emits one of the named events, prints that event's JSON line and exits `0`. It exits `3` when the drive exits, or stops running, without emitting one, and `1` when there is no such drive or an `--until` name is no event. Without `--after` or `--since`, only events written after `watch` starts count, so an event written between two calls is lost. `--after <seq>` counts only events whose `seq` is past it, whenever they were written: a loop passing the `seq` of the last event it handled gets each event once and misses none. `--since <ts>` counts events stamped at or after `ts`, for a person reading by time; `ts` is one second wide and two events often share one, so a loop on `--since` returns the event it handled again, and strict "after" on `ts` would drop the event beside it. The `exit` event ends a watch whenever it was written, so `watch` on a drive that already exited returns at once: `0` with that event when `--until` names `exit`, `3` otherwise. An interrupt exits `1` and leaves the drive running.
 
 ```sh
@@ -1019,8 +1036,10 @@ A `push_failed` park with `push_hook` belongs to `push_refused_by_hook`, which s
 `stage`: an item reached a step. `stage` is one of `implement`, `review`, `update_branch`, `gate`, `pr`, `merge` or `finish`. The trunk steps (`update_branch` through `finish`) can repeat for one item, because the merge fallback updates the branch and runs the merge gate again at the head it merges.
 
 ```json
-{ "event": "stage", "ts": "2026-10-16T22:00:01Z", "id": "E36", "stage": "implement" }
+{ "event": "stage", "ts": "2026-10-16T22:00:01Z", "id": "E36", "stage": "implement", "log": "~/.cache/drover/webapp/E36-retry.20261016-150001.123456789.jsonl" }
 ```
+
+An `implement` or `review` stage launches a session and carries `log`: the session log's path as the launch banner prints it, relative to the project root or under `~/`, chosen before the event and the file the runner writes. A relaunch after a transient fault (an overloaded service, an exhausted account) writes a log of its own and emits a `stage` of its own. The trunk steps launch no session and carry no `log`. [`attach --session`](#detaching-from-a-drive) follows it.
 
 An `update_branch` for another item's open pull request, after a merge or under `--update-branches`, arrives once its branch update is done and carries `result`, `branch` and `pr`. `result` is an `update_branch.verify` word (`passed`, `failed`, `sequence`, `trunk_red`, `skipped`, `unrunnable`), or `up_to_date` (the branch already held the trunk), `conflict`, or `kept` (not attempted, `reason` says why).
 

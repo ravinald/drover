@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ravinald/drover/internal/config"
+	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/runner"
 )
 
@@ -521,6 +522,57 @@ func TestSuperviseDryRunPrintsTheBrief(t *testing.T) {
 	for _, want := range []string{"| `resolve_conflict` | operator |", "drover drive 1 --json --events", "needs_operator", "`supervise`, `unaccept`"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the prompt does not carry %q:\n%s", want, out)
+		}
+	}
+}
+
+// A stage that launches a session names its log, the file the runner's stream
+// went to, so attach can follow it; a stage that launches nothing names none.
+func TestStageEventsNameTheSessionLog(t *testing.T) {
+	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
+	mergeProject(t)
+
+	evs, stderr, err := driveEventsOf(t)
+	if err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	wd, _ := os.Getwd()
+	cfg, err := config.Load(wd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := map[string]bool{}
+	for _, e := range evs {
+		if e.Event != evStage {
+			continue
+		}
+		if e.Stage != ledger.StageImplement && e.Stage != ledger.StageReview {
+			if e.Log != "" {
+				t.Errorf("%s stage of %s names log %q and launches no session", e.Stage, e.ID, e.Log)
+			}
+			continue
+		}
+		if e.Log == "" {
+			t.Errorf("%s stage of %s names no log", e.Stage, e.ID)
+			continue
+		}
+		path := sessionLog(cfg.Root, e.Log)
+		b, err := os.ReadFile(path) // #nosec G304 -- the test's own log directory
+		if err != nil || !strings.Contains(string(b), `"type":"result"`) {
+			t.Errorf("%s stage of %s names %s, which holds %q (%v), not the fake runner's stream", e.Stage, e.ID, path, b, err)
+		}
+		named[path] = true
+	}
+	written, err := filepath.Glob(filepath.Join(cfg.LogDir(), "*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(written) == 0 || len(written) != len(named) {
+		t.Errorf("the runners wrote %v and the stage events named %v", written, named)
+	}
+	for _, w := range written {
+		if !named[w] {
+			t.Errorf("%s was written and no stage event names it", w)
 		}
 	}
 }

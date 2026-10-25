@@ -242,6 +242,10 @@ type Schema struct {
 	// an item event, so a Result read from the terminal line alone has no text
 	// and a result written from it has no report.
 	Carry func(line []byte, r *Result)
+	// Activity reads one event for what the session was doing when it wrote
+	// it, which is what attach --session shows while the log grows. Nil for a
+	// schema that carries nothing of the kind.
+	Activity func(line []byte) []Activity
 }
 
 // claims reports whether an event of this kind belongs to this schema.
@@ -269,12 +273,14 @@ func Schemas() []Schema {
 			Terminal: []string{"result"},
 			Read:     readClaude,
 			Carry:    carryClaude,
+			Activity: claudeActivity,
 		},
 		{
 			Name: "agy", Key: "event",
 			Kinds:    []string{"init", "step_update", "result"},
 			Terminal: []string{"result"},
 			Read:     readAgy,
+			Activity: agyActivity,
 		},
 		{
 			Name: "codex", Key: "type",
@@ -285,6 +291,7 @@ func Schemas() []Schema {
 			Terminal: []string{"turn.completed", "turn.failed", "turn.aborted"},
 			Read:     readCodex,
 			Carry:    carryCodex,
+			Activity: codexActivity,
 		},
 	}
 }

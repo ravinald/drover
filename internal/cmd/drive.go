@@ -246,7 +246,9 @@ const (
 )
 
 // launch is one stage of one item: the stage row, then the runner, headless, to
-// a fresh log.
+// a fresh log. The stage event is emitted here, once the log's path is chosen,
+// so the event and the banner name the file the runner writes; each relaunch
+// launchOrWait makes after a fault writes a log of its own and emits its own.
 //
 // It takes the runner and the body as parameters and reads no flag variable,
 // because drive drives many items and a flag holds one value. Both callers
@@ -263,6 +265,7 @@ func (s *session) launch(ctx context.Context, it backlog.Item, stage, name, logB
 	// carries it. A drive that reported only what it resolved at the top would
 	// say nothing about the second round, which is the one whose prompt differs.
 	banner.Log = displayPath(s.cfg.Root, logPath)
+	events.session(it.ID.Bare(), stage, banner.Log)
 	banner.from(name, spec, runner.Headless).write(os.Stderr)
 	// Linked again before every session, not only when the tree opens: a branch
 	// update that merges a trunk which stopped tracking a linked path (a
@@ -1877,7 +1880,6 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 		}
 		banner.Stage, banner.Prompt = ledger.StageReview, s.promptPath(s.cfg.Prompts.Review, "review")
 		banner.Item = rel(s.cfg.Root, it.Path)
-		events.stage(d.ID, ledger.StageReview)
 		oc, rerr := s.launchOrWait(ctx, it, ledger.StageReview, reviewer, runlog.ReviewBase(it.ID.Stem(), it.Slug), brief, banner, deadline)
 		last, lastErr = &oc, rerr
 		if err := s.reload(); err != nil {
@@ -1990,7 +1992,6 @@ func (s *session) implementRound(ctx context.Context, it backlog.Item, d *DriveI
 		return park("branch_failed", err.Error()), true
 	}
 	banner.Stage, banner.Prompt = ledger.StageImplement, s.promptPath(s.cfg.Prompts.Implement, "default")
-	events.stage(d.ID, ledger.StageImplement)
 	ic, err := s.launchOrWait(ctx, it, ledger.StageImplement, implementer, base, body, banner, deadline)
 	*last, *lastErr = &ic, err
 	// Before the push and before the review. A run that never reached the

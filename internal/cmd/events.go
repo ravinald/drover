@@ -62,6 +62,9 @@ type DriveEvent struct {
 	// Action is the catalog key that produced the event, where one did.
 	Action string `json:"action,omitempty"`
 	Stage  string `json:"stage,omitempty"`
+	// Log is the session log a stage launching a session streams to, as the
+	// launch banner prints it: relative to the project root, or under ~/.
+	Log    string `json:"log,omitempty"`
 	Park   string `json:"park,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	// Detail is the park's detail token, on parked, as the item's report
@@ -276,6 +279,12 @@ func (es *eventSink) reconfigure(cfg *config.Config) {
 // stage is the event for an item reaching one step.
 func (es *eventSink) stage(id, stage string) {
 	es.emit(DriveEvent{Event: evStage, ID: id, Stage: stage})
+}
+
+// session is the stage event for a step that launches a session, naming the
+// log it streams to.
+func (es *eventSink) session(id, stage, log string) {
+	es.emit(DriveEvent{Event: evStage, ID: id, Stage: stage, Log: log})
 }
 
 // notifyWait bounds one notifier run. A notifier that hangs would otherwise
