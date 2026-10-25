@@ -172,7 +172,8 @@ preview, and exits 3.`,
 			return err
 		}
 
-		_, runErr := runner.Run(c.Context(), at, spec, mode, body, logPath, os.Stdout)
+		oc, runErr := runner.Run(c.Context(), at, spec, mode, body, logPath, os.Stdout)
+		s.recordUsage(data.ID, ledger.StageImplement, at.Session, oc)
 		s.mirrorNow(it)
 		// Whatever the exit: a session that failed after committing still left work
 		// on the branch, and this row is what lets a later finish tell that branch

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,14 +18,15 @@ import (
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/lease"
 	"github.com/ravinald/drover/internal/ledger"
+	"github.com/ravinald/drover/internal/runlog"
 	"github.com/spf13/cobra"
 )
 
 // driveEventNames is every event a drive emits, which is what watch --until
 // may name.
 var driveEventNames = []string{
-	evQueued, evDispatched, evPreflight, evStage, evCheck, evParked, evFiled,
-	evNeedsOperator, evMerged, evPaused, evResumed, evReexecWaiting, evExit,
+	evStarted, evQueued, evDispatched, evPreflight, evStage, evCheck, evParked, evFiled,
+	evNeedsOperator, evMerged, evPaused, evResumed, evReexecWaiting, evConfigChanged, evUsageWarning, evExit,
 }
 
 // driveEventsPath is where a drive keeps its events, one object per line,
@@ -54,6 +56,12 @@ type followed struct {
 	id     string
 	events string
 	lease  string
+	// root is the project root, which a stage event's log is relative to.
+	root string
+	// tick, when set, runs once per pass over the event file, after the lines
+	// it gained are handed out and before the wait for more: attach --session
+	// reads the session logs it follows there.
+	tick func()
 }
 
 // errDriveGone is a drive that stopped running with no exit event in its file:
@@ -106,7 +114,7 @@ func resolveFollowed(args []string) (followed, error) {
 	if err != nil {
 		return followed{}, err
 	}
-	return followed{id: id, events: path, lease: lp}, nil
+	return followed{id: id, events: path, lease: lp, root: cfg.Root}, nil
 }
 
 // running reports whether the checkout's lease still names this drive. A drive
@@ -152,6 +160,9 @@ func (f followed) follow(ctx context.Context, fn func(line []byte, n int, end in
 			if fn(line, n, consumed, e) || e.Event == evExit {
 				return nil
 			}
+		}
+		if f.tick != nil {
+			f.tick()
 		}
 		if !alive {
 			if !seen {
@@ -222,6 +233,9 @@ func eventLine(e DriveEvent) string {
 		}
 		return strconv.Itoa(n)
 	}
+	add("queue", strings.Join(e.Queue, ","))
+	add("jobs", num(e.Jobs))
+	add("deadline", e.Deadline)
 	add("stage", e.Stage)
 	add("park", e.Park)
 	add("detail", e.Detail)
@@ -236,9 +250,22 @@ func eventLine(e DriveEvent) string {
 	if e.Code != nil {
 		add("code", strconv.Itoa(*e.Code))
 	}
+	if e.Summary != nil {
+		add("ended", e.Summary.Ended)
+		add("merged", strconv.Itoa(e.Summary.Merged))
+		add("parked", strconv.Itoa(e.Summary.Parked))
+		add("skipped", strconv.Itoa(e.Summary.Skipped))
+		add("held", strconv.Itoa(e.Summary.Held))
+	}
 	add("changed", strings.Join(e.Changed, ","))
+	add("tables", strings.Join(e.Tables, ","))
+	add("window", e.Window)
+	if e.Remaining != nil {
+		add("remaining", strconv.Itoa(*e.Remaining)+"%")
+	}
+	add("resets_at", e.ResetsAt)
 	add("seq", num(e.Seq))
-	for _, kv := range [][2]string{{"reason", e.Reason}, {"run", e.Run}, {"evidence", e.Evidence}} {
+	for _, kv := range [][2]string{{"reason", e.Reason}, {"run", e.Run}, {"evidence", e.Evidence}, {"error", e.Error}} {
 		if kv[1] != "" {
 			add(kv[0], strconv.Quote(kv[1]))
 		}
@@ -247,9 +274,190 @@ func eventLine(e DriveEvent) string {
 }
 
 var (
-	attachSince string
-	attachJSON  bool
+	attachSince   string
+	attachJSON    bool
+	attachSession bool
+	attachItem    string
 )
+
+// SessionActivity is one entry attach --session --json prints for a session
+// log line. It is keyed activity rather than event, so a reader filtering the
+// stream on event sees the drive's events and nothing else.
+type SessionActivity struct {
+	// Activity is runlog.ActivityTool or runlog.ActivityText.
+	Activity string `json:"activity"`
+	// TS is when attach read the line, not when the session wrote it: codex
+	// and agy stamp no line, and one clock across runners keeps the entries
+	// of items running at once in the order they were read.
+	TS    string `json:"ts"`
+	Drive string `json:"drive"`
+	ID    string `json:"id"`
+	Stage string `json:"stage"`
+	Tool  string `json:"tool,omitempty"`
+	Text  string `json:"text"`
+}
+
+// sessionLog is the file a stage event's log names, which displayPath wrote
+// relative to the project root or under ~/.
+func sessionLog(root, log string) string {
+	if rest, ok := strings.CutPrefix(log, "~/"); ok {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, rest)
+		}
+	}
+	if filepath.IsAbs(log) {
+		return log
+	}
+	return filepath.Join(root, log)
+}
+
+// sessionTail is one session log attach follows, by offset as follow reads the
+// event file. broken is a log that would not read, reported once and then
+// left alone.
+type sessionTail struct {
+	id, stage, path string
+	off             int64
+	buf             []byte
+	broken          bool
+}
+
+// attacher is attach's state across the event file and the session logs it
+// opened from it.
+type attacher struct {
+	f        followed
+	out, err io.Writer
+	json     bool
+	session  bool
+	item     string
+	since    time.Time
+	// replayTo is the event file's size when attach started. A stage event
+	// within it launched a session that may have finished long ago, so its log
+	// waits in pending until the replay is read: an item with a later event
+	// finished it, and the rest are live only if the drive still runs.
+	replayTo int64
+	read     int64
+	live     bool
+	tails    map[string]*sessionTail
+	pending  map[string]*sessionTail
+}
+
+func newAttacher(f followed, out, errw io.Writer) *attacher {
+	a := &attacher{
+		f: f, out: out, err: errw,
+		json: attachJSON, session: attachSession, item: attachItem,
+		tails: map[string]*sessionTail{}, pending: map[string]*sessionTail{},
+	}
+	if info, err := os.Stat(f.events); err == nil {
+		a.replayTo = info.Size()
+	}
+	return a
+}
+
+// event prints one drive event, after closing whatever session of the same
+// item it ends: the next event of an item is the end of its session's
+// activity, so that log is read once more to its last line and dropped.
+func (a *attacher) event(line []byte, end int64, e DriveEvent) {
+	a.read = end
+	if a.item != "" && !strings.EqualFold(e.ID, a.item) && e.Event != evExit {
+		return
+	}
+	switch {
+	case e.Event == evExit:
+		for _, id := range slices.Sorted(maps.Keys(a.tails)) {
+			a.stop(id)
+		}
+		clear(a.pending)
+	case e.ID != "":
+		a.stop(e.ID)
+	}
+	if !a.since.IsZero() && before(e.TS, a.since) {
+		return
+	}
+	if a.json {
+		fmt.Fprintf(a.out, "%s\n", line)
+	} else {
+		fmt.Fprintln(a.out, eventLine(e))
+	}
+	if a.session && e.Event == evStage && e.Log != "" && e.ID != "" {
+		t := &sessionTail{id: e.ID, stage: e.Stage, path: sessionLog(a.f.root, e.Log)}
+		if end <= a.replayTo {
+			a.pending[e.ID] = t
+		} else {
+			a.tails[e.ID] = t
+		}
+	}
+}
+
+func (a *attacher) stop(id string) {
+	delete(a.pending, id)
+	if t := a.tails[id]; t != nil {
+		a.poll(t)
+		delete(a.tails, id)
+	}
+}
+
+// tick reads every session log attach follows, once the replay is behind it.
+func (a *attacher) tick() {
+	if !a.live && a.read >= a.replayTo {
+		a.live = true
+		if a.f.running() {
+			maps.Copy(a.tails, a.pending)
+		}
+		clear(a.pending)
+	}
+	for _, id := range slices.Sorted(maps.Keys(a.tails)) {
+		a.poll(a.tails[id])
+	}
+}
+
+// poll prints the activity in every whole line the log gained. A log not
+// there yet is waited for; the drive names it before the runner opens it.
+func (a *attacher) poll(t *sessionTail) {
+	if t.broken {
+		return
+	}
+	chunk, _, err := readFrom(t.path, t.off)
+	if err != nil {
+		t.broken = true
+		fmt.Fprintf(a.err, "· %s: cannot read the %s session's log %s: %v; following the drive's events without it\n", t.id, t.stage, t.path, err)
+		return
+	}
+	t.off += int64(len(chunk))
+	t.buf = append(t.buf, chunk...)
+	for {
+		i := bytes.IndexByte(t.buf, '\n')
+		if i < 0 {
+			return
+		}
+		line := t.buf[:i]
+		t.buf = t.buf[i+1:]
+		for _, act := range runlog.Activities(line) {
+			a.activity(t, act)
+		}
+	}
+}
+
+func (a *attacher) activity(t *sessionTail, act runlog.Activity) {
+	if a.json {
+		b, err := json.Marshal(SessionActivity{
+			Activity: act.Kind, TS: time.Now().UTC().Format(time.RFC3339), Drive: a.f.id,
+			ID: t.id, Stage: t.stage, Tool: act.Tool, Text: act.Summary,
+		})
+		if err == nil {
+			fmt.Fprintf(a.out, "%s\n", b)
+		}
+		return
+	}
+	mark := "·"
+	if act.Kind == runlog.ActivityTool {
+		mark = ">"
+	}
+	fmt.Fprintf(a.out, "%s%s %s %s\n", activityIndent, t.id, mark, act.Summary)
+}
+
+// activityIndent puts a session's activity under the item column of
+// eventLine: a 20-rune stamp, two spaces, a 14-rune event name and a space.
+var activityIndent = strings.Repeat(" ", 37)
 
 var attachCmd = &cobra.Command{
 	Use:   "attach [drive id]",
@@ -264,20 +472,46 @@ signals the drive or writes anything it reads. A drive that stops running with
 no exit event in its file (killed, or its event file stopped taking writes)
 exits 1, and so does an id this project has no drive under.
 
+--session prints, under each stage event that launched a session, what that
+session is doing as its log grows: each tool it calls and each line of text it
+writes, one per line, prefixed with the item's id. It follows a log until the
+item's next event. Replaying a drive already under way, it reads the logs of
+sessions still running and of every session launched after; a session that
+finished before attach started keeps its stage line alone. A log that will not
+read is reported once on stderr and attach goes on with the events.
+
+--item limits the output to one item's events and the exit. An id the drive
+has not reached prints nothing until it does, since it may be enqueued later.
+
+Every event the drive emits prints, usage_warning among them: a [usage]
+notify level crossed, with the window, the percent of it left and its reset.
+A usage hold prints as paused and needs_operator with action=usage_admission,
+and the resume at the reset as resumed with the same action.
+
 --since skips events stamped before it. --json prints each line as the drive
 wrote it, the objects documented under drive --events; without it each event
-is one readable line.`,
+is one readable line. Under --json --session each activity is an object keyed
+activity rather than event, its ts the time attach read it.`,
 	Example: `  drover attach                     # the drive running here, or the latest
   drover attach D3 --json           # its events as JSON, one per line
   drover attach --since 2026-10-18T09:00:00Z
+  drover attach D8 --session --item F14   # what F14's session is doing
 
   2026-10-18T09:12:03Z  dispatched     4
   2026-10-18T09:12:03Z  stage          4 stage=implement
   2026-10-18T09:40:51Z  parked         4 park=silent detail=unknown reason="the review recorded nothing"
   2026-10-18T09:40:52Z  exit           code=0
 
+  under --session, the session's activity beneath its stage line:
+  2026-10-24T22:40:11Z  stage          F14 stage=implement
+                                       F14 > Read internal/cmd/events.go
+                                       F14 > Bash make build && make check
+                                       F14 · The verify command passes; committing.
+
   under --json, each line as the drive wrote it:
-  {"event":"exit","ts":"2026-10-18T09:40:52Z","drive":"D3","code":0}`,
+  {"event":"exit","ts":"2026-10-18T09:40:52Z","drive":"D3","code":0}
+  and under --json --session, each activity beside them:
+  {"activity":"tool","ts":"2026-10-24T22:41:02Z","drive":"D8","id":"F14","stage":"implement","tool":"Bash","text":"Bash make build && make check"}`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(c *cobra.Command, args []string) error {
 		since, err := parseSince(attachSince)
@@ -288,15 +522,11 @@ is one readable line.`,
 		if err != nil {
 			return err
 		}
-		err = f.follow(c.Context(), func(line []byte, _ int, _ int64, e DriveEvent) bool {
-			if !since.IsZero() && before(e.TS, since) {
-				return false
-			}
-			if attachJSON {
-				fmt.Fprintf(os.Stdout, "%s\n", line)
-			} else {
-				fmt.Fprintln(os.Stdout, eventLine(e))
-			}
+		a := newAttacher(f, os.Stdout, os.Stderr)
+		a.since = since
+		f.tick = a.tick
+		err = f.follow(c.Context(), func(line []byte, _ int, end int64, e DriveEvent) bool {
+			a.event(line, end, e)
 			return false
 		})
 		if errors.Is(err, context.Canceled) {
@@ -310,5 +540,7 @@ is one readable line.`,
 func init() {
 	attachCmd.Flags().StringVar(&attachSince, "since", "", "skip events stamped before this RFC 3339 time")
 	attachCmd.Flags().BoolVar(&attachJSON, "json", false, "print each event as the JSON line the drive wrote")
+	attachCmd.Flags().BoolVar(&attachSession, "session", false, "print what each running session is doing beneath its stage event")
+	attachCmd.Flags().StringVar(&attachItem, "item", "", "print only this item's events, and the exit")
 	root.AddCommand(attachCmd)
 }

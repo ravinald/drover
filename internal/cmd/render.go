@@ -162,10 +162,14 @@ func (s *session) statusReport(scoped, tracker bool, now time.Time) StatusReport
 		s.attachDrive(rows, l, now)
 	}
 	if ds := s.ledger.Drives(); len(ds) > 0 {
-		drivesRunning(ds, l, busy && err == nil)
+		s.drivesRunning(ds, l, busy && err == nil)
 		report.Drives = ds
 	}
 	report.Trends = trends(s.ledger.Rows, now, s.location(), s.window)
+	if report.Usage = s.reportUsage(now); report.Usage != nil {
+		report.LongSessions = s.longSessions(report.Usage.start, now)
+	}
+	report.RateLimit = statusRateLimit(s.readAccount(), now)
 	// Asked under the gate a tracker read answers to, so --no-tracker and a
 	// drive's render leave the forge alone. A drive's render judges the
 	// register as the drive last read it; with no rows read, the error says
@@ -219,6 +223,12 @@ func localize(rows []Row, report *StatusReport, loc *time.Location) {
 	}
 	if report.Lease != nil {
 		in(&report.Lease.Started)
+	}
+	if report.Usage != nil && report.Usage.Window != "7d" {
+		in(&report.Usage.Window)
+	}
+	if report.RateLimit != nil {
+		in(&report.RateLimit.TS)
 	}
 	for i := range report.Drives {
 		in(&report.Drives[i].Started)
@@ -486,6 +496,21 @@ func (s *session) templateFuncs(now time.Time, loc *time.Location) template.Func
 			}
 			return strconv.FormatFloat(f*100, 'f', 0, 64) + "%"
 		},
+		"tokens": func(v any) string {
+			f, ok := number(v)
+			if !ok {
+				return ""
+			}
+			return tokenCount(f)
+		},
+		"usd": func(v any) string {
+			f, ok := number(v)
+			if !ok {
+				return ""
+			}
+			return dollars(f)
+		},
+		"budget": budgetClass,
 		"num": func(v any) string {
 			f, ok := number(v)
 			if !ok {

@@ -40,7 +40,7 @@ A flag can escalate a class: `run --dry-run` is read-only, `report --save` write
 | `0` | Clean. | anything |
 | `1` | drover could not answer. Unreadable config, no such item, `gh` unreachable, a git command that failed. | anything |
 | `2` | drover ran and the project failed its own validation. | `check` |
-| `3` | drover ran and a rule it enforces refused the operation. The tree and the ledger are untouched. | `accept`, `agents`, `audit`, `close-changes`, `config`, `draft`, `drive`, `finish`, `init`, `intake`, `invariant`, `link`, `mark-merged`, `new`, `open-pr`, `projects`, `request-changes`, `resolve`, `review`, `follow-up`, `run`, `shelve`, `signoff`, `skills`, `split`, `status`, `supervise`, `unaccept`, `unmark-merged`, `unshelve`, `watch` |
+| `3` | drover ran and a rule it enforces refused the operation. The tree and the ledger are untouched. | `accept`, `agents`, `amend`, `audit`, `close-changes`, `config`, `draft`, `drive`, `finish`, `init`, `intake`, `invariant`, `link`, `mark-merged`, `new`, `open-pr`, `projects`, `request-changes`, `resolve`, `review`, `follow-up`, `run`, `shelve`, `signoff`, `skills`, `split`, `status`, `supervise`, `touch`, `unaccept`, `unmark-merged`, `unshelve`, `watch` |
 
 The distinction that matters to a wrapper is `1` against `2` and `3`. A `1` means the tool did not work and the answer is unknown. A `2` or a `3` means it worked, and what it is telling you is about your project.
 
@@ -56,11 +56,14 @@ Every refusal that exits `3`:
 | `link <id> <issue>...`                                                                                  | The project declares no `closes` key, the tracker cannot be read so the number could not be checked, or the issue is owned by a different item.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `drive [id...]`                                                                                         | `--for` and `--until` were both given, the project declares no `[run] review_runner`, the project declares no `[drive] merge_gate` and `--no-merge` was not passed, `[git] enabled` is false, the tree has no `origin` to push to, a merge gate is declared and `gh` cannot be reached, a runner the drive will launch says it is not signed in (see [Park details](#park-details)), or `--review-only` was given other than one id or beside `--enqueue`. A drive with no reviewer would merge a night's work with no review having run; one with no merge gate was asked to merge and given nothing that could say green.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `open-pr [id]`                                                                                          | `[git] enabled` is false, a `run`, `draft` or `review` holds the checkout (a `drive` does not refuse it), the project declares no `[drive] merge_gate`, `gh` cannot be reached, the merge gate did not exit 0, or the most recent review did not pass. A stale pass row refuses unless a review stage row follows it. A `findings_open` pass row reads as `passed` once a `drover close-changes` row follows both it and the audit it read, and refuses until then. With no recorded pass row, or a stale one a later review has outdated, the ledger answers the last of those, names the pass it set aside, and refuses a review stage row it cannot find, a `changes` row or a re-run after the latest review, an audit weaker than an independent `reviewed`, an item whose body still carries a sent-back block an earlier round wrote and nobody closed (`findings_open`), an item with no body digest to read the review against (`no_digest`), and one whose body changed outside drover since the last digest drover recorded (`body_edited`). `--force` overrides the merge gate and every reading of the review, and overrides none of the rest: it substitutes your judgment for drover's evidence and cannot conjure a forge, a branch or a free checkout. |
-| `split <id> --into <kind> "<title>" -f <file>`                                                          | No `-f` or `--into` was given, the file is empty, the title yields no filename, the kind names no declared namespace, the project declares no `deps` key, or the dependency would close a cycle.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `split <id> --into <kind> "<title>" -f <file>`                                                          | No `-f` or `--into` was given, the file is empty, the title yields no filename, the kind names no declared namespace, the project declares no `deps` key, the dependency would close a cycle, or both `--after` and `--before` were given.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `invariant <id> -f <file>`                                                                              | No `-f` was given, the invariant is empty, or writing it would change the count of numbered requirements.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `close-changes <id>`                                                                                    | The body carries no `## What the review sent back` section, so there is nothing to discharge; the latest review sent work back itself, so that block is current rather than closed; or writing the statement would change the count of numbered requirements.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `request-changes <id> -f <file>`                                                                        | No `-f` was given, the evidence is empty, writing it would change the count of numbered requirements, which are the contract rather than a finding, every finding in the evidence traces to an `[operator]` requirement, which no session can meet, or the item has already been sent back `[review] max_review_rounds` times.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `signoff <id> <n> <note>`                                                                               | The number is not one of the item's `[operator]` requirements, the note is empty, or `DROVER_ACTOR` is set.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `amend <id> -f <file> --reason <text>`                                                                  | No `-f` or `--reason`, the file holds no numbered list, the item is a scaffold or merged, prose splits the body's list, or `DROVER_ACTOR` is set.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `touch <id> --reason <text>`                                                                            | No `--reason`, the item is a scaffold or merged, its body matches the recorded digest, or `DROVER_ACTOR` is set.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `request-changes <id> -f <file>` (contract)                                                             | The evidence names a requirement number the body lacks, or says requirements were removed or replaced with no `amend` since the last round. Under `--over-limit` it warns and `--yes` writes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `request-changes <id> --over-limit`                                                                     | The override is the operator's and this is a session drover launched. A refusal naming its own escape is an instruction, and the cap exists to bound the party reading it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `intake <n>`                                                                                            | The issue carries no label matching a namespace, or a body already exists at that path. A follow-up adds one: it is still owned by an item the ledger does not record as merged, so that run already carries it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | every project command                                                                                   | `.drover.toml` declares no `drover_version`, or one older by a minor release than the binary, or a root-level file's `drover agents` block differs from what this binary renders. Checked before the command does anything, never inside a session drover launched, and never for agents, config, init, schema, version, help, projects or shell completion. `-I` (`--ignore-stale`) overrides. See [The release stamp](configuration.md#the-release-stamp).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -68,7 +71,7 @@ Every refusal that exits `3`:
 | `init`                                                                                                  | A `.drover.toml` is already there.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `agents --write`                                                                                        | The target file has the end marker above the begin marker.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `new <kind> <title>`                                                                                    | The kind matches no namespace, the title yields no filename, a body already sits at that path, or the project declares no `[intake] stop_marker` to make the scaffold inert.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `accept` / `unaccept`                                                                                   | The project declares no `[intake] stop_marker`, so there is no marker to accept or restore. `unaccept` also refuses an item the ledger records as merged.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `accept` / `unaccept`                                                                                   | The project declares no `[intake] stop_marker`, so there is no marker to accept or restore. `unaccept` also refuses an item the ledger records as merged. `accept` refuses a scaffold whose body cites a path or a function or type name only the branch of an unmerged item waiting on it has, unless given `--yes`. It also refuses, unless given `--yes`, a body carrying an angle-bracket placeholder or an `[intake] hold_markers` line, naming each line.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `shelve` / `unshelve`                                                                                   | The id is already on the shelf, another item declares it on `deps`, no shelf is configured, or the shelf and the backlog are one directory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `intake --list`                                                                                         | The `[register]` backend is not `github`, so there is no tracker to take anything from.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `projects --forget <root>`                                                                              | The registry never named that root, so there is no row to tombstone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -94,7 +97,7 @@ Every refusal that exits `3`:
 
 drover exports `DROVER_ACTOR=agent` into every session it launches. Two rules key on it, both exiting `3` with nothing written:
 
-- **Ten commands belong to the operator** and refuse where it is set: `accept`, `unaccept`, `signoff`, `intake`, `finish`, `mark-merged`, `unmark-merged`, `open-pr`, `drive` and `supervise`. Each certifies work somebody else has to trust, reaches a tracker other people read, or launches sessions. A supervising session may run `drive` under its policy; see [The supervisor](#the-supervisor). `drover --help` prints the reason beside each name, and every one of them carries an `Actor:` line in its own `--help`.
+- **Twelve commands belong to the operator** and refuse where it is set: `accept`, `unaccept`, `amend`, `touch`, `signoff`, `intake`, `finish`, `mark-merged`, `unmark-merged`, `open-pr`, `drive` and `supervise`. Each certifies work somebody else has to trust, reaches a tracker other people read, or launches sessions. A supervising session may run `drive` under its policy; see [The supervisor](#the-supervisor). `drover --help` prints the reason beside each name, and every one of them carries an `Actor:` line in its own `--help`.
 - **A launched session cannot launch another.** Checked before the branch switch and before the `stage` row, so the refusal keeps exit `3`'s promise that the tree and the ledger are untouched.
 
 `audit` is exempt at every level, and that is deliberate rather than an oversight: a review session is independent of the session that implemented the work, drover launched both, and one environment variable cannot tell them apart. A second one can: every launched session also carries its own id in `DROVER_SESSION`, recorded on its stage row, and `--code-by agent` resolves against those rows, so the implement session cannot record `verified` on its own code.
@@ -110,7 +113,7 @@ CI is unaffected: a job that never went through `drover run` has no `DROVER_ACTO
 - **It may run `drive`.** `drive` is the `enqueue` action, so a supervisor runs it, `--enqueue` included, while `[supervise] enqueue` is `supervisor` or `auto`, the default being `supervisor`. The sessions that drive launches get `DROVER_ACTOR=agent`, never `supervisor`, so none of them can start a drive or a supervisor. `run`, `draft --runner` and `review --runner` stay refused, and so does `supervise`.
 - **A command that is a supervised action answers to its policy.** `drive` (`enqueue`), `close-changes` (`close_changes`), `accept` (`accept`) and `request-changes --over-limit` (`override_review_limit`) run under a supervisor only when the action is at `supervisor` or `auto`, and otherwise exit `3` naming the action, its policy and that the operator owns it. The catalog and each action's ceiling are in [`[supervise]`](configuration.md#supervise).
 
-`accept`, `unaccept`, `signoff`, `intake`, `finish`, `mark-merged`, `unmark-merged`, `open-pr` and `supervise` refuse a supervisor whatever `[supervise]` says. The policy is asked first, so where both apply the refusal names the setting.
+`accept`, `unaccept`, `touch`, `signoff`, `intake`, `finish`, `mark-merged`, `unmark-merged`, `open-pr` and `supervise` refuse a supervisor whatever `[supervise]` says, and so does `amend`, the `move_requirement` action, whose ceiling is `operator`. The policy is asked first, so where both apply the refusal names the setting.
 
 ## `DROVER_ROOT`
 
@@ -173,6 +176,10 @@ Wait for it to finish, or stop it: kill 41234
 A drive reads `.drover.toml` once. `drover drive --pause` tells the drive running in this checkout to dispatch nothing more and to hold each running item at its next stage boundary: before its implement run, before its review, or before its trunk stage. An item already in its trunk stage finishes it. An item whose review passed and that is waiting for its trunk turn behind an item dispatched before it counts as held before `update_branch` for as long as it waits, and leaves the hold when its turn comes or the drive stops. Nothing parks, the drive stays up and its lease stays held, so `--enqueue` still appends to it and `status` still names it. The lease reads `"paused":true`.
 
 `drover drive --resume` checks the config and the prompt and review templates in its own process and refuses with exit `3`, asking the drive nothing, when one will not load or render. Otherwise the drive reloads them itself and runs the launch's preflight under its own flags (the reviewer, the merge gate, the origin, gh and each runner's sign-in), and a failure there is refused with exit `3` as well. Either way the drive stays paused and says why in `refused`. Once a resume takes, each held item adopts the reloaded config at its boundary, and one whose verify command changed reruns it there (see [`resumed`](#drive---events)).
+
+A [usage hold](#drive---events) pauses the drive through this same lease state, `"paused":true`, and `--resume` lifts it the same way; it also lifts on its own at its window's reset when the drive's `--for` or `--until` covers it.
+
+A running drive keeps the `.drover.toml` it started or last resumed with, and an edit made meanwhile does not apply. Before each item is dispatched and at each stage boundary, an unpaused drive compares the file on disk with the bytes it runs under, and reports a difference once per distinct content, without applying it: a stderr line `  ! config changed on disk at <mtime>: this drive still runs the .drover.toml it started with; drover drive --pause, then --resume, applies it`, naming the tables that differ (or the load error, for a file a resume would refuse), and a [`config_changed`](#drive---events) event. `drover status` says the same under the drive's `▸ also here:` line, from the lease's `config_sha256`. `--pause`, then `--resume`, applies it.
 
 The templates are read from disk at every launch whether or not the drive was paused. What a resume adds is the check before anything launches, and the `resumed` event naming what changed.
 
@@ -238,11 +245,29 @@ A drive that exits before it holds the lease (a refusal, a preflight that fails)
 **`drover attach [drive id]`** prints the drive's event file from the first line and follows it until the `exit` event, then exits `0`. With no id it follows the drive running in this checkout, else the project's latest from the ledger. Each event is one readable line by default and the drive's own JSON line under `--json`; `--since <ts>` (RFC 3339) skips events stamped before it. An interrupt stops following and leaves the drive running, since `attach` never signals the drive or writes anything it reads. An id the ledger and the lease do not name exits `1`, and so does a drive that stopped running with no `exit` event in its file, or with no file at all (one that ran before drives kept one).
 
 ```text
-2026-10-18T09:12:03Z  dispatched     4 seq=1
-2026-10-18T09:12:03Z  stage          4 stage=implement seq=2
-2026-10-18T09:40:51Z  parked         4 park=no_record detail=unknown seq=3 reason="the review recorded nothing"
-2026-10-18T09:40:52Z  exit           code=0 seq=4
+2026-10-18T09:12:02Z  started        queue=4 jobs=1 seq=1
+2026-10-18T09:12:03Z  dispatched     4 seq=2
+2026-10-18T09:12:03Z  stage          4 stage=implement seq=3
+2026-10-18T09:40:51Z  parked         4 park=no_record detail=unknown seq=4 reason="the review recorded nothing"
+2026-10-18T09:40:52Z  exit           code=0 ended=drained merged=0 parked=1 skipped=0 held=0 seq=5
 ```
+
+`--session` prints, beneath each `stage` event that carries a [`log`](#drive---events), what that session is doing as its log grows: one line per tool call or block of text, indented under the item and prefixed with its id, so items running at once under `--jobs` stay apart. `attach` follows each log by offset as it follows the event file, opened for reading only, and stops at the same item's next event, reading the log once more to its last whole line first. Replaying a drive already under way, it reads the logs of sessions still running when it started and of every session launched after; a session that finished before `attach` started keeps its `stage` line alone, so attaching to a long drive does not print hours of old logs. A log not written yet is waited for, and one that will not read is named once on stderr with the error while `attach` goes on with the events. What a line says depends on the runner: a Claude tool call is its name and the first of its `command`, `file_path`, `pattern` or `url` inputs, a codex one is a `command_execution` or `file_change` item, an agy one is the tool step it opens; Claude and codex text is each message the session writes, and agy, which streams text in fragments, yields none. Each summary is one line, cut at 160 characters with a trailing `...`.
+
+```text
+2026-10-24T22:40:11Z  stage          F14 stage=implement log=~/.cache/drover/webapp/F14-ntfy.20261024-154011.123456789.jsonl seq=7
+                                     F14 > Read internal/cmd/events.go
+                                     F14 > Bash make build && make check
+                                     F14 · The verify command passes; committing.
+```
+
+Under `--json --session` each activity is one object keyed `activity`, never `event`, so a reader filtering on `event` sees the drive's stream unchanged. `activity` is `tool` or `text`, `tool` is the tool's name on a `tool` entry alone, and `text` is the summary above. `ts` is the time `attach` read the line, not the time the session wrote it: codex and agy stamp none of their lines, and one clock across runners keeps the entries of items running at once in the order they were read.
+
+```json
+{ "activity": "tool", "ts": "2026-10-24T22:41:02Z", "drive": "D8", "id": "F14", "stage": "implement", "tool": "Bash", "text": "Bash make build && make check" }
+```
+
+`--item <id>` limits `attach`, with or without `--session`, to one item's events and the `exit`. An id the drive has not dispatched or queued is not an error, since it may be enqueued later: `attach` prints nothing for it until it appears.
 
 **`drover watch [drive id] --until <event,...>`** blocks until the drive emits one of the named events, prints that event's JSON line and exits `0`. It exits `3` when the drive exits, or stops running, without emitting one, and `1` when there is no such drive or an `--until` name is no event. Without `--after` or `--since`, only events written after `watch` starts count, so an event written between two calls is lost. `--after <seq>` counts only events whose `seq` is past it, whenever they were written: a loop passing the `seq` of the last event it handled gets each event once and misses none. `--since <ts>` counts events stamped at or after `ts`, for a person reading by time; `ts` is one second wide and two events often share one, so a loop on `--since` returns the event it handled again, and strict "after" on `ts` would drop the event beside it. The `exit` event ends a watch whenever it was written, so `watch` on a drive that already exited returns at once: `0` with that event when `--until` names `exit`, `3` otherwise. An interrupt exits `1` and leaves the drive running.
 
@@ -358,7 +383,7 @@ An object. `items` is one entry per item in backlog order; merged rows are absen
 }
 ```
 
-`lease` is [the checkout lease](#the-checkout-lease), present only while another drover command holds this tree, and `lease_error` only when drover could not name the holder: a degraded read says what it could not ask rather than reporting nobody. That covers a lease drover could not read at all and a holder that has the tree and has not written its account yet, which is why the two never appear together: one of them is always a holder drover cannot describe. `item` is absent on a lease taken over a queue rather than for one id, which is every `drive`. A `drive` names its queue instead: `queue` is the ids it holds waiting, in dispatch order, `running` the ids it has dispatched and not yet heard back from, and `jobs` its `--jobs`. It rewrites all three in the lease file as items are dispatched and finish, so another process reads them without asking the drive. A stopped drive dispatches nothing more and publishes an empty `queue`. `paused` is a drive holding its items for a resume, and `holds` each running item it holds at a stage boundary: the item, the stage it goes on to (`at`) and the verify command the stage before was told to pass. A `running` id with no hold is still inside a session, a verify command or the trunk stage. `reexec` names the binary a resumed drive re-executes onto once every running item holds, `reexec_waiting` is the line naming the running items it has waited on for more than a minute, and `handoff` is what it leaves there for the new process, present only across the `exec`. `control`, `answered` and `refused` carry [`--pause` and `--resume`](#pausing-a-drive) between processes. `closed` is a drive that takes no more ids: it stopped, or its queue ran out and it is exiting. `drive --enqueue` writes into `queue` while it is absent, and the drive takes what was appended at its next dispatch. `drive` is the running drive's id and `label` its `--label`, both written when the drive takes the lease, before reconciliation, and absent on every other holder. The table prints them after the command on the `▸ also here:` line: `drover drive D2 "night run"`, followed by `paused` while it is (`pausing` while an item is still inside a stage, `pausing to re-exec` with a `waiting:` line carrying `reexec_waiting` once that is set), and a `held:` line under it naming each held item and the stage it holds before.
+`lease` is [the checkout lease](#the-checkout-lease), present only while another drover command holds this tree, and `lease_error` only when drover could not name the holder: a degraded read says what it could not ask rather than reporting nobody. That covers a lease drover could not read at all and a holder that has the tree and has not written its account yet, which is why the two never appear together: one of them is always a holder drover cannot describe. `item` is absent on a lease taken over a queue rather than for one id, which is every `drive`. A `drive` names its queue instead: `queue` is the ids it holds waiting, in dispatch order, `running` the ids it has dispatched and not yet heard back from, and `jobs` its `--jobs`. It rewrites all three in the lease file as items are dispatched and finish, so another process reads them without asking the drive. A stopped drive dispatches nothing more and publishes an empty `queue`. `paused` is a drive holding its items for a resume, and `holds` each running item it holds at a stage boundary: the item, the stage it goes on to (`at`) and the verify command the stage before was told to pass. A `running` id with no hold is still inside a session, a verify command or the trunk stage. `reexec` names the binary a resumed drive re-executes onto once every running item holds, `reexec_waiting` is the line naming the running items it has waited on for more than a minute, and `handoff` is what it leaves there for the new process, present only across the `exec`. `control`, `answered` and `refused` carry [`--pause` and `--resume`](#pausing-a-drive) between processes. `config_sha256` is the SHA-256 of the `.drover.toml` the drive runs under, written when it takes the lease and again by each resume that takes, and `config_resumed` says a resume wrote it; when the file on disk no longer matches, the table prints `config changed since this drive started; --pause, then --resume, applies it` (`resumed`, after a resume) under the `▸ also here:` line, and the running drive in `drives` carries `"config_changed": true`. A lease an older binary wrote has no `config_sha256` and reports nothing. `closed` is a drive that takes no more ids: it stopped, or its queue ran out and it is exiting. `drive --enqueue` writes into `queue` while it is absent, and the drive takes what was appended at its next dispatch. `drive` is the running drive's id and `label` its `--label`, both written when the drive takes the lease, before reconciliation, and absent on every other holder. The table prints them after the command on the `▸ also here:` line: `drover drive D2 "night run"`, followed by `paused` while it is (`pausing` while an item is still inside a stage, `pausing to re-exec` with a `waiting:` line carrying `reexec_waiting` once that is set), and a `held:` line under it naming each held item and the stage it holds before.
 
 `drives` is every drive the ledger records, newest first, in the form [`drives --json`](#drives---json) prints, and absent before the first. The one the lease names carries `"running": true`. A row's `drive` is the drive that wrote the item's latest row carrying one, absent when no drive has touched the item, so grouping `items` by `drive` answers which items one drive ran without reading the dependency graph.
 
@@ -463,6 +488,89 @@ A metric with nothing to read in a period is `null`, never `0`. For `finished` a
 
 A row without `ts` is left out of every trend, since its time is a day in the writer's zone and placing it on a day of another zone would guess. Drive's own rows (`"id":"drive"`) are left out too. A tombstone (`"merged":false`) withdraws the finish before it. `review_passes` counts review launches drover resolved a runner for, so a project that pipes `drover review` reads `null` there rather than a count of zero. `verify` covers the runs drive makes itself, on an updated tree and after a resume that changed `[verify]`; the verify command a session runs inside its own run writes no row drover can time.
 
+#### usage
+
+`usage` on an item and on the report, and `long_sessions` on the report, read the ledger's [usage rows](#writing-to-the-ledger-without-the-binary). The counts are tokens as the API reported them, not the subscription's quota accounting, and `cost_usd` is list price, not what a subscription charged. `weighted` is `input + output + cache_create + 0.1 * cache_read`, computed when status reads the rows and never stored: it ranks which item, stage or session consumed the most, and it is not how the service counts against a limit.
+
+```json
+{
+  "items": [
+    {
+      "id": "F193",
+      "usage": {
+        "runs": 7,
+        "tokens": {
+          "input": 2100,
+          "output": 310000,
+          "cache_create": 2400000,
+          "cache_read": 98000000
+        },
+        "weighted": 12512100,
+        "cost_usd": 61.4
+      }
+    }
+  ],
+  "usage": {
+    "window": "2026-10-17T20:00:00-07:00",
+    "runs": 9,
+    "tokens": {
+      "input": 3000,
+      "output": 540000,
+      "cache_create": 4100000,
+      "cache_read": 170000000
+    },
+    "weighted": 21643000,
+    "cost_usd": 104.2,
+    "by_stage": {
+      "implement": {
+        "runs": 5,
+        "tokens": {
+          "input": 2100,
+          "output": 310000,
+          "cache_create": 2400000,
+          "cache_read": 98000000
+        },
+        "weighted": 12512100,
+        "cost_usd": 61.4
+      },
+      "interactive": {
+        "runs": 4,
+        "tokens": {
+          "input": 900,
+          "output": 230000,
+          "cache_create": 1700000,
+          "cache_read": 72000000
+        },
+        "weighted": 9130900,
+        "cost_usd": 42.8
+      }
+    },
+    "budget": 600000000,
+    "budget_used": 0.62,
+    "budget_unread": [
+      "capy (/src/capy): open /src/capy/docs-internal/ledger.jsonl: permission denied"
+    ]
+  },
+  "long_sessions": [
+    {
+      "session_id": "5f1c0e2a",
+      "source": "interactive",
+      "id": "",
+      "hours": 424.3,
+      "context_max": 965000,
+      "weighted": 48210000,
+      "reason": "open 17d 16h, past 24h; context reached 965K, past 400K"
+    }
+  ]
+}
+```
+
+An item's `usage` sums every usage row whose `id` names it, all time: `runs` is how many rows, `tokens` the four counts added up, `weighted` the formula over those sums, rounded, and `cost_usd` the rows' list prices added up. An item no usage row names has no `usage` key, never a zero object, because nothing measured is a different answer from nothing spent.
+
+The report's `usage` holds the same four totals over every usage row of this project whose `ts` falls in the window, the rows naming no item included, which is where an interactive session lands. `window` is `"7d"`, the 7 days before the report's `now`, or with [`[usage] reset`](configuration.md#usage) set, the RFC 3339 time of the last reset, which the window runs from to `now`. `by_stage` holds the totals per stage (`implement`, `review`, `draft`), with a row no stage launched under `interactive`. `budget` and `budget_used` are present only when [`[usage] weekly_budget`](configuration.md#usage) is set: `budget` is that figure and `budget_used` a fraction, the weighted total of every usage row in the window across every project in the [per-user registry](#projects---json), over it. The limit is per account, so this project's own `weighted` is not the number measured against it. Each ledger is counted once, however many registered roots reach it. `budget_unread` names each registered project whose config or ledger would not read, which the fraction then leaves out rather than counting as zero; it is absent when every one read. A ledger with no usage row has no `usage` key.
+
+`long_sessions` is every session with a usage row in the window whose rows, taken together, span more than [`[usage] session_max_hours`](configuration.md#usage) (24 unless set) or reach a `context_max` past [`[usage] context_warn`](configuration.md#usage) (400000 unless set). The span runs from the earliest of the rows' `started`, `first_ts` and `ts` minus `duration_ms`, to the latest `ts`. `hours` is that span to one decimal, `context_max` the largest of the rows' and `weighted` the session's whole total, all of its rows, not only the window's; `id` is the item a row names, `""` for an interactive session. `reason` says which threshold it passed, in words a view prints as they are. The list is sorted by `weighted`, largest first. It is `[]` when the ledger holds usage rows and no session qualifies, and absent with no usage row at all.
+
 ### `status --template`
 
 `drover status --template <file>` renders the object `status --json` emits through a Go [`text/template`](https://pkg.go.dev/text/template) instead of the table. The template reads the same field names `--json` does, lowercase and underscored (`.items`, `.id`, `.stage_started`, `.pr.number`, `.deps`, `.blocks`, `.drive`, `.drives`, `.trends`), plus `now`, the time of the render, [`attention`](#attention), `zone` (the zone's name, such as `America/Los_Angeles`), `project`, `version` (the drover binary's) and `refresh` ([`[status] refresh`](configuration.md#status)) and `index` ([`[status] index`](configuration.md#status), an empty string when unset). Numbers are JSON numbers and every time is an RFC 3339 string in [`[status] timezone`](configuration.md#status), `now` included, or in the zone `--tz` names. A field the JSON omits is absent from the template's data too: test it with `with` or `or` rather than printing it, or the output says `<no value>`. `--all`, `--sev` and `--by-sev` scope the items as they do for `--json`, and `--template` is refused together with `--json`. `--template builtin:<name>` renders a template drover ships rather than a file: see [Built-in templates](#built-in-templates).
@@ -507,6 +615,9 @@ Each function takes the field as `--json` carries it and returns a string. An ab
 | `secs`   | `{{secs .trends.total.cycle_time.median}}` on 23400  | `6h 30m`                                                     |
 | `pct`    | `{{pct .trends.total.changes_rate.value}}` on 0.25    | `25%`                                                        |
 | `num`    | `{{num .trends.total.review_passes.value}}` on 1.333 | `1.333`                                                      |
+| `tokens` | `{{tokens .usage.weighted}}` on 12512100             | `12.5M`                                                      |
+| `usd`    | `{{usd .usage.cost_usd}}` on 1234.56                 | `$1,235`                                                     |
+| `budget` | `{{budget .usage.budget_used}}` on 0.85              | `warning`                                                    |
 
 `class` maps a state, a park reason or an audit level to one of nine names a stylesheet or a callout can key on: `ready`, `running`, `blocked`, `parked`, `scaffold`, `done`, `broken`, `needs-operator`, `unaudited`. `implemented` is `running`, since the work is in flight and not merged. The levels `claimed`, `reviewed` and `verified` are `done`, and `UNAUDITED` is `unaudited`. Any other value is a park reason: `needs-operator` when the [supervise](configuration.md#supervise) action that owns it is at `operator` policy (`trunk_red` by default), and `parked` otherwise. An absent value is `""`, so `{{class .park}}` on an item nothing parked adds no class. Pass `.stage` to nothing here: a stage is not one of these vocabularies, and `class` reads it as a park reason. An [`attention`](#attention) `kind` reads as its own class, with `needs_operator` as `needs-operator`; `follow-up` has none.
 
@@ -519,6 +630,8 @@ Each function takes the field as `--json` carries it and returns a string. An ab
 `groups` and `done` return lists rather than strings, for the two views a template cannot build with `range` and `if` alone. `groups` drops merged items and returns one entry per drive, in the order `drives` lists them, then one with an empty `drive` for the items no listed drive ran. Each entry carries `drive`, `label` and `states`, and each of `states` carries a `state`, its `class` and the `items` in it, in backlog order. `state` is the word to print and `class` the name to style it with, and the two differ: an `implemented` group has state `implemented` and class `running`. An item whose id is in the lease's `running` list has state `running`, whatever its backlog state or park, so the Open list agrees with the running drive. Pass `.lease` as the third argument; with no lease, every item keeps its backlog state. The states come in a fixed order, what waits on a person first: `needs-operator`, `parked`, `broken`, `running`, `implemented`, `ready`, `blocked`, `scaffold`. An item a park stands on takes the park's class as its state, `parked` or `needs-operator`, so it sits with the other parks rather than among the ready items. `done` is every merged item, newest `finished` first, and an item with no `finished` last.
 
 `spark` draws one [`trends`](#trends) metric across `.trends.days` as an inline `<svg>` of 120 by 24 with the class `spark`: the second argument names the metric and the third the value inside it (`value`, `median`, `p90` or `n`). A day the metric is `null` on is a gap in the line rather than a point at zero, and a value standing alone between gaps is a dot. The markup holds numbers and the two names alone, uses no script and fetches nothing, and `html/template` places it unescaped. `secs` prints seconds in their two largest units (`42s`, `14m 5s`, `6h 30m`, `3d 2h`), `pct` a share as a whole percentage, and `num` a number with no trailing zeros. All three give `""` for a `null`, so test a metric with `with` and print `n/a` in the `else`.
+
+`tokens` prints a count in its largest unit with one decimal at most, trailing `.0` dropped: `840`, `1.3K`, `840K`, `12.5M`, `1.2B`. A value that rounds to the next unit's 1000 is written in that unit, so 999,950 is `1M`, and nothing goes past `B`. `usd` prints a figure as whole dollars, rounded, with thousands separators: `$0`, `$999`, `$1,235`. Both read counts and list prices, so the caveat on [`usage`](#usage) holds for what they print: tokens, not the subscription's quota, and list price, not what a subscription charged. `budget` is the class a `budget_used` fraction is styled with, `warning` from 0.8, `critical` from 1.0 and `""` below, which the built-in templates and `drover status --print-css obsidian` style in the warning and critical colors.
 
 `md` escapes a string for a Markdown table cell: a backslash doubles, `|` becomes `\|`, and a line break becomes a space. `html` escapes `<`, `>`, `&`, `'` and `"`. `esc` escapes only `<`, `>` and `&`, which is what Markdown needs to keep a value from opening a tag or an entity: Obsidian shows `html`'s `&#39;` as typed, so a title reading "place's" would read "place&#39;s".
 
@@ -801,7 +914,7 @@ Stdout carries the document and nothing else. Every count, warning and summary g
 
 Each park is said on stderr the moment it happens, before the next item starts, as an indented `! <id> parked <park> at <head>: <first line of the reason>`. `<head>` is the branch's commit, shortened, or `no head` where the branch has none. The summary after the queue drains repeats every park; the line is what an operator watching `--follow` sees in time to act on it.
 
-`outcome` is one of `ready_to_merge`, `merged_by_drover`, `merged_immediately`, `parked` or `skipped`. Where the trunk has required status checks, drive asks the forge to merge with `--auto`, so the merge completes after drive has moved on and the next drive's reconciliation records it; that item reads `ready_to_merge` with `merged`, and stderr says the merge is queued. drive learns whether the trunk has required checks by reading `repos/{owner}/{repo}/branches/<trunk>/protection/required_status_checks` once per drive. Where `[drive] merge_gate` is declared and that read answers no required checks (404, or 403 on a plan that cannot protect the branch) or fails, drive skips `--auto` and merges on the merge gate's word, as `merged_by_drover` below, and says why on stderr. `merged` is the field that says drive asked, and it is absent on an item nothing merged: a park, a branch `protected_paths` refused, or a run under `--no-merge`.
+`outcome` is one of `ready_to_merge`, `merged_by_drover`, `merged_immediately`, `parked`, `skipped` or `held`. `held` is an item a [usage hold](#drive---events) kept from starting or finishing when the drive's `--for` or `--until` arrived first: the drive exits 0, `reason` names the hold, nothing parked and no park row is written, and the next drive picks the item up. Where the trunk has required status checks, drive asks the forge to merge with `--auto`, so the merge completes after drive has moved on and the next drive's reconciliation records it; that item reads `ready_to_merge` with `merged`, and stderr says the merge is queued. drive learns whether the trunk has required checks by reading `repos/{owner}/{repo}/branches/<trunk>/protection/required_status_checks` once per drive. Where `[drive] merge_gate` is declared and that read answers no required checks (404, or 403 on a plan that cannot protect the branch) or fails, drive skips `--auto` and merges on the merge gate's word, as `merged_by_drover` below, and says why on stderr. `merged` is the field that says drive asked, and it is absent on an item nothing merged: a park, a branch `protected_paths` refused, or a run under `--no-merge`.
 
 `gh pr merge --auto` also succeeds when the forge merges on the spot because nothing waits, so drive asks the forge afterwards whether the pull request merged. One that did reads `merged_immediately`, with `merged`, `pr`, and `finished` once drive finishes it in the same drive. With `[drive] merge_gate` declared, the merge gate then reads the merged head first; a refusal cannot undo the merge, so the item is left unfinished, the reason names the pull request and the merge gate's last lines, and the drive stops. A merge state drive cannot read leaves the item `ready_to_merge`, with a reason saying the next drive's reconciliation decides it.
 
@@ -842,13 +955,13 @@ Reconciliation runs before the queue is read, only over a clean tree, and finish
 
 Reconciliation refuses a finish that would leave the tree dirty, before `finish` writes anything, and the refusal ends the drive with exit 3 whether or not any item is drivable: no completion row is written, nothing switches, and the `reconciled:` line counts the items it finished before the stop. It refuses when `git status --porcelain` reports any path before the finish, and when the ledger row or the report `finish` is about to write is a path git does not ignore inside the Git worktree the checkout changes (not the directory holding `.drover.toml`). A path outside that worktree, or one git ignores, is exempt. Which path counts depends on how `finish` writes it. The ledger is appended to, so every symlink resolves, a dangling one included, because opening it creates the file it names. The report is written to a temporary file and renamed over its path, so its directories resolve and the final entry does not: a tracked report symlink is replaced where it stands, however far outside the worktree it pointed. A failed `git status`, `git check-ignore` or symlink resolution stops the drive with exit 1 rather than reading as clean.
 
-`park` is the machine-readable cause and `reason` the sentence for a person. Two fields because a wrapper keying on prose breaks the day somebody rewords an error. The causes are `died`, `runner_fault`, `unreadable`, `no_record`, `findings_open`, `no_digest`, `body_edited`, `at_limit`, `repeating`, `implement_died`, `implement_unreadable`, `uncommitted_work`, `worktree_failed`, `no_commits`, `gate_refused`, `gate_unrunnable`, `forge_down`, `trunk_conflict`, `trunk_red`, `infra_failure`, `protected_paths`, `deny_unreadable`, `awaiting_signoff`, `push_failed`, `open_pr_failed`, `blocked_on_deps`, `ledger_unwritable`, `merge_failed`, `branch_failed`, `interrupted` and `stopped`; a `skipped` item carries the state that skipped it instead, one of `merged`, `scaffold`, `blocked` or `broken`.
+`park` is the machine-readable cause and `reason` the sentence for a person. Two fields because a wrapper keying on prose breaks the day somebody rewords an error. The causes are `died`, `runner_fault`, `unreadable`, `no_record`, `findings_open`, `no_digest`, `body_edited`, `at_limit`, `repeating`, `implement_died`, `implement_unreadable`, `uncommitted_work`, `worktree_failed`, `no_commits`, `gate_refused`, `gate_unrunnable`, `forge_down`, `trunk_conflict`, `trunk_red`, `infra_failure`, `protected_paths`, `deny_unreadable`, `awaiting_signoff`, `push_failed`, `open_pr_failed`, `blocked_on_deps`, `hand_edited`, `ledger_unwritable`, `merge_failed`, `branch_failed`, `interrupted` and `stopped`; a `skipped` item carries the state that skipped it instead, one of `merged`, `scaffold`, `blocked` or `broken`.
 
 `body_edited` compares the item file's exact bytes, with no whitespace normalization. A formatter, an editor's format-on-save or a snapshot hook that rewrites the body during a review counts as an edit and parks the pass `body_edited`: a normalization rule would be a set of edits drover chose to trust without seeing them.
 
 `pr` is the pull request drover opened for the item, and it is absent wherever none exists. Only a green `[drive] merge_gate` on a review that passed opens one, so every park before that point reports none; `blocked_on_deps`, `awaiting_signoff` and `protected_paths` report one, because each is a branch a human merges and a human needs something to merge. A zero on an item that reached the forge means `gh` printed a URL drover could not read a number out of, which is not a failure: the pull request is open either way.
 
-`gate_refused` with no `pr` is the merge gate blaming the diff before any pull request opened, and its output goes back to the branch; with a `pr` it is the merge gate refusing at the merge, when the forge has no auto-merge, and the reason carries the merge gate's last lines. `gate_refused` with `update_branch.verify` `failed` is the item's own verify command failing on the branch merged with the trunk while the trunk alone passes: the merge commit is pushed, the send-back opens with the trunk range drive merged and carries the verify command's output, and it counts against `max_review_rounds` as a round. `trunk_conflict` is a trunk that moved since the branch was pushed and would not merge into it: the reason names the conflicted files, the merge is aborted and nothing is pushed. `trunk_red` is a trunk that fails the item's verify command on its own, which no item can fix: the reason names the trunk commit and the verify command's last lines, nothing is sent back or pushed, the local branch drops the merge, and the drive stops. A pull request already open stays open. `trunk_red` is also a red check on the head that concluded failure on the trunk's latest completed run of the same check: the reason names the check and that run's URL, the merge gate does not run, nothing is sent back, and the drive stops. `infra_failure` is a check that failed on the forge's infrastructure while `rerun_infra_failure` is below `auto`, so drive did not rerun it: the reason names each check and the log line that marked it; the queue goes on. Once the queue drains, and only when the drive is not stopping, drive reads the checks on that head once more. Where every one completed `success`, `neutral` or `skipped` and the branch still points there, it records a `green` check row and sends the item through the merge gate and the merge it would have taken, and the item is reported a second time with its new outcome; otherwise stderr says `checks on <head> still red at the end of the drive; left parked`. `forge_down` on a head no workflow reported on within `[forge] checks_wait` opens its reason with `no workflow ran on this head`, because the fix is CI that fires on a branch push rather than a failing check. See [`[forge]`](configuration.md#forge) for how each red check is classified. `merge_failed` is any refusal from `gh pr merge` other than the auto-merge one, and every auto-merge refusal in a project with no `[drive] merge_gate`.
+`gate_refused` with no `pr` is the merge gate blaming the diff before any pull request opened, and its output goes back to the branch. Where a red check drive read as `code` sits under that refusal, the reason reads `<check> failed: <first line>`, the `detail` is `code`, `evidence` holds up to 5 lines its job log says failed (see [`[forge]`](configuration.md#forge)), and the body sent back adds those lines and the check's URL under the merge gate's output, so the next run starts from the failure rather than a check name; with a `pr` it is the merge gate refusing at the merge, when the forge has no auto-merge, and the reason carries the merge gate's last lines. `gate_refused` with `update_branch.verify` `failed` is the item's own verify command failing on the branch merged with the trunk while the trunk alone passes: the merge commit is pushed, the send-back opens with the trunk range drive merged and carries the verify command's output, and it counts against `max_review_rounds` as a round. `trunk_conflict` is a trunk that moved since the branch was pushed and would not merge into it: the reason names the conflicted files, the merge is aborted and nothing is pushed. `trunk_red` is a trunk that fails the item's verify command on its own, which no item can fix: the reason names the trunk commit and the verify command's last lines, nothing is sent back or pushed, the local branch drops the merge, and the drive stops. A pull request already open stays open. `trunk_red` is also a red check on the head that concluded failure on the trunk's latest completed run of the same check: the reason names the check and that run's URL, the merge gate does not run, nothing is sent back, and the drive stops. `infra_failure` is a check that failed on the forge's infrastructure while `rerun_infra_failure` is below `auto`, so drive did not rerun it: the reason names each check and the log line that marked it; the queue goes on. Once the queue drains, and only when the drive is not stopping, drive reads the checks on that head once more. Where every one completed `success`, `neutral` or `skipped` and the branch still points there, it records a `green` check row and sends the item through the merge gate and the merge it would have taken, and the item is reported a second time with its new outcome; otherwise stderr says `checks on <head> still red at the end of the drive; left parked`. `forge_down` on a head no workflow reported on within `[forge] checks_wait` opens its reason with `no workflow ran on this head`, because the fix is CI that fires on a branch push rather than a failing check. See [`[forge]`](configuration.md#forge) for how each red check is classified. `merge_failed` is any refusal from `gh pr merge` other than the auto-merge one, and every auto-merge refusal in a project with no `[drive] merge_gate`.
 
 `push_failed` is a rejected `git push`, which drover never forces past and never retries with `--no-verify`: a branch can carry a human's commits, and a pre-push hook is the project's own check on what leaves the machine. `blocked_on_deps` is a `SPLIT-OUT` the review filed during the drive, since `drover split` rewrites the `deps` line and leaves the item waiting on work nobody has accepted. `ledger_unwritable` is a ledger that refused the pass row, which parks rather than merging on a result nothing can read back.
 
@@ -868,7 +981,7 @@ Nothing is stashed, reset or cleaned on the operator's behalf: only they know wh
 
 `runner_fault` is the runner reporting about itself rather than about the work: the service was unreachable, the account is out of budget, or the runner holds no credentials the service accepts. It is read off the terminal event, structurally where a runner offers structure and out of the failure's own message otherwise, and the three are answered differently. A transient failure is retried twice, backing off 45 seconds then 90. A quota is waited out only when the runner named the instant it serves again _and_ that instant falls inside the drive's own `--for` or `--until`: those flags are the operator saying how long this drive may own the terminal, and an unbounded drive has no such grant to spend. An unauthenticated runner is never waited on, because no reset repairs it. Everything left parks, quoting what the runner said and naming the log. Both stages check it, so a run that faulted before it touched the work never reaches a push, a review or a captured report.
 
-`findings_open`, `body_edited` and `no_digest` are the three ways an audit with nothing sent back fails to read as a clean pass. A review that records its audit and then writes its findings into the item body by hand leaves an audit row and no `changes` row, which reads the same as a review that found nothing. The body tells them apart. The review's stage row carries a 12-hex digest of the item file as the session launched, frontmatter included, and every drover command that writes an item body appends a body row carrying the digest of what it wrote: `request-changes`, `close-changes`, `invariant`, `link`, `resolve --link`, `split` (for the item it splits, not the scaffold), `accept` and `unaccept`. When the review ends, `drive` digests the file again and compares it with the latest recorded digest. The digest ignores spaces, tabs, carriage returns and newlines at the end of the file, because a final newline an editor or a snapshot hook adds is nobody's edit; a rewrapped paragraph or one changed word still moves it. A row recorded before that rule holds the digest of the exact bytes, and either form matches. A match is `passed` and goes on to the merge gate, on the first review as on any later one. A difference is `body_edited`: the body changed outside drover after the review launched, so findings written into it by hand cannot be told from a clean pass, and the park names both digests. Diff the body against its history, then `drover request-changes <id> -f <file>` the findings properly, or `drover open-pr <id> --force` if the change was not a finding. A block deleted by hand reads the same as findings written by hand: `drover close-changes <id>` is how a closed block is discharged without moving the digest. An item sent back before is no exception: an earlier send-back says nothing about whether this pass wrote its findings down.
+`findings_open`, `body_edited` and `no_digest` are the three ways an audit with nothing sent back fails to read as a clean pass. A review that records its audit and then writes its findings into the item body by hand leaves an audit row and no `changes` row, which reads the same as a review that found nothing. The body tells them apart. The review's stage row carries a 12-hex digest of the item file as the session launched, frontmatter included, and every drover command that writes an item body appends a body row carrying the digest of what it wrote: `request-changes`, `close-changes`, `invariant`, `link`, `resolve --link`, `split` (for the item it splits, not the scaffold), `accept`, `unaccept`, `amend` and `touch`. When the review ends, `drive` digests the file again and compares it with the latest recorded digest. The digest ignores spaces, tabs, carriage returns and newlines at the end of the file, because a final newline an editor or a snapshot hook adds is nobody's edit; a rewrapped paragraph or one changed word still moves it. A row recorded before that rule holds the digest of the exact bytes, and either form matches. A match is `passed` and goes on to the merge gate, on the first review as on any later one. A difference is `body_edited`: the body changed outside drover after the review launched, so findings written into it by hand cannot be told from a clean pass, and the park names both digests. Diff the body against its history, then `drover request-changes <id> -f <file>` the findings properly, or `drover open-pr <id> --force` if the change was not a finding. An edit made before the drive is caught earlier: `drover check` reports it `HAND EDITED` and `drive` parks the item `hand_edited` before any session, until `drover amend` or `drover touch` records it. A block deleted by hand reads the same as findings written by hand: `drover close-changes <id>` is how a closed block is discharged without moving the digest. An item sent back before is no exception: an earlier send-back says nothing about whether this pass wrote its findings down.
 
 `findings_open` is read before the other two. A review that finds the block an earlier round wrote under `## What the review sent back` still open, and records its audit without sending anything back, leaves the block in place and the digest where drover left it: the rows of a clean pass over a body that says the opposite. Any block that is not the statement `drover close-changes` writes parks the pass as `findings_open`, whether or not a digest exists. It parks rather than running the item again, because no `changes` row was written and `[review] max_review_rounds` would never count the round. `drover request-changes <id> -f <file>` if the findings are still open, `drover close-changes <id>` if they are closed.
 
@@ -898,9 +1011,10 @@ The `findings_open` park reason names the follow-up for that item, chosen from t
 | `tool_denied`             | The terminal event's denials (claude's `permission_denials`, agy's `denied_actions`)                                            | `the runner denied <tools>`                                                     |
 | `push_hook`               | A refused `git push` in a tree whose pre-push hook would have run, with no rejection from the remote                            | The hook (its config name, or its path) and the first line of the push's output |
 | `push_network`            | A `git push` whose output names the transport failing (`closed by remote host`, `Could not resolve host`, `Connection refused`) | That line                                                                       |
+| `code`                    | A `gate_refused` park whose merge gate refused over a red check drive read as `code`, rather than any session log               | Up to 5 lines the check's job log says failed                                   |
 | `unknown`                 | None of the above                                                                                                               | The log's last 5 lines, or the push's                                           |
 
-The order of the rows is the order they are read in. A park that comes after a clean session (`gate_refused`, `at_limit`, `protected_paths`) reads `unknown` with the last lines of the last log the item wrote, since nothing under it failed; the `reason` carries the cause. A park before any launch says no session ran.
+The order of the rows is the order they are read in. A park that comes after a clean session (`gate_refused` with no `code` check under it, `at_limit`, `protected_paths`) reads `unknown` with the last lines of the last log the item wrote, since nothing under it failed; the `reason` carries the cause. A park before any launch says no session ran.
 
 A session that leaves a process it started running is not counted as clean, whatever its terminal event says: the implement run parks `implement_died` and a review reads `died`. The prompt tells every session to run its verify command in the foreground.
 
@@ -914,9 +1028,54 @@ A `push_failed` park with `push_hook` belongs to `push_refused_by_hook`, which s
 
 `forge_down` and `runner_fault` are the two parks that end the drive rather than the item, and `drive` then exits 1. A trunk that did not receive this merge is the trunk every later item builds on; a service that is down and an account with nothing left in it are true of the next item as well, and walking the queue anyway spends a branch, a push and two dead sessions per item to rediscover it.
 
+#### rate_limit
+
+`rate_limit` is the newest reading Claude Code left on a usage row of any project in the [per-user registry](#projects---json), this one included, because the limit is the account's. It is absent when no usage row carries a reading, which is every ledger written only by codex or agy.
+
+```json
+{
+  "rate_limit": {
+    "reading": {
+      "status": "allowed_warning",
+      "rate_limit_type": "seven_day",
+      "resets_at": 1792983600,
+      "five_hour": { "utilization": 0.09, "resets_at": 1792747800 },
+      "seven_day": { "utilization": 0.79, "resets_at": 1792983600 },
+      "overage_status": "rejected",
+      "overage_disabled_reason": "org_level_disabled"
+    },
+    "project": "drover",
+    "ts": "2026-10-22T14:03:11-07:00",
+    "remaining": { "weekly": 21, "five_hour": 91 },
+    "overage": false
+  }
+}
+```
+
+`reading` is the usage row's [`rate_limit`](#writing-to-the-ledger-without-the-binary) as written, `project` the registered project whose row it is and `ts` that row's time, in the report's zone. `remaining` is the percent of each window left now, `100 - utilization * 100`: the reading's own figure until that window's `resets_at` passes, and 100 after it, since the account has started over. `overage` is true while sessions draw on purchased credit (the weekly window `rejected` with `is_using_overage`). `unread` names each registered project whose ledger would not read, when one would not, so a reading older than one in that ledger is not mistaken for the newest. `status` without `--json` prints the same reading as one footer line:
+
+```
+account: weekly 21% left, five-hour 91% left, not on purchased credit, week resets Sun Oct 25 20:00 PDT (read Oct 22 14:03 in drover)
+```
+
 ### `drive --events`
 
-`drive --json --events` writes, beside each item's report, one event object per line as things happen. Every event carries `event`, which no item report has, so a reader splits the stream on that key. Every event also carries `ts` (RFC 3339, UTC), `drive` (the drive's id, taken with the lease; absent only on the `exit` of a drive whose id would not allocate because the ledger would not open), `seq` (the event's line in the drive's event file, from 1, and the cursor [`watch --after`](#detaching-from-a-drive) takes; absent where `drive` is), `id` where one item is meant, and `action` where a [`[supervise]`](configuration.md#supervise) catalog action produced it. `--events` without `--json` refuses with exit `3`. The same objects go to the drive's event file whatever the flags; see [Detaching from a drive](#detaching-from-a-drive).
+`drive --json --events` writes, beside each item's report, one event object per line as things happen. Every event carries `event`, which no item report has, so a reader splits the stream on that key. Every event also carries `ts` (RFC 3339, UTC), `drive` (the drive's id, taken with the lease; absent only on the `exit` of a drive whose id would not allocate because the ledger would not open), `seq` (the event's line in the drive's event file, from 1, and the cursor [`watch --after`](#detaching-from-a-drive) takes; absent where `drive` is), `project` (the project's name as [`drover projects`](#projects---json) lists it, so a notifier serving several projects reads it rather than working it out from its directory), `id` where one item is meant, and `action` where a [`[supervise]`](configuration.md#supervise) catalog action produced it. `--events` without `--json` refuses with exit `3`. The same objects go to the drive's event file whatever the flags; see [Detaching from a drive](#detaching-from-a-drive).
+
+`started`: the drive holds its lease and has read its queue, before anything is dispatched. `queue` is the ids it will run, in order, `jobs` its `--jobs`, and `deadline` the instant `--for` or `--until` bounds it at, in local time; `deadline` is absent on an unbounded drive. A drive whose queue is empty, and one [re-executed onto a new binary](#resuming-onto-a-new-binary), emits none.
+
+```json
+{
+  "event": "started",
+  "ts": "2026-10-24T17:31:04Z",
+  "seq": 1,
+  "drive": "D10",
+  "project": "drover",
+  "queue": ["B89", "E71", "F14", "E72"],
+  "jobs": 2,
+  "deadline": "2026-10-24T19:31:04-07:00"
+}
+```
 
 `queued`: an id `drive --enqueue` appended to this drive was taken into its queue. `position` is its place among the items waiting, from 1. `action` is `enqueue`.
 
@@ -933,8 +1092,10 @@ A `push_failed` park with `push_hook` belongs to `push_refused_by_hook`, which s
 `stage`: an item reached a step. `stage` is one of `implement`, `review`, `update_branch`, `gate`, `pr`, `merge` or `finish`. The trunk steps (`update_branch` through `finish`) can repeat for one item, because the merge fallback updates the branch and runs the merge gate again at the head it merges.
 
 ```json
-{ "event": "stage", "ts": "2026-10-16T22:00:01Z", "id": "E36", "stage": "implement" }
+{ "event": "stage", "ts": "2026-10-16T22:00:01Z", "id": "E36", "stage": "implement", "log": "~/.cache/drover/webapp/E36-retry.20261016-150001.123456789.jsonl" }
 ```
+
+An `implement` or `review` stage launches a session and carries `log`: the session log's path as the launch banner prints it, relative to the project root or under `~/`, chosen before the event and the file the runner writes. A relaunch after a transient fault (an overloaded service, an exhausted account) writes a log of its own and emits a `stage` of its own. The trunk steps launch no session and carry no `log`. [`attach --session`](#detaching-from-a-drive) follows it.
 
 An `update_branch` for another item's open pull request, after a merge or under `--update-branches`, arrives once its branch update is done and carries `result`, `branch` and `pr`. `result` is an `update_branch.verify` word (`passed`, `failed`, `sequence`, `trunk_red`, `skipped`, `unrunnable`), or `up_to_date` (the branch already held the trunk), `conflict`, or `kept` (not attempted, `reason` says why).
 
@@ -967,7 +1128,7 @@ The branch update drive makes before an item's own implement session, or its `--
 }
 ```
 
-`parked`: an item stopped. `park`, `reason` and `detail` are the fields the item's report carries; key on `park`. Where a catalog action owns the park, `action` names it and `policy` says who handles it in this project.
+`parked`: an item stopped. `park`, `reason`, `detail` and `evidence` are the fields the item's report carries; key on `park`. For `gate_refused` over a `code` check, `evidence` is the lines its job log says failed, one per line, the same lines `drover show` prints under the park. Where a catalog action owns the park, `action` names it and `policy` says who handles it in this project.
 
 ```json
 {
@@ -979,6 +1140,18 @@ The branch update drive makes before an item's own implement session, or its `--
   "reason": "this branch changes Makefile, which decides what every later item tonight is measured by; merge it by hand",
   "policy": "operator",
   "pr": 7
+}
+```
+
+```json
+{
+  "event": "parked",
+  "ts": "2026-10-25T00:54:02Z",
+  "id": "F14",
+  "park": "gate_refused",
+  "reason": "Gate failed: internal/cmd/notify.go:28:16: var-declaration: should omit type http.RoundTripper from declaration of var ntfyTransport; it will be inferred from the right-hand side (revive); sent back",
+  "detail": "code",
+  "evidence": "internal/cmd/notify.go:28:16: var-declaration: should omit type http.RoundTripper from declaration of var ntfyTransport; it will be inferred from the right-hand side (revive)"
 }
 ```
 
@@ -997,8 +1170,9 @@ The branch update drive makes before an item's own implement session, or its `--
 | `at_limit`                            | `override_review_limit`       |
 | `stopped`, `interrupted`              | `cleanup_interrupted_drive`   |
 | `stale_citations`                     | `stale_citations`             |
+| the `held` outcome, which is no park  | `usage_admission`             |
 
-`preflight`: a check drive ran before spending a session. `action` is the check's key (`stale_citations`, `deps_lint`, `worktree_links_gap` or `host_load_admission`) and `policy` its policy here. One event per finding, with `reason` the sentence the drive printed, or one with `reason` `clean` for a check that found nothing. `stale_citations` carries `id`. `host_load_admission` emits on a change of state rather than per dispatch: `clean` on the first admission and again as each hold ends, the hold's reason as it starts, and the error at the first load it cannot read. A `deps_lint` refusal emits its event before the drive exits `3`, with no `exit` event after it.
+`preflight`: a check drive ran before spending a session. `action` is the check's key (`stale_citations`, `deps_lint`, `worktree_links_gap` or `host_load_admission`; `usage_admission` reports through `usage_warning`, `paused` and `needs_operator` instead) and `policy` its policy here. One event per finding, with `reason` the sentence the drive printed, or one with `reason` `clean` for a check that found nothing. `stale_citations` carries `id`. `host_load_admission` emits on a change of state rather than per dispatch: `clean` on the first admission and again as each hold ends, the hold's reason as it starts, and the error at the first load it cannot read. A `deps_lint` refusal emits its event before the drive exits `3`, with no `exit` event after it.
 
 ```json
 {
@@ -1019,12 +1193,13 @@ The branch update drive makes before an item's own implement session, or its `--
 {"event":"needs_operator","ts":"2026-10-16T22:31:00Z","id":"E43","action":"triage_finding","reason":"follow-up #846, filed by E43, is orphaned: every owner has merged, so no run is left to carry it","policy":"operator","run":"read follow-up #846 (drover follow-ups --coverage), then give it an owner a run will reach, or close it","kind":"follow-up","ref":"846","filed_by":["E43"],"owners":["E35"],"coverage":"orphaned"}
 ```
 
-`needs_operator`: an action at `operator` policy stopped, after its `parked` or `filed` event. `run` is what the operator has to do. `[supervise] notify` runs once per `needs_operator` with this object on stdin, with or without `--events`.
+`needs_operator`: an action at `operator` policy stopped, after its `parked` or `filed` event. `run` is what the operator has to do. Each [`[notify]`](configuration.md#notify) destination that routes `needs_operator` is sent it, with or without `--events`; see [Notification payloads](#notification-payloads).
 
 ```json
 {
   "event": "needs_operator",
   "ts": "2026-10-16T22:41:00Z",
+  "project": "example.app",
   "id": "E38",
   "action": "merge_protected_paths",
   "reason": "this branch changes Makefile, which decides what every later item tonight is measured by; merge it by hand",
@@ -1066,19 +1241,51 @@ The branch update drive makes before an item's own implement session, or its `--
 }
 ```
 
-`merged`: an item's pull request merged, by the forge at once or by drover on the merge gate's word. A merge the forge queued is not one: the next drive's reconciliation finishes it.
+`merged`: an item's pull request merged, by the forge at once or by drover on the merge gate's word. `pr` is its number and `title` its title. A merge the forge queued is not one: the next drive's reconciliation finishes it.
 
 ```json
-{ "event": "merged", "ts": "2026-10-16T22:45:00Z", "id": "E36", "pr": 252 }
+{
+  "event": "merged",
+  "ts": "2026-10-16T22:45:00Z",
+  "id": "E36",
+  "pr": 252,
+  "title": "E36: retry a flaky gate once"
+}
 ```
 
-`paused`: `drive --pause` reached the drive. It dispatches nothing more, and each running item holds at its next stage boundary.
+`paused`: `drive --pause` reached the drive, or [`usage_admission`](configuration.md#supervise) held it. It dispatches nothing more, and each running item holds at its next stage boundary. A usage hold carries `action` `usage_admission`, `policy`, and `window`, `remaining` and `resets_at` as `usage_warning` does, with `reason` naming the level crossed: `the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT`, a window entered on purchased credit under `[usage.overage] mode = "pause"`, a list-price sum at `max_usd`, or a refusal, `impl's review session was refused: the weekly window is spent and so is the purchased credit (out_of_credits), so the service refuses sessions; it resets …`. A `needs_operator` with the same fields and `run` `drover drive --resume` follows it at every policy, so a destination routing `needs_operator` reaches the operator.
 
 ```json
 { "event": "paused", "ts": "2026-10-16T22:50:00Z" }
+{
+  "event": "paused",
+  "ts": "2026-10-24T09:12:40Z",
+  "action": "usage_admission",
+  "policy": "auto",
+  "reason": "the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT",
+  "window": "weekly",
+  "remaining": 4,
+  "resets_at": "2026-10-25T20:00:00-07:00"
+}
 ```
 
-`resumed`: `drive --resume` reloaded the drive's inputs. The event without `id` is the drive's own; one with `id` is an item leaving the boundary it was held at, and `stage` is where it goes next (`implement`, `review` or `update_branch`). `changed` names which inputs differ from what the drive, or that item, ran under before: `config` (the `.drover.toml` bytes), `prompt`, `review` (the template text) and `verify` (the item's own verify command, or for the drive's event the whole `[verify]` table). An item whose `verify` changed runs the new command on its tree before it goes on, with a `stage` event for `gate`, and a refusal is sent back to it as a merge gate's would be. A drive that [re-executed onto a new binary](#resuming-onto-a-new-binary) emits one `resumed` with `changed` `binary` from the new process.
+A session the service refused for quota (its reading `rejected` with no overage, or `out_of_credits`) is held rather than parked: its item goes back to the head of the queue at the stage that was refused, with a `queued` event carrying `action` `usage_admission`, `stage` and `position` 1, and the refused launch counts against neither `rerun_lost_review` nor `max_review_rounds`. A quota fault with no reading, codex's or agy's, waits or parks `runner_fault` as before, and so does every quota fault at `usage_admission = "off"`.
+
+`usage_warning`: the newest reading crossed a [`[usage]` notify level](configuration.md#usageweekly-and-usagefive_hour). `window` is `weekly` or `five_hour` with `remaining` the percent of it left, `overage` (the weekly allotment spent and sessions drawing on purchased credit, sent when `[usage.weekly] notify_remaining` is set) or `overage_usd` (the list-price sum at `[usage.overage] notify_usd`); neither overage form carries `remaining`, since the service reports no credit figure. `resets_at` is the window's reset in local time and `reason` the sentence. It pauses nothing. Each is sent once per window per reset: drive appends a ledger row naming both first, and sends nothing a row in any registered project already names. Each [`[notify]`](configuration.md#notify) destination routing `usage_warning` is sent it.
+
+```json
+{
+  "event": "usage_warning",
+  "ts": "2026-10-23T18:40:02Z",
+  "action": "usage_admission",
+  "reason": "the weekly window has 18% left, at or below [usage.weekly] notify_remaining 20; it resets Sun Oct 25 20:00 PDT",
+  "window": "weekly",
+  "remaining": 18,
+  "resets_at": "2026-10-25T20:00:00-07:00"
+}
+```
+
+`resumed`: `drive --resume` reloaded the drive's inputs. The event without `id` is the drive's own; one with `id` is an item leaving the boundary it was held at, and `stage` is where it goes next (`implement`, `review` or `update_branch`). `changed` names which inputs differ from what the drive, or that item, ran under before: `config` (the `.drover.toml` bytes), `prompt`, `review` (the template text) and `verify` (the item's own verify command, or for the drive's event the whole `[verify]` table). An item whose `verify` changed runs the new command on its tree before it goes on, with a `stage` event for `gate`, and a refusal is sent back to it as a merge gate's would be. A drive that [re-executed onto a new binary](#resuming-onto-a-new-binary) emits one `resumed` with `changed` `binary` from the new process. A usage hold lifting on its own at its window's reset (plus a minute), which it does when the reset falls inside `--for` or `--until`, emits `resumed` with `action` `usage_admission`, the hold's `window`, `remaining` and `resets_at`, and `reason` `the weekly hold reached its reset at Sun Oct 25 20:00 PDT, so the drive dispatches again`; a destination routing `resumed` is sent that one as it is every other. `drive --resume` lifts a usage hold at any time and emits the ordinary `resumed`, and the same reading does not hold the drive again before its window resets.
 
 ```json
 {
@@ -1090,18 +1297,81 @@ The branch update drive makes before an item's own implement session, or its `--
 }
 ```
 
+`config_changed`: the `.drover.toml` on disk is no longer the one the drive runs under, the one it started or [last resumed](#pausing-a-drive) with. The drive applies nothing; `--pause`, then `--resume`, does. It is emitted once per distinct content, at the dispatch or stage boundary that first sees it, with the stderr line saying the same: an edit reverted to the bytes the drive runs under emits nothing, and a later edit emits again. `tables` names each top-level table that differs, bracketed (`[drive]`), and each top-level key outside a table, and is absent when only comments or layout changed. `error` replaces it when the new file will not load, which a resume would refuse, or will not read.
+
+```json
+{
+  "event": "config_changed",
+  "ts": "2026-10-24T11:12:40Z",
+  "drive": "D7",
+  "project": "capy",
+  "tables": ["[drive]"]
+}
+```
+
 `reexec_waiting`: a resume onto a [replaced binary](#resuming-onto-a-new-binary) has waited more than a minute for every running item to hold, and these have not. `waiting` names each, in dispatch order, with the `stage` its last `stage` event named, absent when it has emitted none since its dispatch. `reason` is the line `status` prints. Repeated at most once a minute while the wait lasts.
 
 ```json
 {
   "event": "reexec_waiting",
   "ts": "2026-10-16T23:05:00Z",
+  "drive": "D7",
+  "project": "capy",
   "reason": "the re-exec onto v0.1.2 (built 2026-10-16T22:58:00Z) has waited 3m0s for E37 (in review) to hold at a stage boundary; it goes on once each does, and drive --stop parks them instead",
   "waiting": [{ "id": "E37", "stage": "review" }]
 }
 ```
 
 `exit`: the drive ended, last on the stream. `code` is the exit status the process returns, and `reason` the stop when there was one. A drive that walked its queue also carries `findings_by_coverage` and `findings_needing_triage`, as the [totals object](#drive---json) does.
+
+Every `exit` carries `summary`, what the drive left done and undone:
+
+| Field            | Meaning                                                                                                                                                                                                                                                                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `merged`         | Items whose pull request merged.                                                                                                                                                                                                                                                                                                                         |
+| `ready_to_merge` | Items reviewed and green that nothing merged, such as under `--no-merge` or a `protected_paths` hold.                                                                                                                                                                                                                                                    |
+| `parked`         | Items parked.                                                                                                                                                                                                                                                                                                                                            |
+| `skipped`        | Items not attempted: done, scaffolded, blocked or broken.                                                                                                                                                                                                                                                                                                |
+| `held`           | Items a usage hold kept from starting or finishing.                                                                                                                                                                                                                                                                                                      |
+| `undone`         | Each item that did not merge, in the order it finished: `id`, `outcome`, and `park`, `detail`, `reason` and `pr` where it has them. A skipped item blocked by its dependencies carries `blocked_by`, each unmerged dependency's `id` with its `state`: its outcome in this drive (`parked gate_refused`) where the drive ran it, else its backlog state. |
+| `weighted`       | The weighted tokens of the usage rows the drive's sessions wrote, as [`usage`](#usage) weighs them.                                                                                                                                                                                                                                                      |
+| `ended`          | Why the drive ended: `drained` (the queue ran out), `deadline`, `max_items`, `stopped` (`drive --stop`), `interrupted` or `fault`.                                                                                                                                                                                                                       |
+
+An exit whose summary counts any item parked, skipped or held is what a [`[notify]`](configuration.md#notify) destination routes at `exit_undone`'s priority. A drive re-executed onto a new binary counts the items its predecessor finished by their outcome alone.
+
+```json
+{
+  "event": "exit",
+  "ts": "2026-10-24T18:59:12Z",
+  "drive": "D10",
+  "code": 0,
+  "summary": {
+    "merged": 2,
+    "ready_to_merge": 0,
+    "parked": 1,
+    "skipped": 1,
+    "held": 0,
+    "undone": [
+      {
+        "id": "F14",
+        "outcome": "parked",
+        "park": "gate_refused",
+        "detail": "code",
+        "reason": "Gate failed: internal/cmd/notify.go:28:16: var-declaration (revive); sent back"
+      },
+      {
+        "id": "E72",
+        "outcome": "skipped",
+        "park": "blocked",
+        "reason": "blocked by F14",
+        "blocked_by": [{ "id": "F14", "state": "parked gate_refused" }]
+      }
+    ],
+    "weighted": 48210000,
+    "ended": "drained"
+  }
+}
+```
 
 ```json
 {
@@ -1129,6 +1399,15 @@ The branch update drive makes before an item's own implement session, or its `--
 }
 ```
 
+#### Notification payloads
+
+A [`[notify]`](configuration.md#notify) `command` destination reads each message as one JSON line on stdin: the event as above, plus `priority`, the ntfy priority the destination routed it at, and `message`, the body an ntfy destination would send. A message standing for several events, a coalesced kind or what quiet hours held, carries them in `folded`; a coalesced one takes the last event's fields with `id` and `pr` cleared, and what quiet hours held arrives when the window ends as `event` `held`, which no drive emits and only a destination's stdin carries. An exit inside quiet hours folds what was held into the `exit`. A destination's [reminder](configuration.md#reminders) of an unanswered `needs_operator` repeats that event with `reminder` added, such as `"reminder": "(reminder 2 of 6)"`, and the message calling the reminders off arrives as `event` `answered`, carrying the item's `id` and `action` and the `message` `answered: <action> <id>`, which likewise only a destination's stdin carries.
+
+```json
+{ "event": "parked", "ts": "2026-10-24T18:12:40Z", "seq": 31, "drive": "D10", "project": "drover", "id": "F14", "park": "gate_refused", "reason": "Gate failed: internal/cmd/notify.go:28:16: var-declaration (revive); sent back", "detail": "code", "priority": "default", "message": "parked gate_refused (code): Gate failed: internal/cmd/notify.go:28:16: var-declaration (revive); sent back" }
+{ "event": "held", "ts": "2026-10-25T14:00:00Z", "drive": "D11", "project": "drover", "priority": "default", "message": "held during quiet hours (2):\nB93 merged #19: B93: …\nB94 merged #20: B94: …", "folded": [{ "event": "merged", "id": "B93", "pr": 19 }, { "event": "merged", "id": "B94", "pr": 20 }] }
+```
+
 ### `check --json`
 
 One object, not an array, because the counts are part of the answer.
@@ -1144,7 +1423,7 @@ One object, not an array, because the counts are part of the answer.
 }
 ```
 
-`kind` is the stable token to key on: `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `BAD TEMPLATE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED` and `SEQUENCE CLASH`. `message` is prose and will change wording. `path`, `line` and `id` are present where the finding has one.
+`kind` is the stable token to key on: `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `BAD TEMPLATE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `PLACEHOLDER`, `HOLD MARKER`, `BROAD CITATION` and `HAND EDITED`. `message` is prose and will change wording. `path`, `line` and `id` are present where the finding has one.
 
 `register_state` is what the follow-up read amounted to, as a token rather than as prose. Only `read` says the count of orphaned rows is the whole answer:
 
@@ -1171,6 +1450,8 @@ Switch on it rather than on `register_note`, which is prose and only ever elabor
 One object: the item's frontmatter verbatim under `meta`, its dependencies with `state`, `done` and `weak` per dep, the count of numbered requirements, the selected verify command, the runners under `implementer` and `review_runner`, and the full audit history under `audits`.
 
 A dep's `state` is what drover found behind the id, and it is the field to read before any of the others: `readable` (a body that parsed), `unparsed` (a body on disk whose frontmatter does not), `shelved`, `absent` (no body in either directory) or `unresolved` (not an id this project can parse). Those are the same four unreadable states `check` reports as `MISSING DEP` and the prompt prints under deps it could not read.
+
+`splits` lists every split the item took part in, found by the line `split` writes into the new item's body: `from` is the item split, `into` the item it wrote, and `direction` is `--after` when `from` waits on `into` or `--before` when `into` waits on `from`. `direction` is read from the two deps lines, which are what `status` and `drive` obey; `recorded` is the direction the split wrote, and differs from `direction` once somebody reverses the deps by hand. When neither deps line names the other, or both do, `direction` is `recorded` and the table says which. Absent for an item no split touched.
 
 `weak` is scoped to that state and needs nothing remembered: it is `false` on any dep whose `state` is not `readable`, because a body drover could not read is not a weak foundation, it is not a foundation. It is the same statement the table makes with its `⚠`. `done`, `level` and `by` are unscoped on purpose: they echo ledger rows rather than judging a foundation, and an id whose body was shelved after it merged still merged.
 
@@ -1477,6 +1758,50 @@ A row `drive` appends carries `drive`, the drive's id, and a row written outside
   "ts": "2026-10-17T02:14:09-07:00"
 }
 ```
+
+A usage row records one session's tokens, and a set `usage` object is what makes a row one. A headless session gets one when its runner exits, written by `run --headless`, `review --headless`, `draft --headless` and `drive`, whenever the log's result event carries usage, a failed or interrupted session included. `drover usage --backfill` writes the same rows from logs already on disk, and `drover usage --sync` backfills first and then writes `"source":"interactive"` rows from Claude Code's transcripts, one per session per local day, with `first_ts` and `ts` the day's first and last message, `started` the session's first message on any day, and `id` empty. `session` is the drover session id the stage row carries and `log` the log's basename; a backfilled row has no `session`, since a log does not record one. `context_max` is the largest `input + cache_read + cache_create` of any one message, how full the context window got. `session_id` is the runner's own id. A headless session has one usage row; an interactive one has one per local day, and a session any run log names is never recorded as interactive. Claude Code writes a transcript for every headless session as well, so `--sync` backfills before it reads a transcript, and `drive` runs the same step before it reads its queue and after its end row. Write a usage row only when no usage row names its `session_id` yet, or the session counts twice.
+
+```json
+{
+  "id": "16",
+  "stage": "implement",
+  "session": "8f2c41d09a7e",
+  "log": "16-cache.20261017-021409.512003000.jsonl",
+  "usage": { "input": 140, "output": 57264, "cache_create": 1261852, "cache_read": 11419637 },
+  "model": "claude-opus-5-5[1m]",
+  "session_id": "ad34e1d2-b659-4b2b-be96-29cfd8220613",
+  "cost_usd": 9.8969774,
+  "duration_ms": 3669375,
+  "turns": 72,
+  "source": "headless",
+  "context_max": 412880,
+  "drive": "D3",
+  "date": "2026-10-17",
+  "ts": "2026-10-17T03:15:18-07:00"
+}
+```
+
+A row from a session whose log carried a `rate_limit_event` adds `rate_limit`, the last one it wrote, renamed into the ledger's own case: `status` (`allowed`, `allowed_warning`, `rejected`), `rate_limit_type` (the window that status is about), `resets_at` (a Unix second), `five_hour` and `seven_day` (each `utilization` from 0 to 1, its `resets_at`, and `status` where the event gave one), `is_using_overage`, `overage_status` and `overage_disabled_reason` (`out_of_credits` once purchased credit is spent). It is absent on a row from a runner that writes no such event, codex and agy among them. `status --json` reports the newest one as [`rate_limit`](#rate_limit), and `drive`'s usage admission judges it.
+
+```json
+"rate_limit": {
+  "status": "rejected",
+  "rate_limit_type": "seven_day",
+  "resets_at": 1792983600,
+  "five_hour": { "utilization": 0, "resets_at": 1792834200, "status": "allowed" },
+  "seven_day": { "utilization": 1, "resets_at": 1792983600, "status": "rejected" },
+  "overage_status": "rejected",
+  "overage_disabled_reason": "out_of_credits"
+}
+```
+
+A `usage_warning` drive sent leaves one row under `"id":"usage"`, an id no namespace can mint, naming the window and the reset it was about, with `note` the sentence. Any row naming the pair stops a second notice, in this project or another registered one; `check` and every item reader skip it.
+
+```json
+{"id":"usage","usage_warning":"weekly","resets_at":1792983600,"note":"the weekly window has 18% left, at or below [usage.weekly] notify_remaining 20; it resets Sun Oct 25 20:00 PDT","drive":"D9","date":"2026-10-23","ts":"2026-10-23T11:40:02-07:00"}
+```
+
+The counts are tokens as the API reported them, not the subscription's quota accounting, and `cost_usd` is list price, not what a subscription charged. drover's other readers ignore usage rows: no stage, pass or run count changes because one is there, and `check` reads one with an empty `id` as a usage row rather than a malformed line.
 
 Every row type resolves last-row-wins, and `status` and `show` also count the rows a fold discards: `runs`, `audits` and, in `show`, the length of the `audits` array. A disposition carries `settled` once two independent passes recorded the same answer in a row with nothing since disagreeing.
 

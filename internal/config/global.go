@@ -189,14 +189,30 @@ func (c *Config) expandPaths() error {
 // would otherwise take effect as silence, and it does so in the global file
 // exactly as readily as in a project's.
 func unknownKeys(path string, md toml.MetaData) error {
-	undecoded := md.Undecoded()
-	if len(undecoded) == 0 {
-		return nil
+	var keys []string
+	for _, k := range undecoded(md) {
+		keys = append(keys, k.String())
 	}
-	keys := make([]string, len(undecoded))
-	for i, k := range undecoded {
-		keys[i] = k.String()
+	if len(keys) == 0 {
+		return nil
 	}
 	slices.Sort(keys)
 	return fmt.Errorf("%s: unknown key(s): %v", path, keys)
+}
+
+// undecoded is md.Undecoded less the keys inside a [notify] destination and
+// inside a removed [supervise.ntfy]. The decoder hands a table under an untyped
+// map over whole and lists every key in it as undecoded, so without this a
+// correct destination reads as unknown keys, and an old ntfy table as a typo
+// rather than the removal validateSupervise names with its migration.
+// validateNotify names the destination keys that are unknown.
+func undecoded(md toml.MetaData) []toml.Key {
+	var out []toml.Key
+	for _, k := range md.Undecoded() {
+		s := k.String()
+		if !strings.HasPrefix(s, "notify.destinations.") && !strings.HasPrefix(s, "supervise."+SuperviseNtfyKey+".") {
+			out = append(out, k)
+		}
+	}
+	return out
 }

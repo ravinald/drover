@@ -71,8 +71,8 @@ drover agents --pointer DROVER.md >> AGENTS.md
 
 This project's work items, completion ledger and audit trail are driven by
 `drover`. **Read [DROVER.md](DROVER.md) before running any drover command.**
-`accept`, `drive`, `finish`, `intake`, `mark-merged`, `open-pr`, `signoff`,
-`supervise`, `unaccept` and `unmark-merged` refuse inside a session drover
+`accept`, `amend`, `drive`, `finish`, `intake`, `mark-merged`, `open-pr`,
+`signoff`, `supervise`, `touch`, `unaccept` and `unmark-merged` refuse inside a session drover
 launched and exit 3, because each certifies work somebody else has to trust or
 reaches a tracker other people read. `run`, `draft --runner` and `review
 --runner` refuse there too: a launched session cannot launch another.

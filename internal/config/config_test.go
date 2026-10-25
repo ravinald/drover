@@ -529,6 +529,26 @@ func TestAnUnknownLoopKeyIsRefused(t *testing.T) {
 	}
 }
 
+// [forge] failure_patterns are regular expressions, so one that does not
+// compile is refused at load rather than skipped at the first red check.
+func TestFailurePatternsMustCompile(t *testing.T) {
+	root := write(t, map[string]string{
+		FileName: minimal + "\n[forge]\nfailure_patterns = ['^ERROR ', '(unclosed']\n",
+		"go.mod": "module x\n",
+	})
+	if _, err := Load(root); err == nil || !strings.Contains(err.Error(), `forge.failure_patterns holds "(unclosed"`) {
+		t.Fatalf("Load = %v, want a refusal naming the pattern", err)
+	}
+	root = write(t, map[string]string{
+		FileName: minimal + "\n[forge]\nfailure_patterns = ['^ERROR ']\n",
+		"go.mod": "module x\n",
+	})
+	c, err := Load(root)
+	if err != nil || len(c.Forge.FailurePatterns) != 1 {
+		t.Fatalf("Load = %+v, %v, want the one pattern", c, err)
+	}
+}
+
 // [git] merge_method picks the flag drive hands `gh pr merge`. Unset is squash;
 // anything outside the three methods gh knows is refused at load rather than at
 // the first merge of a drive.
@@ -752,6 +772,106 @@ func TestStatusRefreshIsValidatedAtLoad(t *testing.T) {
 			t.Errorf("%q: %v", src, err)
 		case want >= 0 && c.Status.RefreshSeconds() != want:
 			t.Errorf("%q: RefreshSeconds() = %d, want %d", src, c.Status.RefreshSeconds(), want)
+		}
+	}
+}
+
+// [usage] reads from either file, defaults its thresholds, and refuses a value
+// that would measure nothing.
+func TestUsageTableLayersAndRefusesWhatMeasuresNothing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	root := write(t, map[string]string{FileName: minimal, "go.mod": "module x\n"})
+	c, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UsageSessionMaxHours() != DefaultSessionMaxHours || c.UsageContextWarn() != DefaultContextWarn || c.Usage.WeeklyBudget != 0 {
+		t.Errorf("an undeclared [usage] resolved to %+v", c.Usage)
+	}
+
+	global := filepath.Join(home, "drover", GlobalFileName)
+	if err := os.MkdirAll(filepath.Dir(global), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte("[usage]\nweekly_budget = 600000000\nreset = \"Sat 20:00 America/Los_Angeles\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, err = Load(root); err != nil || c.Usage.WeeklyBudget != 600000000 || c.Usage.Reset == "" {
+		t.Errorf("the per-user [usage] did not reach the project: %+v, %v", c.Usage, err)
+	}
+	if err := os.Remove(global); err != nil {
+		t.Fatal(err)
+	}
+
+	for body, want := range map[string]string{
+		"weekly_budget = 0\nreset = \"Sat 20:00 UTC\"": "usage.weekly_budget is 0",
+		"weekly_budget = 100":                          "usage.reset is unset",
+		"reset = \"Caturday 20:00 UTC\"":               "not a weekday",
+		"session_max_hours = 0":                        "usage.session_max_hours is 0",
+		"context_warn = -1":                            "usage.context_warn is -1",
+	} {
+		root := write(t, map[string]string{FileName: minimal + "\n[usage]\n" + body + "\n", "go.mod": "module x\n"})
+		if _, err := Load(root); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("[usage] %s: err = %v, want one naming %q", body, err, want)
+		}
+	}
+}
+
+// The two levels are percent of the window left, and the pause has to come
+// after the notice: a pair the other way round would hold the drive before
+// anybody was told it was close.
+func TestUsageLevelsLoadAndRefuseBadPairs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	root := write(t, map[string]string{FileName: minimal + "\n[usage.weekly]\nnotify_remaining = 20\npause_remaining = 5\n" +
+		"[usage.five_hour]\npause_remaining = 0\n", "go.mod": "module x\n"})
+	c, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, ok := c.UsageLevel(UsageWeekly, "notify"); !ok || n != 20 {
+		t.Errorf("weekly notify = %d %v, want 20", n, ok)
+	}
+	if p, ok := c.UsageLevel(UsageFiveHour, "pause"); !ok || p != 0 {
+		t.Errorf("five-hour pause = %d %v, want 0 and set: 0 is a level, not unset", p, ok)
+	}
+	if _, ok := c.UsageLevel(UsageFiveHour, "notify"); ok {
+		t.Error("an unset five-hour notify reads as set")
+	}
+	if c.OverageMode() != OveragePause {
+		t.Errorf("overage mode = %q, want the default %q", c.OverageMode(), OveragePause)
+	}
+
+	global := filepath.Join(home, "drover", GlobalFileName)
+	if err := os.MkdirAll(filepath.Dir(global), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(global, []byte("[usage.overage]\nmode = \"continue\"\nmax_usd = 50.0\nnotify_usd = 30.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if c, err = Load(root); err != nil || c.OverageMode() != OverageContinue {
+		t.Fatalf("the per-user [usage.overage] did not reach the project: %+v, %v", c.Usage.Overage, err)
+	}
+	if m, ok := c.OverageUSD("max"); !ok || m != 50 {
+		t.Errorf("max_usd = %g %v, want 50", m, ok)
+	}
+	if err := os.Remove(global); err != nil {
+		t.Fatal(err)
+	}
+
+	for body, want := range map[string]string{
+		"[usage.weekly]\nnotify_remaining = 5\npause_remaining = 20": "pause_remaining is 20 and notify_remaining is 5",
+		"[usage.weekly]\nnotify_remaining = 5\npause_remaining = 5":  "pause_remaining is 5 and notify_remaining is 5",
+		"[usage.five_hour]\nnotify_remaining = 100":                  "usage.five_hour.notify_remaining is 100",
+		"[usage.weekly]\npause_remaining = -1":                       "usage.weekly.pause_remaining is -1",
+		"[usage.overage]\nmode = \"spend\"":                          "usage.overage.mode is \"spend\"",
+		"[usage.overage]\nmax_usd = 0.0":                             "usage.overage.max_usd is 0",
+		"[usage.overage]\nmax_usd = 10.0\nnotify_usd = 10.0":         "notify_usd must be below max_usd",
+	} {
+		root := write(t, map[string]string{FileName: minimal + "\n" + body + "\n", "go.mod": "module x\n"})
+		if _, err := Load(root); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want one naming %q", body, err, want)
 		}
 	}
 }

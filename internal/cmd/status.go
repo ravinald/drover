@@ -119,6 +119,9 @@ type Row struct {
 	// etaSamples timed runs of either stage, because a guess printed as a time
 	// is read as a promise.
 	ETA string `json:"eta,omitempty"`
+	// Usage is every usage row naming the item, all time, and absent when none
+	// does: an item nobody measured has no usage, not a usage of zero.
+	Usage *UsageTotals `json:"usage,omitempty"`
 }
 
 // StatusReport is what --json emits: the rows, and who else is in this
@@ -150,6 +153,14 @@ type StatusReport struct {
 	// not answer, or was not asked. The scaffolds are listed either way.
 	FindingsNeedingTriage []FiledFinding `json:"findings_needing_triage"`
 	FindingsError         string         `json:"findings_error,omitempty"`
+	// Usage is the project's usage rows over the window, and LongSessions every
+	// session in it that ran long. Both are absent when the ledger holds no
+	// usage row, and LongSessions is empty, not absent, when none ran long.
+	Usage        *ReportUsage   `json:"usage,omitempty"`
+	LongSessions *[]LongSession `json:"long_sessions,omitempty"`
+	// RateLimit is the newest rate_limit reading among every registered
+	// project's usage rows, absent when no usage row carries one.
+	RateLimit *StatusRateLimit `json:"rate_limit,omitempty"`
 	// all is every row before --all and --sev scoped them, which is what a
 	// template's attention list reads: a merged item nobody audited is waiting on
 	// somebody whether or not the view shows merged rows.
@@ -294,7 +305,9 @@ B1 --json prints.`,
      {"id":"B1","title":"finish refuses after done","state":"merged","level":"reviewed","code_by":"agent",
       "independent":true,"reviewer":"sam","implementer":"claude","review_runner":"codex","runs":3,
       "audits":2,"rounds":2,"planned":false,
-      "pr":{"number":236,"state":"merged"}},
+      "pr":{"number":236,"state":"merged"},
+      "usage":{"runs":5,"tokens":{"input":2100,"output":310000,"cache_create":2400000,"cache_read":98000000},
+       "weighted":12512100,"cost_usd":61.4}},
      {"id":"B2","title":"drive parks twice","state":"implemented","planned":false,"drive":"D2",
       "pr":{"number":240,"state":"unknown","error":"not authenticated: ..."}}],
      "lease":{"command":"drive","pid":41234,"branch":"b1-first","root":"/src/drover",
@@ -302,7 +315,15 @@ B1 --json prints.`,
       "queue":["B3"],"running":["B2"],"jobs":1,"paused":true,
       "holds":[{"id":"B2","at":"review","verify":"make check"}]},
      "drives":[{"id":"D2","label":"night run","started":"2026-09-17T09:12:05Z","queued":["B2"],
-      "items":[{"id":"B2","outcome":""}],"running":true}]}
+      "items":[{"id":"B2","outcome":""}],"running":true,"config_changed":true}],
+     "usage":{"window":"2026-10-17T20:00:00-07:00","runs":9,
+      "tokens":{"input":3000,"output":540000,"cache_create":4100000,"cache_read":170000000},
+      "weighted":21643000,"cost_usd":104.2,
+      "by_stage":{"implement":{"runs":5,"tokens":{"input":2100,"output":310000,"cache_create":2400000,"cache_read":98000000},
+       "weighted":12512100,"cost_usd":61.4}},
+      "budget":600000000,"budget_used":0.62,"budget_unread":["capy (/src/capy): open ledger.jsonl: permission denied"]},
+     "long_sessions":[{"session_id":"5f1c0e2a","source":"interactive","id":"","hours":424.3,
+      "context_max":965000,"weighted":48210000,"reason":"open 17d 16h, past 24h; context reached 965K, past 400K"}]}
 
   state is one of merged, implemented, ready, blocked, scaffold, broken. level and by are
   absent when nobody has audited it; by is --code-by as typed, and independent
@@ -323,7 +344,29 @@ B1 --json prints.`,
   when its review stage should end, absent below 5 timed runs of a stage.
   drive is the drive that wrote the item's latest drive row, and drives is
   every drive the ledger records, newest first, as drover drives --json prints
-  them; the one the lease names carries "running": true.
+  them; the one the lease names carries "running": true, and "config_changed":
+  true when the .drover.toml on disk is no longer the one it runs under.
+
+  usage on an item sums every usage row naming it, all time, and is absent on
+  an item no usage row names. The top-level usage is the window's rows, the
+  ones naming no item included: window is "7d", or the RFC 3339 time of the
+  last [usage] reset it runs from, and by_stage the same totals per stage,
+  interactive for a row no stage launched. weighted is input + output +
+  cache_create + 0.1 * cache_read, a ranking rather than the subscription's
+  accounting, and cost_usd is list price. budget and budget_used appear only
+  under [usage] weekly_budget, measured across every registered project, and
+  budget_unread names each project whose ledger would not read. long_sessions
+  is every session in the window open past [usage] session_max_hours or at a
+  context past [usage] context_warn, empty when none is. usage and
+  long_sessions are both absent from a ledger with no usage row.
+
+  rate_limit is the newest reading Claude Code left on a usage row of any
+  registered project: reading as the row carries it, the project and ts of
+  that row, remaining the percent of each window left now (weekly,
+  five_hour; 100 once that window reset), and overage, true while sessions
+  draw on purchased credit. It is absent when no usage row carries a
+  reading. Without --json the footer prints it as one line:
+    account: weekly 21% left, five-hour 91% left, not on purchased credit, week resets Sun Oct 25 20:00 PDT (read Oct 22 14:03 in drover)
 
   drover status --json --window 3   # trends, one entry per day and the total:
     {"items":[],"trends":{"window":3,"from":"2026-10-15","to":"2026-10-17",
@@ -612,6 +655,7 @@ func (s *session) rows() []Row {
 		current = owners[0].ID.Bare()
 	}
 
+	spent := itemUsage(s.ledger.Usage)
 	for _, it := range s.backlog.Items {
 		st := s.ledger.State(it.ID.Bare())
 		c := s.ledger.Counts(it.ID.Bare())
@@ -637,6 +681,7 @@ func (s *session) rows() []Row {
 			Severity:    it.Get(s.cfg.Severity.Key),
 			Issue:       issueOf(it),
 			Drive:       s.ledger.DriveOf(it.ID.Bare()),
+			Usage:       spent[it.ID.Bare()],
 		}
 		row.State, row.Missing = s.workState(it, logDir)
 		if pk, ok := s.ledger.Parked(it.ID.Bare()); ok {
@@ -973,6 +1018,9 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
 	if prErr != nil && prWidth > 0 {
 		fmt.Fprintf(w, "pull requests unread: %v\n", prErr)
 	}
+	if a := s.readAccount(); a.Reading != nil {
+		fmt.Fprintf(w, "account: %s (read %s in %s)\n", readingLine(a.Reading, time.Now()), a.At.Local().Format("Jan 2 15:04"), a.Project)
+	}
 
 	// Named in text as well as marked in the table: the marker is one glyph in a
 	// hundred lines, and the colour is no help at all to a reader who cannot see
@@ -1079,6 +1127,13 @@ func (s *session) printLease(w io.Writer, saidHere bool) {
 				holds = append(holds, h.ID+" before "+h.At)
 			}
 			fmt.Fprintf(w, "  held:    %s\n", strings.Join(holds, ", "))
+		}
+		if s.configDrift(l) {
+			since := "started"
+			if l.ConfigResumed {
+				since = "resumed"
+			}
+			fmt.Fprintf(w, "  config changed since this drive %s; --pause, then --resume, applies it\n", since)
 		}
 	}
 }

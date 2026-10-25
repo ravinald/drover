@@ -9,6 +9,11 @@
 - <span class="drover-needs-operator">needs-operator</span> [[#^b12|B12]] trunk_red: vuln · since 9h ago · `fix the trunk, then drover drive B12`
 - **follow-up** the follow-up list could not be read: the forge was not asked (--no-tracker, or a drive's render) · `drover follow-ups`
 
+### Long sessions
+
+- `s-b2` [[#^b2|B2]] headless · 12.2M tokens · context reached 520K, past 400K
+- `i-long` interactive · 5.8M tokens · open 16d 3h, past 24h; context reached 965K, past 400K
+
 ## Running drive
 
 **D2** · day run · started 1h ago · 1 at a time
@@ -22,48 +27,48 @@
 
 #### <span class="drover-running">running</span>
 
-- **B8** Running now ^b8
+- **B8** Running now · tokens - · list - ^b8
 
 ### Drive D1 · night run
 
 #### <span class="drover-parked">parked</span>
 
-- **B2** Parked on no commits · no_commits: runner_exit · blocks [[#^b3|B3]] ^b2
+- **B2** Parked on no commits · no_commits: runner_exit · blocks [[#^b3|B3]] · tokens 12.2M · list $1,235 ^b2
 
 ### No drive
 
 #### <span class="drover-needs-operator">needs-operator</span>
 
-- **B12** Trunk went red · trunk_red: vuln ^b12
+- **B12** Trunk went red · trunk_red: vuln · tokens - · list - ^b12
 
 #### <span class="drover-broken">broken</span>
 
-- **B11** (unreadable) · <root>/work/B11-broken.md: no frontmatter (expected a '---' fence on line 1) ^b11
+- **B11** (unreadable) · <root>/work/B11-broken.md: no frontmatter (expected a '---' fence on line 1) · tokens - · list - ^b11
 
 #### <span class="drover-running">implemented</span>
 
-- **B10** Ran clean ^b10
+- **B10** Ran clean · tokens - · list - ^b10
 
 #### <span class="drover-ready">ready</span>
 
-- **B7** &lt;script&gt;alert(1)&lt;/script&gt; &amp; co ^b7
-- **B9** Queued next ^b9
-- **B13** The place's sign reads a &lt; b · blocks [[#^b14|B14]] ^b13
+- **B7** &lt;script&gt;alert(1)&lt;/script&gt; &amp; co · tokens - · list - ^b7
+- **B9** Queued next · tokens - · list - ^b9
+- **B13** The place's sign reads a &lt; b · blocks [[#^b14|B14]] · tokens - · list - ^b13
 
 #### <span class="drover-blocked">blocked</span>
 
-- **B3** Blocked by the park · deps [[#^b2|B2]] · blocks [[#^b4|B4]] ^b3
-- **B4** Blocked behind that · deps [[#^b3|B3]] ^b4
-- **B14** Published as an issue · deps [[#^b13|B13]] ^b14
+- **B3** Blocked by the park · deps [[#^b2|B2]] · blocks [[#^b4|B4]] · tokens - · list - ^b3
+- **B4** Blocked behind that · deps [[#^b3|B3]] · tokens - · list - ^b4
+- **B14** Published as an issue · deps [[#^b13|B13]] · tokens - · list - ^b14
 
 #### <span class="drover-scaffold">scaffold</span>
 
-- **B5** Scaffold ^b5
+- **B5** Scaffold · tokens - · list - ^b5
 
 ## Done
 
-- **B6** Merged with a level · <span class="drover-done">reviewed</span> · PR [#236](https://forge.example/acme/widgets/pull/236) · merged 2026-10-16 ^b6
-- **B1** Merged first · <span class="drover-unaudited">unaudited</span> · merged 2026-01-15 ^b1
+- **B6** Merged with a level · <span class="drover-done">reviewed</span> · PR [#236](https://forge.example/acme/widgets/pull/236) · merged 2026-10-16 · tokens 1.2M · list $43 ^b6
+- **B1** Merged first · <span class="drover-unaudited">unaudited</span> · merged 2026-01-15 · tokens 140K · list $3 ^b1
 
 ## Trends
 
@@ -113,4 +118,6 @@ Red waits on a person, yellow is moving, gray is held by a paused drive, orange 
 | **follow-up** | An open follow-up nothing is scheduled to carry. |
 
 ---
+Usage over the last 7 days: 19.2M weighted tokens · $1,277 at list price
+
 Rendered 2026-10-17 11:00 PDT (America/Los_Angeles) · fixture · drover v9.9.9-test

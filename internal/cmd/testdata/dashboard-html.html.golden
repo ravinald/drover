@@ -39,6 +39,8 @@ footer { margin-top: 2rem; color: var(--muted); font-size: 0.85em; }
 .drover-paused { color: var(--muted); }
 .drover-blocked, .drover-scaffold, .drover-unaudited { color: var(--orange); }
 .drover-parked, .drover-broken, .drover-needs-operator { color: var(--red); }
+.drover-warning { color: var(--orange); }
+.drover-critical { color: var(--red); }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 0.3rem 0.5rem 0.3rem 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
 th { font-weight: 600; }
@@ -71,6 +73,14 @@ th { font-weight: 600; }
 <tr><td><span class="state">follow-up</span></td><td>-</td><td class="reason">the follow-up list could not be read: the forge was not asked (--no-tracker, or a drive&#39;s render)</td><td class="num">-</td><td><code>drover follow-ups</code></td></tr>
 </tbody>
 </table></div>
+<h3>Long sessions</h3>
+<div class="scroll"><table class="items">
+<thead><tr><th>Session</th><th>Item</th><th>Source</th><th>Tokens</th><th>Reason</th></tr></thead>
+<tbody>
+<tr><td><code>s-b2</code></td><td><a class="id" href="#item-b2">B2</a></td><td>headless</td><td class="num">12.2M</td><td class="reason">context reached 520K, past 400K</td></tr>
+<tr><td><code>i-long</code></td><td>-</td><td>interactive</td><td class="num">5.8M</td><td class="reason">open 16d 3h, past 24h; context reached 965K, past 400K</td></tr>
+</tbody>
+</table></div>
 
 <h2>Running drive</h2>
 <p><span class="id">D2</span> · day run <span class="meta">started 1h ago · 1 at a time</span></p>
@@ -86,73 +96,73 @@ th { font-weight: 600; }
 <h3>Drive D2 · day run</h3>
 <h4><span class="state drover-running">running</span></h4>
 <div class="scroll"><table class="items">
-<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
-<tr id="item-b8"><td><span class="state drover-running">running</span> <span class="id">B8</span></td><td class="title">Running now</td><td>-</td><td>implement</td><td>-</td><td>-</td><td class="num">-</td><td class="num">11:11 PDT (in 11m)</td></tr>
+<tr id="item-b8"><td><span class="state drover-running">running</span> <span class="id">B8</span></td><td class="title">Running now</td><td>-</td><td>implement</td><td>-</td><td>-</td><td class="num">-</td><td class="num">11:11 PDT (in 11m)</td><td class="num">-</td><td class="num">-</td></tr>
 </tbody>
 </table></div>
 <h3>Drive D1 · night run</h3>
 <h4><span class="state drover-parked">parked</span></h4>
 <div class="scroll"><table class="items">
-<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
-<tr id="item-b2"><td><span class="state drover-parked">parked</span> <span class="id">B2</span></td><td class="title">Parked on no commits</td><td>-</td><td class="reason">no_commits: runner_exit</td><td>-</td><td><a href="#item-b3">B3</a></td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b2"><td><span class="state drover-parked">parked</span> <span class="id">B2</span></td><td class="title">Parked on no commits</td><td>-</td><td class="reason">no_commits: runner_exit</td><td>-</td><td><a href="#item-b3">B3</a></td><td class="num">-</td><td class="num">-</td><td class="num">12.2M</td><td class="num">$1,235</td></tr>
 </tbody>
 </table></div>
 <h3>No drive</h3>
 <h4><span class="state drover-needs-operator">needs-operator</span></h4>
 <div class="scroll"><table class="items">
-<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
-<tr id="item-b12"><td><span class="state drover-needs-operator">needs-operator</span> <span class="id">B12</span></td><td class="title">Trunk went red</td><td>-</td><td class="reason">trunk_red: vuln</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b12"><td><span class="state drover-needs-operator">needs-operator</span> <span class="id">B12</span></td><td class="title">Trunk went red</td><td>-</td><td class="reason">trunk_red: vuln</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
 </tbody>
 </table></div>
 <h4><span class="state drover-broken">broken</span></h4>
 <div class="scroll"><table class="items">
-<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
-<tr id="item-b11"><td><span class="state drover-broken">broken</span> <span class="id">B11</span></td><td class="title">(unreadable)</td><td>-</td><td class="reason"><root>/work/B11-broken.md: no frontmatter (expected a &#39;---&#39; fence on line 1)</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b11"><td><span class="state drover-broken">broken</span> <span class="id">B11</span></td><td class="title">(unreadable)</td><td>-</td><td class="reason"><root>/work/B11-broken.md: no frontmatter (expected a &#39;---&#39; fence on line 1)</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
 </tbody>
 </table></div>
 <h4><span class="state drover-running">implemented</span></h4>
 <div class="scroll"><table class="items">
-<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
-<tr id="item-b10"><td><span class="state drover-running">implemented</span> <span class="id">B10</span></td><td class="title">Ran clean</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b10"><td><span class="state drover-running">implemented</span> <span class="id">B10</span></td><td class="title">Ran clean</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
 </tbody>
 </table></div>
 <h4><span class="state drover-ready">ready</span></h4>
 <div class="scroll"><table class="items">
-<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
-<tr id="item-b7"><td><span class="state drover-ready">ready</span> <span class="id">B7</span></td><td class="title">&lt;script&gt;alert(1)&lt;/script&gt; &amp; co</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
-<tr id="item-b9"><td><span class="state drover-ready">ready</span> <span class="id">B9</span></td><td class="title">Queued next</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">11:26 PDT (in 26m)</td></tr>
-<tr id="item-b13"><td><span class="state drover-ready">ready</span> <span class="id">B13</span></td><td class="title">The place&#39;s sign reads a &lt; b</td><td>-</td><td>-</td><td>-</td><td><a href="#item-b14">B14</a></td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b7"><td><span class="state drover-ready">ready</span> <span class="id">B7</span></td><td class="title">&lt;script&gt;alert(1)&lt;/script&gt; &amp; co</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b9"><td><span class="state drover-ready">ready</span> <span class="id">B9</span></td><td class="title">Queued next</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">11:26 PDT (in 26m)</td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b13"><td><span class="state drover-ready">ready</span> <span class="id">B13</span></td><td class="title">The place&#39;s sign reads a &lt; b</td><td>-</td><td>-</td><td>-</td><td><a href="#item-b14">B14</a></td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
 </tbody>
 </table></div>
 <h4><span class="state drover-blocked">blocked</span></h4>
 <div class="scroll"><table class="items">
-<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
-<tr id="item-b3"><td><span class="state drover-blocked">blocked</span> <span class="id">B3</span></td><td class="title">Blocked by the park</td><td>-</td><td>-</td><td><a href="#item-b2">B2</a></td><td><a href="#item-b4">B4</a></td><td class="num">-</td><td class="num">-</td></tr>
-<tr id="item-b4"><td><span class="state drover-blocked">blocked</span> <span class="id">B4</span></td><td class="title">Blocked behind that</td><td>-</td><td>-</td><td><a href="#item-b3">B3</a></td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
-<tr id="item-b14"><td><span class="state drover-blocked">blocked</span> <a class="id" href="https://forge.example/acme/widgets/issues/42">B14</a></td><td class="title">Published as an issue</td><td>-</td><td>-</td><td><a href="#item-b13">B13</a></td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b3"><td><span class="state drover-blocked">blocked</span> <span class="id">B3</span></td><td class="title">Blocked by the park</td><td>-</td><td>-</td><td><a href="#item-b2">B2</a></td><td><a href="#item-b4">B4</a></td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b4"><td><span class="state drover-blocked">blocked</span> <span class="id">B4</span></td><td class="title">Blocked behind that</td><td>-</td><td>-</td><td><a href="#item-b3">B3</a></td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b14"><td><span class="state drover-blocked">blocked</span> <a class="id" href="https://forge.example/acme/widgets/issues/42">B14</a></td><td class="title">Published as an issue</td><td>-</td><td>-</td><td><a href="#item-b13">B13</a></td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
 </tbody>
 </table></div>
 <h4><span class="state drover-scaffold">scaffold</span></h4>
 <div class="scroll"><table class="items">
-<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th></tr></thead>
+<thead><tr><th>Item</th><th>Title</th><th>Severity</th><th>Stage or park</th><th>Deps</th><th>Blocks</th><th>PR</th><th>ETA</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
-<tr id="item-b5"><td><span class="state drover-scaffold">scaffold</span> <span class="id">B5</span></td><td class="title">Scaffold</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td></tr>
+<tr id="item-b5"><td><span class="state drover-scaffold">scaffold</span> <span class="id">B5</span></td><td class="title">Scaffold</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
 </tbody>
 </table></div>
 
 <h2>Done</h2>
 <div class="scroll"><table class="items">
-<thead><tr><th>Item</th><th>Title</th><th>Level</th><th>PR</th><th>Merged</th></tr></thead>
+<thead><tr><th>Item</th><th>Title</th><th>Level</th><th>PR</th><th>Merged</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
-<tr id="item-b6"><td><span class="id">B6</span></td><td class="title">Merged with a level</td><td><span class="state drover-done">reviewed</span></td><td class="num"><a href="https://forge.example/acme/widgets/pull/236">#236</a></td><td class="num">2026-10-16</td></tr>
-<tr id="item-b1"><td><span class="id">B1</span></td><td class="title">Merged first</td><td><span class="state drover-unaudited">unaudited</span></td><td class="num">-</td><td class="num">2026-01-15</td></tr>
+<tr id="item-b6"><td><span class="id">B6</span></td><td class="title">Merged with a level</td><td><span class="state drover-done">reviewed</span></td><td class="num"><a href="https://forge.example/acme/widgets/pull/236">#236</a></td><td class="num">2026-10-16</td><td class="num">1.2M</td><td class="num">$43</td></tr>
+<tr id="item-b1"><td><span class="id">B1</span></td><td class="title">Merged first</td><td><span class="state drover-unaudited">unaudited</span></td><td class="num">-</td><td class="num">2026-01-15</td><td class="num">140K</td><td class="num">$3</td></tr>
 </tbody>
 </table></div>
 
@@ -188,6 +198,8 @@ th { font-weight: 600; }
 <tr><td><span class="state">follow-up</span></td><td>An open follow-up nothing is scheduled to carry.</td></tr>
 </table>
 
-<footer>Rendered 2026-10-17 11:00 PDT (America/Los_Angeles) · fixture · drover v9.9.9-test</footer>
+<footer>
+<p>Usage over the last 7 days: 19.2M weighted tokens, $1,277 at list price</p>
+Rendered 2026-10-17 11:00 PDT (America/Los_Angeles) · fixture · drover v9.9.9-test</footer>
 </body>
 </html>

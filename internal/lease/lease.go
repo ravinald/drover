@@ -106,6 +106,13 @@ type Lease struct {
 	// a minute on running items that do not hold, naming each and its stage,
 	// and empty otherwise.
 	ReexecWaiting string `json:"reexec_waiting,omitempty"`
+	// ConfigSHA256 is the SHA-256 of the .drover.toml a drive runs under, hex,
+	// written at launch and by each resume that takes, and ConfigResumed that
+	// a resume wrote it. A drive keeps the config it read until a resume, so
+	// another process compares this with the file to say an edit has not
+	// applied. Absent from a lease an older binary wrote.
+	ConfigSHA256  string `json:"config_sha256,omitempty"`
+	ConfigResumed bool   `json:"config_resumed,omitempty"`
 	// Handoff is what a drive re-executing itself leaves for the process that
 	// takes its place, opaque here and cleared once that process has read it.
 	Handoff json.RawMessage `json:"handoff,omitempty"`
