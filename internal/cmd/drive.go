@@ -588,7 +588,10 @@ A runner that fails on the service rather than on the work is answered before
 the ledger is asked anything. A transport failure is retried twice, 45 seconds
 then 90; a spent account is waited out only when the runner named the instant it
 serves again and that instant falls inside --for or --until; a runner with no
-credentials is never waited on. Anything left parks the item ` + "`runner_fault`" + `,
+credentials is never waited on. Claude Code's own reset instant is read from its
+stream, the last rate_limit_event's epoch before the sentence in its result.
+--until takes a time of day, so a reset more than a day out, as a weekly limit's
+is, can only be covered by --for. Anything left parks the item ` + "`runner_fault`" + `,
 quoting what the runner said, and ends the drive: an account with nothing in it
 is empty for the next item too.
 

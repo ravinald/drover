@@ -55,7 +55,10 @@ var (
 		"invalid_api_key",
 		"credentials",
 	}
+	// Claude Code names the spent window rather than saying "usage": "You've
+	// hit your weekly limit", "... session limit", "... Opus limit".
 	quotaSigns = []string{
+		"you've hit your",
 		"usage limit",
 		"rate limit",
 		"rate_limit",
@@ -126,7 +129,7 @@ func Classify(r Result) Result {
 	default:
 		return r
 	}
-	r.RetryAt = RetryAt(r.Text)
+	r.RetryAt = retryAt(r)
 	return r
 }
 
@@ -140,27 +143,57 @@ func containsAny(text string, signs []string) bool {
 }
 
 // RetryAt is the instant a failure message names as the one to come back at,
-// and the zero time when it names none.
+// and the zero time when it names none. A sentence with no year in it is read
+// against now.
 //
-// Two forms, because two runners state it two ways and neither offers a field.
-// codex writes it for a person: "try again at Sep 22nd, 2026 10:03 AM", with an
-// ordinal suffix no time layout in the standard library parses. Claude Code
-// appends a Unix second to its own quota message after a pipe.
+// Three forms, because two runners state it three ways and neither offers a
+// field in the message. codex writes it for a person: "try again at Sep 22nd,
+// 2026 10:03 AM", with an ordinal suffix no time layout in the standard library
+// parses. Claude Code once appended a Unix second to its quota message after a
+// pipe, and now writes "resets Oct 25 at 8pm (America/Los_Angeles)", with no
+// year and the zone it means.
 //
 // A caller waits on this, so every uncertain read returns zero: an instant
 // drover guessed wrong is a drive asleep until tomorrow, while no instant is a
 // drive that stops and says why.
 func RetryAt(text string) time.Time {
+	return retryText(text, time.Now())
+}
+
+// retryAt is the instant a classified result names. Claude Code's
+// rate_limit_event states a quota reset as an epoch, which no sentence it
+// rewords can break, so a rejected one wins over the prose.
+func retryAt(r Result) time.Time {
+	if r.Fault == FaultQuota && r.RateLimitStatus == "rejected" && r.RateLimitReset > 0 {
+		return time.Unix(r.RateLimitReset, 0)
+	}
+	ref := r.loggedAt
+	if ref.IsZero() {
+		ref = time.Now()
+	}
+	return retryText(r.Text, ref)
+}
+
+func retryText(text string, ref time.Time) time.Time {
 	if t := retryEpoch(text); !t.IsZero() {
 		return t
 	}
-	return retryProse(text)
+	if t := retryProse(text); !t.IsZero() {
+		return t
+	}
+	return retryResets(text, ref)
 }
 
 var (
-	epochPat = regexp.MustCompile(`\|\s*(\d{10,})\b`)
-	prosePat = regexp.MustCompile(`(?i)\b([A-Z][a-z]{2})[a-z]*\.? (\d{1,2})(?:st|nd|rd|th)?,? (\d{4}),? (\d{1,2}):(\d{2})\s*(AM|PM)?`)
+	epochPat  = regexp.MustCompile(`\|\s*(\d{10,})\b`)
+	prosePat  = regexp.MustCompile(`(?i)\b([A-Z][a-z]{2})[a-z]*\.? (\d{1,2})(?:st|nd|rd|th)?,? (\d{4}),? (\d{1,2}):(\d{2})\s*(AM|PM)?`)
+	resetsPat = regexp.MustCompile(`(?i)\bresets ([A-Z][a-z]{2})[a-z]*\.? (\d{1,2})(?:st|nd|rd|th)?,? at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?:\s*\(([A-Za-z0-9_+/-]+)\))?`)
 )
+
+// resetsAhead bounds how far out a yearless reset may land. The longest window
+// Claude Code reports is seven days, so a year that puts the instant further
+// out than this is a misread, not a long wait.
+const resetsAhead = 8 * 24 * time.Hour
 
 func retryEpoch(text string) time.Time {
 	m := epochPat.FindStringSubmatch(text)
@@ -190,7 +223,59 @@ func retryProse(text string) time.Time {
 	year, _ := strconv.Atoi(m[3])
 	hour, _ := strconv.Atoi(m[4])
 	minute, _ := strconv.Atoi(m[5])
-	switch strings.ToUpper(m[6]) {
+	hour, ok = clock12(hour, m[6])
+	if !ok || day < 1 || day > 31 || minute > 59 {
+		return time.Time{}
+	}
+	return time.Date(year, mon, day, hour, minute, 0, 0, time.Local)
+}
+
+// retryResets reads Claude Code's sentence, which names month, day, hour and
+// zone but no year. The year is the first that puts the instant after ref, the
+// log's own last timestamp, and a zone that will not load falls back to the
+// local one rather than costing the instant.
+func retryResets(text string, ref time.Time) time.Time {
+	m := resetsPat.FindStringSubmatch(text)
+	if m == nil {
+		return time.Time{}
+	}
+	mon, ok := months[strings.ToLower(m[1])]
+	if !ok {
+		return time.Time{}
+	}
+	day, _ := strconv.Atoi(m[2])
+	hour, _ := strconv.Atoi(m[3])
+	minute := 0
+	if m[4] != "" {
+		minute, _ = strconv.Atoi(m[4])
+	}
+	hour, ok = clock12(hour, m[5])
+	if !ok || day < 1 || day > 31 || minute > 59 {
+		return time.Time{}
+	}
+	loc := time.Local
+	if m[6] != "" {
+		if l, err := time.LoadLocation(m[6]); err == nil {
+			loc = l
+		}
+	}
+	for _, year := range []int{ref.In(loc).Year(), ref.In(loc).Year() + 1} {
+		t := time.Date(year, mon, day, hour, minute, 0, 0, loc)
+		if t.Day() != day || !t.After(ref) {
+			continue
+		}
+		if t.Sub(ref) > resetsAhead {
+			return time.Time{}
+		}
+		return t
+	}
+	return time.Time{}
+}
+
+// clock12 turns an hour with an optional AM or PM onto the 24-hour clock, and
+// reports false for an hour that clock has no place for.
+func clock12(hour int, suffix string) (int, bool) {
+	switch strings.ToUpper(suffix) {
 	case "PM":
 		if hour < 12 {
 			hour += 12
@@ -200,10 +285,7 @@ func retryProse(text string) time.Time {
 			hour = 0
 		}
 	}
-	if day < 1 || day > 31 || hour > 23 || minute > 59 {
-		return time.Time{}
-	}
-	return time.Date(year, mon, day, hour, minute, 0, 0, time.Local)
+	return hour, hour <= 23
 }
 
 var months = map[string]time.Month{
