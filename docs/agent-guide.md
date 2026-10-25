@@ -150,6 +150,10 @@ You can carry an item from a tracker issue to an audited review without the oper
 
 Between `review` and `merge` there is a loop, not a straight line. A requirement the review finds unmet goes back to the branch rather than to the tracker; see step 4 below.
 
+### A runner out of budget
+
+A session refused for a spent account parks its item `runner_fault` and ends the drive, unless the runner named the instant it serves again and that instant falls inside the drive's `--for` or `--until`, in which case drive sleeps until then and relaunches. Claude Code states its reset twice: as an epoch on the last `rate_limit_event` before its result, which drive reads first, and as a sentence such as `resets Oct 25 at 8pm (America/Los_Angeles)`, read in the zone it names when the event carries none. A weekly limit resets days out, and `--until` takes a time of day, so it never reaches past the next 24 hours: only `--for` (`--for 48h`) can cover such a reset. The park quotes the instant either way, so the operator can relaunch at it.
+
 ## Reviewing a finished item
 
 Start with `drover review <id>`. It assembles six things a reviewer would otherwise gather from as many commands: the numbered contract, each dependency with how well it is audited, the open follow-ups, each dependency's saved report, the run's self-report, and the verify command. The failure mode of gathering them by hand is skipping one silently.

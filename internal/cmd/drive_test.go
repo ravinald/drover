@@ -2321,6 +2321,57 @@ func TestADriveStopsAtTheFirstRunnerFault(t *testing.T) {
 	}
 }
 
+// Claude Code's weekly-limit refusal, as F14's review log recorded it: the
+// reset stated once as an epoch on the rate_limit_event and once as prose with
+// no year. The epoch is 2026-10-25T20:00:00-07:00.
+const (
+	weeklyLimitEvent = `{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1792983600,"rateLimitType":"seven_day"}}`
+	weeklyLimitHit   = `{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error",` +
+		`"result":"You've hit your weekly limit · resets Oct 25 at 8pm (America/Los_Angeles)"}`
+)
+
+// A week-long window resets more than a day out, which is past what --until
+// can name, so --for is the bound that has to cover it.
+func TestFaultWaitOnClaudesWeeklyReset(t *testing.T) {
+	res := faultResult(t, weeklyLimitEvent+"\n"+weeklyLimitHit)
+	reset := time.Unix(1792983600, 0)
+	if res.Fault != runlog.FaultQuota || !res.RetryAt.Equal(reset) {
+		t.Fatalf("fault %q at %v, want %q at %v", res.Fault, res.RetryAt, runlog.FaultQuota, reset)
+	}
+	now := time.Date(2026, time.October, 24, 17, 0, 0, 0, time.UTC)
+	if got, _ := faultWait(res, 0, now.Add(48*time.Hour), now); got != reset.Sub(now)+quotaSlack {
+		t.Errorf("under --for 48h faultWait = %v, want %v", got, reset.Sub(now)+quotaSlack)
+	}
+	if got, _ := faultWait(res, 0, now.Add(8*time.Hour), now); got != 0 {
+		t.Errorf("under --for 8h faultWait = %v, want 0: the reset is past the bound", got)
+	}
+}
+
+// The same refusal end to end: a reset the bound does not cover parks the item
+// runner_fault, with the instant in the park.
+func TestADriveParksOnAWeeklyResetPastItsBound(t *testing.T) {
+	t.Cleanup(func() { driveFor, driveNoMerge = 0, false })
+	driveProject(t)
+	bin := t.TempDir()
+	stub(t, filepath.Join(bin, "stub-impl"), "#!/bin/sh\n"+
+		"printf '%s\\n' \"{\\\"type\\\":\\\"rate_limit_event\\\",\\\"rate_limit_info\\\":{\\\"status\\\":\\\"rejected\\\",\\\"resetsAt\\\":$(($(date +%s)+172800))}}\"\n"+
+		"cat <<'STREAM'\n"+weeklyLimitHit+"\nSTREAM\n")
+	stub(t, filepath.Join(bin, "stub-rev"), revRefuses)
+	t.Setenv("DROVER_TEST_REV_STDERR", "the review ran against a run that never happened")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var err error
+	out := capture(t, func() { err = execute(t, "drive", "--json", "--for", "1h", "--no-merge", "1") })
+	if !errors.Is(err, errRunnerFault) {
+		t.Fatalf("drive returned %v, want %v\n%s", err, errRunnerFault, out)
+	}
+	// Two days out is the event's epoch; the prose would name October 25th.
+	day := time.Now().Add(48 * time.Hour).Format("2006-01-02")
+	if !strings.Contains(out, `"park":"runner_fault"`) || !strings.Contains(out, "It serves again at "+day) {
+		t.Errorf("the item did not park runner_fault naming the event's reset on %s:\n%s", day, out)
+	}
+}
+
 // The other half of a quota: a reset the operator's own bound covers is waited
 // out and the item carries on, rather than costing a park and a resume somebody
 // has to type in the morning.
