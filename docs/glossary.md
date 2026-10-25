@@ -11,6 +11,7 @@ Each command, as typed after `drover`.
 | `accept`                | Deletes the stop marker from a scaffold, making it runnable.                                                 |
 | `agents`                | Prints the agent instructions generated from this project's config; `--write` writes them into a file.       |
 | `attach`                | Prints a drive's events from the start and follows them until the drive exits.                               |
+| `amend`                 | Replaces an accepted, unmerged item's numbered requirements and keeps the old list.                          |
 | `audit`                 | Appends an audit row: the audit level, who wrote the code (`--code-by`) and who looked (`--reviewer`).       |
 | `check`                 | Validates the config, the backlog, the ledger and the paths between them; exits 2 on findings.               |
 | `close-changes`         | Replaces the sent-back section of an item with a closed note, writing no request-changes row.                |
@@ -52,6 +53,7 @@ Each command, as typed after `drover`.
 | `split`                 | Scaffolds a new item for work the contract never named and adds it to this item's deps.                      |
 | `status`                | Prints every item, its state and its audit level.                                                            |
 | `supervise`             | Launches a supervising session that handles what `[supervise]` allows.                                       |
+| `touch`                 | Records a hand edit to an accepted item's prose as the operator's.                                           |
 | `unaccept`              | Restores the stop marker, returning an item to a scaffold.                                                   |
 | `unaudited`             | Lists merged items nobody audited, worst blast radius first.                                                 |
 | `unmark-merged`         | Appends a tombstone withdrawing a completion.                                                                |
@@ -153,6 +155,7 @@ Why drive stopped an item (ledger and `--json` `park`), and the underlying failu
 | `no_commits`              | The run committed nothing.                                                            |
 | `uncommitted_work`        | The run left uncommitted work in its worktree.                                        |
 | `worktree_failed`         | The item's worktree could not be opened, linked or set up.                            |
+| `hand_edited`             | The body changed outside drover before any session launched.                          |
 | `branch_failed`           | A git step on the item's branch failed.                                               |
 | `implement_died`          | The implement session left no result.                                                 |
 | `implement_unreadable`    | The implement session left a stream drover cannot read.                               |
@@ -268,6 +271,7 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `NO VERIFY`           | `[verify] default` is empty.                                                          |
 | `UNDECLARED KEY`      | A config key names a frontmatter key `[frontmatter]` does not declare.                |
 | `NO REQUIREMENTS`     | An accepted item has no numbered requirements.                                        |
+| `HAND EDITED`         | An accepted item's body changed outside drover since its last digest.                 |
 | `UNREADABLE`          | A backlog file did not parse.                                                         |
 | `BAD VALUE`           | An item's value fails what `[frontmatter]` declares the key may hold.                 |
 | `BAD RUNNER`          | A `[runners]` entry's argv is one its binary cannot use.                              |

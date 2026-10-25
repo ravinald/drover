@@ -530,7 +530,7 @@ func TestSuperviseDryRunPrintsTheBrief(t *testing.T) {
 			t.Errorf("the prompt does not name %s", a.key)
 		}
 	}
-	for _, want := range []string{"| `resolve_conflict` | operator |", "drover drive 1 --json --events", "needs_operator", "`supervise`, `unaccept`"} {
+	for _, want := range []string{"| `resolve_conflict` | operator |", "drover drive 1 --json --events", "needs_operator", "`supervise`, `touch`, `unaccept`"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the prompt does not carry %q:\n%s", want, out)
 		}
