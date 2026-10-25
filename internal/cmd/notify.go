@@ -152,6 +152,8 @@ func sampleEvent(kind, project string) DriveEvent {
 		e.Reason, e.Action, e.Policy, e.Run = "", "test", string(polSupervisor), testReason
 	case evMerged:
 		e.Reason, e.Title = "", "TEST: "+testReason
+	case evConfigChanged:
+		e.Tables = []string{"[drive]"}
 	case evUsageWarning:
 		left := 20
 		e.Window, e.Remaining, e.ResetsAt = config.UsageWeekly, &left, time.Now().Add(24*time.Hour).Format(time.RFC3339)

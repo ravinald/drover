@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -397,5 +398,159 @@ func TestTimeoutWithoutWaitRefusesADrive(t *testing.T) {
 	}
 	if n := stageRows(t, "1", ledger.StageImplement); n != 0 {
 		t.Errorf("the refused drive ran item 1 (%d implement rows)", n)
+	}
+}
+
+// configEdits runs each id's edit as the drive dispatches that item, before
+// the drive compares the config on disk.
+func configEdits(t *testing.T, edits map[string]func()) {
+	t.Helper()
+	driveDispatching = func(id string) {
+		if edit := edits[id]; edit != nil {
+			edit()
+		}
+	}
+	t.Cleanup(func() { driveDispatching = nil })
+}
+
+// configChanges is the index in evs of each config_changed event.
+func configChanges(evs []DriveEvent) []int {
+	var out []int
+	for i, e := range evs {
+		if e.Event == evConfigChanged {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// An edit to .drover.toml mid-drive is reported once per distinct content and
+// applied nowhere: the item after it under the same bytes says nothing more, a
+// revert to the bytes the drive runs under says nothing, and the same edit
+// made again after that revert is reported again.
+func TestADriveReportsAConfigEditOncePerContent(t *testing.T) {
+	enqueueFixture(t)
+	write(t, filepath.Join("work", "05-fifth.md"), "---\ntitle: Fifth\ndeps:\n---\n\n1. Do it last.\n")
+	raw, err := os.ReadFile(config.FileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(raw), "[drive]\n", "[drive]\nprotected_paths = [\"migrations/*\"]\n", 1)
+	if edited == string(raw) {
+		t.Fatal("the fixture config holds no [drive] table")
+	}
+	configEdits(t, map[string]func(){
+		"2": func() { write(t, config.FileName, edited) },
+		"3": func() { write(t, config.FileName, string(raw)) },
+		"5": func() { write(t, config.FileName, edited) },
+	})
+
+	evs, stderr, err := driveEventsOf(t, "1", "2", "4", "3", "5")
+	if err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	if n := strings.Count(stderr, "config changed on disk at "); n != 2 {
+		t.Errorf("the drive printed the config line %d times, want 2 (the edit, and the edit again after a revert):\n%s", n, stderr)
+	}
+	if !strings.Contains(stderr, "this drive still runs the .drover.toml it started with; drover drive --pause, then --resume, applies it; changed: [drive]") {
+		t.Errorf("the config line does not say what runs, how to apply it and which table changed:\n%s", stderr)
+	}
+	got := configChanges(evs)
+	if len(got) != 2 {
+		t.Fatalf("%d config_changed events, want 2: %+v", len(got), evs)
+	}
+	for _, i := range got {
+		if e := evs[i]; !slices.Equal(e.Tables, []string{"[drive]"}) || e.Error != "" {
+			t.Errorf("config_changed names tables %v error %q, want [drive] alone", e.Tables, e.Error)
+		}
+	}
+	two, four, five := eventIndex(evs, evDispatched, "2"), eventIndex(evs, evDispatched, "4"), eventIndex(evs, evDispatched, "5")
+	if got[0] < two || got[0] > four {
+		t.Errorf("the first config_changed is at %d, want between 2's dispatch (%d) and 4's (%d)", got[0], two, four)
+	}
+	if got[1] < five {
+		t.Errorf("the second config_changed is at %d, before 5's dispatch at %d: the third item or the revert reported", got[1], five)
+	}
+}
+
+// An edit that will not load is reported with the load error rather than a
+// table list, and the drive goes on to dispatch the next item.
+func TestADriveReportsAnUnloadableConfigEdit(t *testing.T) {
+	enqueueFixture(t)
+	raw, err := os.ReadFile(config.FileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configEdits(t, map[string]func(){
+		"1": func() { write(t, config.FileName, strings.Replace(string(raw), "[run]", "[run\n", 1)) },
+		"2": func() { write(t, config.FileName, string(raw)) },
+	})
+
+	evs, stderr, err := driveEventsOf(t, "1", "2")
+	if err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	got := configChanges(evs)
+	if len(got) != 1 || evs[got[0]].Error == "" || len(evs[got[0]].Tables) != 0 {
+		t.Fatalf("config_changed at %v in %+v, want one carrying the load error and no tables", got, evs)
+	}
+	if !strings.Contains(stderr, "the new file will not load, so a --resume refuses it: ") {
+		t.Errorf("the config line does not report the load error:\n%s", stderr)
+	}
+	if eventIndex(evs, evDispatched, "2") < 0 {
+		t.Errorf("the drive stopped on an unloadable edit instead of going on: %+v", evs)
+	}
+}
+
+// status names a drive whose config moved on from the file on disk, from the
+// lease alone, and says nothing for a match or for a lease with no digest.
+func TestStatusSaysTheConfigChangedUnderARunningDrive(t *testing.T) {
+	dir := leaseProject(t)
+	raw, err := os.ReadFile(filepath.Join(dir, config.FileName)) // #nosec G304 -- the fixture's own config
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ledger.Append(s.cfg.Abs(s.cfg.Paths.Ledger),
+		ledger.Row{ID: ledger.DriveRowID, Drive: "D1", Queued: []string{"1"}, Date: ledger.Today()}); err != nil {
+		t.Fatal(err)
+	}
+	const line = "config changed since this drive started; --pause, then --resume, applies it"
+	for _, c := range []struct {
+		name, digest string
+		want         bool
+	}{
+		{"differing", configDigest(append(slices.Clone(raw), "# edited\n"...)), true},
+		{"matching", configDigest(raw), false},
+		{"absent", "", false},
+	} {
+		h, err := lease.Acquire(leasePath(t, dir), lease.Lease{Command: "drive", Root: dir, Drive: "D1", ConfigSHA256: c.digest})
+		if err != nil {
+			t.Fatalf("acquire: %v", err)
+		}
+		out := capture(t, func() {
+			if err := execute(t, "status", "--no-tracker"); err != nil {
+				t.Fatalf("status: %v", err)
+			}
+		})
+		if strings.Contains(out, line) != c.want {
+			t.Errorf("%s digest: status says the config changed = %v, want %v:\n%s", c.name, !c.want, c.want, out)
+		}
+		js := capture(t, func() {
+			if err := execute(t, "status", "--no-tracker", "--json"); err != nil {
+				t.Fatalf("status --json: %v", err)
+			}
+		})
+		var rep StatusReport
+		if err := json.Unmarshal([]byte(js), &rep); err != nil {
+			t.Fatalf("status --json: %v\n%s", err, js)
+		}
+		if len(rep.Drives) != 1 || !rep.Drives[0].Running || rep.Drives[0].ConfigChanged != c.want {
+			t.Errorf("%s digest: status --json drives %+v, want D1 running with config_changed %v", c.name, rep.Drives, c.want)
+		}
+		_ = h.Release()
 	}
 }

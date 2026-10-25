@@ -177,12 +177,15 @@ func (s *session) ledgerNames(id string) bool {
 	return slices.ContainsFunc(l.Rows, func(r ledger.Row) bool { return r.Drive == id })
 }
 
-// drivesRunning marks the drive the lease names as running, and as paused
-// when the lease reads paused.
-func drivesRunning(ds []ledger.Drive, l lease.Lease, busy bool) {
+// drivesRunning marks the drive the lease names as running, as paused when
+// the lease reads paused, and as running under a config the file on disk has
+// moved on from.
+func (s *session) drivesRunning(ds []ledger.Drive, l lease.Lease, busy bool) {
+	drift := busy && s.configDrift(l)
 	for i := range ds {
 		ds[i].Running = busy && l.Drive != "" && ds[i].ID == l.Drive
 		ds[i].Paused = ds[i].Running && l.Paused
+		ds[i].ConfigChanged = ds[i].Running && drift
 	}
 }
 
@@ -253,7 +256,7 @@ read says why and the rest still answer.`,
 func (s *session) drives() []ledger.Drive {
 	ds := s.ledger.Drives()
 	l, busy, _ := s.leaseHolder()
-	drivesRunning(ds, l, busy)
+	s.drivesRunning(ds, l, busy)
 	return ds
 }
 

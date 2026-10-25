@@ -63,6 +63,11 @@ type driveSched struct {
 	// usage is usage_admission's hold, read by the dispatcher and by every
 	// item at each stage that launches a session.
 	usage *usageGate
+	// configSeen is the last on-disk .drover.toml this drive reported as
+	// differing from configBase, the inputs it compared against: a digest, or
+	// the read error. A resume replaces inputs, which restarts the comparison.
+	configSeen string
+	configBase *driveInputs
 }
 
 func newDriveSched() *driveSched {

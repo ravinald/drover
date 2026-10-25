@@ -38,6 +38,9 @@ const (
 	evExit            = "exit"
 	evPaused          = "paused"
 	evResumed         = "resumed"
+	// evConfigChanged is a .drover.toml on disk that differs from the one the
+	// drive runs under, once per distinct content. It applies nothing.
+	evConfigChanged = "config_changed"
 	// evUsageWarning is a [usage] notify level crossed, sent once per window
 	// per reset. It pauses nothing.
 	evUsageWarning = "usage_warning"
@@ -121,6 +124,11 @@ type DriveEvent struct {
 	// Changed is which inputs a resume reloaded differ from those before it,
 	// on resumed alone: config, prompt, review, verify, binary.
 	Changed []string `json:"changed,omitempty"`
+	// Tables is which top-level tables of the config on disk differ from the
+	// one the drive runs under, and Error why that file will not read or load,
+	// on config_changed alone.
+	Tables []string `json:"tables,omitempty"`
+	Error  string   `json:"error,omitempty"`
 	// Window, Remaining and ResetsAt are the usage level behind a
 	// usage_warning, and behind the paused, needs_operator and resumed that
 	// usage_admission emits: weekly, five_hour, overage or overage_usd, the

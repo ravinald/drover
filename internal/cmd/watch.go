@@ -43,7 +43,7 @@ names exit, 3 otherwise.
 
 --until takes any event a drive emits: started, queued, dispatched,
 preflight, stage, check, parked, filed, needs_operator, merged, paused,
-resumed, usage_warning and exit. usage_warning is a [usage] notify level crossed; a usage hold
+resumed, config_changed, usage_warning and exit. usage_warning is a [usage] notify level crossed; a usage hold
 arrives as paused and needs_operator with action usage_admission.
 
 This is the loop a supervising session would otherwise write around sleep and

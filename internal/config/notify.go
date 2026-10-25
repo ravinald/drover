@@ -39,7 +39,7 @@ const EventExitUndone = "exit_undone"
 func NotifyEvents() []string {
 	return []string{
 		"started", "queued", "dispatched", "preflight", "stage", "check", "parked", "filed",
-		"needs_operator", "needs_supervisor", "merged", "paused", "resumed", "usage_warning",
+		"needs_operator", "needs_supervisor", "merged", "paused", "resumed", "config_changed", "usage_warning",
 		"exit", EventExitUndone,
 	}
 }
