@@ -89,6 +89,29 @@ Both may be set, and both run. `drover notify --test` sends a test event through
 
 This is the mode to settle into. The queue runs, the waiting costs nothing, and the only thing that reaches you is an event a person has to handle.
 
+## Running past the weekly allotment
+
+A Claude account runs out twice, in sequence: first the weekly allotment, then any extra-usage credit you bought to work past it. A drive that runs into either without a plan loses the session in flight and stops. Two levels per window tell `drive` what to do before that.
+
+drover can see **the percent of each window left**: Claude Code reports the five-hour and seven-day windows on every request, in steps of 1%, and drover keeps the last reading of each session on its usage row. It cannot see **a remaining credit balance**: once the week reads 100%, the reading says only that sessions are drawing on purchased credit and, at the very end, `out_of_credits`. The only dollar figure drover holds is each session's list-price `cost_usd`, which is not what the account was charged.
+
+Choose the levels in the per-user config, since the limit is the account's and every project shares it:
+
+```toml
+[usage.weekly]
+notify_remaining = 20
+pause_remaining  = 5
+```
+
+- **The notify level** is how much warning you want. At 20% of the week left, `drive` sends one `usage_warning` through `notify` and `ntfy` and keeps going. Pick it at roughly a day's worth of your usual use, so the notice arrives with time to decide.
+- **The fail-safe level** is what you keep back for yourself. At 5% left, `usage_admission` holds the drive: sessions already running finish their stage, since that work is what the margin is for, and nothing new starts. The drive pauses as `drive --pause` would and emits `needs_operator`. Pick it at what an operator session or two of your own needs, so a drive never spends the last of the week on your behalf.
+- **A hold inside the bound lifts itself.** Under `--for 48h`, a weekly reset 30 hours away is inside the bound, and the drive resumes at the reset with no one typing anything. Under an unbounded drive it waits for `drover drive --resume`, and a deadline that arrives first ends the drive with exit 0 and the waiting items reported `held`.
+- **A refusal holds too.** A session the service turns away for quota sends its item back to the head of the queue at the stage that was refused, and the drive holds as above, instead of parking the item `runner_fault`.
+
+`[usage.overage]` decides what happens once the week is spent and credit is in play. The default, `mode = "pause"`, holds the drive the moment a reading shows sessions on purchased credit, so nothing spends it unattended. `mode = "continue"` runs on credit, and `max_usd` bounds it at a list-price sum across every registered project since the week began, with `notify_usd` as the warning on the way. Since the sum is list price and the balance is invisible, set `max_usd` comfortably below what you bought, and expect `out_of_credits` to hold the drive anyway if the estimate runs long. Under `continue`, leave `[usage.weekly] pause_remaining` unset if you mean to run straight onto credit, or `drover drive --resume` past the weekly hold when it comes.
+
+`drover status` prints the reading as one footer line, and `drover drive --dry-run` says whether `usage_admission` would hold now and why. Every key is in [`[usage]`](configuration.md#usageweekly-and-usagefive_hour).
+
 ## Supervised drive
 
 `drover supervise` launches one interactive session with `DROVER_ACTOR=supervisor` to watch drives and take the actions this project's `[supervise]` policy assigns to a supervisor: resolving a branch-update conflict, relaunching an item whose session died, writing the requirements of a scaffold a review filed. The following command prints what that session will be told without launching anything:
@@ -149,8 +172,9 @@ Most projects end up with the following arrangement once the first few items hav
 2. Write and accept items in a short operator session.
 3. Start `drover drive --detach --for <hours>` from a terminal, not as a background task inside an agent session.
 4. Let `[supervise] notify` reach you on `needs_operator`, and use `drover supervise` only if routine parks keep waiting overnight.
-5. Handle each event in a fresh operator session.
-6. Read `drover status`, or the page `[[status.render]]` writes, whenever you like: reading it costs nothing.
+5. Set [`[usage.weekly]`](#running-past-the-weekly-allotment) `notify_remaining` and `pause_remaining` in the per-user config, so no drive spends the end of the week for you.
+6. Handle each event in a fresh operator session.
+7. Read `drover status`, or the page `[[status.render]]` writes, whenever you like: reading it costs nothing.
 
 ## Where to go next
 

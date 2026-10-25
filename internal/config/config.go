@@ -649,7 +649,8 @@ func (c *Config) validateForge(path string) error {
 
 // Usage is how status reads the usage rows: the window its report-level totals
 // cover, the budget it measures them against, and when a session has run long
-// enough to name. Read SessionMaxHours and ContextWarn through
+// enough to name. Weekly, FiveHour and Overage are what drive does on the
+// account's own rate_limit reading. Read SessionMaxHours and ContextWarn through
 // UsageSessionMaxHours and UsageContextWarn, which resolve an undeclared key to
 // its default.
 type Usage struct {
@@ -666,6 +667,79 @@ type Usage struct {
 	// ContextWarn is the largest context, in tokens, a session may reach before
 	// status names it.
 	ContextWarn int64 `toml:"context_warn"`
+	// Weekly and FiveHour are the two levels drive acts on for each window
+	// Claude reports, and Overage what it does past the weekly allotment.
+	// Read them through UsageLevel and OverageMode, which tell unset from 0.
+	Weekly   UsageWindow  `toml:"weekly"`
+	FiveHour UsageWindow  `toml:"five_hour"`
+	Overage  UsageOverage `toml:"overage"`
+}
+
+// UsageWindow is [usage.weekly] or [usage.five_hour]: the percent of the window
+// left, as the service reports it, at which drive notifies and at which it
+// holds dispatch. Unset is no such step; 0 is a step at nothing left.
+type UsageWindow struct {
+	NotifyRemaining int `toml:"notify_remaining"`
+	PauseRemaining  int `toml:"pause_remaining"`
+}
+
+// UsageOverage is [usage.overage]: what drive does once the weekly allotment is
+// spent and sessions run on purchased credit, which no reading puts a figure
+// on. MaxUSD and NotifyUSD are list-price cost_usd summed, not what the
+// account was charged.
+type UsageOverage struct {
+	Mode      string  `toml:"mode"`
+	MaxUSD    float64 `toml:"max_usd"`
+	NotifyUSD float64 `toml:"notify_usd"`
+}
+
+// The [usage.overage] modes.
+const (
+	OveragePause    = "pause"
+	OverageContinue = "continue"
+)
+
+// The [usage] window tables, as a dotted key names them.
+const (
+	UsageWeekly   = "weekly"
+	UsageFiveHour = "five_hour"
+)
+
+// UsageLevel is [usage.<window>] notify_remaining or pause_remaining, and false
+// when no layer set it. step is "notify" or "pause".
+func (c *Config) UsageLevel(window, step string) (int, bool) {
+	key := "usage." + window + "." + step + "_remaining"
+	if !c.Declared(key) {
+		return 0, false
+	}
+	w := c.Usage.Weekly
+	if window == UsageFiveHour {
+		w = c.Usage.FiveHour
+	}
+	if step == "pause" {
+		return w.PauseRemaining, true
+	}
+	return w.NotifyRemaining, true
+}
+
+// OverageMode is [usage.overage] mode, or pause when unset.
+func (c *Config) OverageMode() string {
+	if c.Usage.Overage.Mode == "" {
+		return OveragePause
+	}
+	return c.Usage.Overage.Mode
+}
+
+// OverageUSD is [usage.overage] max_usd or notify_usd, and false when unset.
+// step is "max" or "notify".
+func (c *Config) OverageUSD(step string) (float64, bool) {
+	if !c.Declared("usage.overage." + step + "_usd") {
+		return 0, false
+	}
+	if step == "max" {
+		return c.Usage.Overage.MaxUSD, true
+	}
+	return c.Usage.Overage.NotifyUSD, true
 }
 
 // The [usage] defaults, applied where the key is read.
@@ -708,6 +782,41 @@ func (c *Config) validateUsage(path string) error {
 	}
 	if c.Declared("usage.context_warn") && c.Usage.ContextWarn <= 0 {
 		return fmt.Errorf("%s: usage.context_warn is %d: give a positive count of tokens", path, c.Usage.ContextWarn)
+	}
+	for _, window := range []string{UsageWeekly, UsageFiveHour} {
+		notify, nok := c.UsageLevel(window, "notify")
+		pause, pok := c.UsageLevel(window, "pause")
+		for _, l := range []struct {
+			step  string
+			v     int
+			isSet bool
+		}{{"notify", notify, nok}, {"pause", pause, pok}} {
+			if l.isSet && (l.v < 0 || l.v > 99) {
+				return fmt.Errorf("%s: usage.%s.%s_remaining is %d: give the percent of the window left, 0 to 99, or leave it unset for no such step",
+					path, window, l.step, l.v)
+			}
+		}
+		if nok && pok && pause >= notify {
+			return fmt.Errorf("%s: usage.%s.pause_remaining is %d and notify_remaining is %d: the pause has to come after the notice, so pause_remaining must be below notify_remaining",
+				path, window, pause, notify)
+		}
+	}
+	switch m := c.Usage.Overage.Mode; m {
+	case "", OveragePause, OverageContinue:
+	default:
+		return fmt.Errorf("%s: usage.overage.mode is %q: give %q or %q", path, m, OveragePause, OverageContinue)
+	}
+	maxUSD, mok := c.OverageUSD("max")
+	notifyUSD, nok := c.OverageUSD("notify")
+	if mok && maxUSD <= 0 {
+		return fmt.Errorf("%s: usage.overage.max_usd is %g: give a positive number of dollars, or leave it unset for no cap", path, maxUSD)
+	}
+	if nok && notifyUSD <= 0 {
+		return fmt.Errorf("%s: usage.overage.notify_usd is %g: give a positive number of dollars, or leave it unset for no notice", path, notifyUSD)
+	}
+	if mok && nok && notifyUSD >= maxUSD {
+		return fmt.Errorf("%s: usage.overage.notify_usd is %g and max_usd is %g: the notice has to come before the hold, so notify_usd must be below max_usd",
+			path, notifyUSD, maxUSD)
 	}
 	return nil
 }

@@ -78,12 +78,11 @@ type Result struct {
 	// come back at. fault.go holds both and what reads them.
 	Fault   string
 	RetryAt time.Time
-	// RateLimitStatus and RateLimitReset are the last rate_limit_event Claude
-	// Code wrote before its result: "rejected" or "allowed", and the epoch the
-	// limit resets at. The event states the reset as a number where the result
-	// states it as prose, and a quota fault waits on the number first.
-	RateLimitStatus string
-	RateLimitReset  int64
+	// RateLimit is the last rate_limit_event Claude Code wrote before its
+	// result, nil for a session that wrote none, which is every codex and agy
+	// session. The event states the reset as a number where the result states
+	// it as prose, and a quota fault waits on the number first.
+	RateLimit *RateLimit
 	// loggedAt is the latest timestamp any event carried, the clock a reset
 	// sentence with no year in it is read against.
 	loggedAt time.Time
@@ -363,10 +362,7 @@ func carryClaude(line []byte, r *Result) {
 		Message   struct {
 			Usage *APIUsage `json:"usage"`
 		} `json:"message"`
-		RateLimit struct {
-			Status   string `json:"status"`
-			ResetsAt int64  `json:"resetsAt"`
-		} `json:"rate_limit_info"`
+		RateLimit *claudeRateLimit `json:"rate_limit_info"`
 	}
 	if json.Unmarshal(line, &ev) != nil {
 		return
@@ -375,8 +371,8 @@ func carryClaude(line []byte, r *Result) {
 		r.loggedAt = at
 	}
 	switch {
-	case ev.Type == "rate_limit_event":
-		r.RateLimitStatus, r.RateLimitReset = ev.RateLimit.Status, ev.RateLimit.ResetsAt
+	case ev.Type == "rate_limit_event" && ev.RateLimit != nil:
+		r.RateLimit = ev.RateLimit.reading()
 	case ev.Type == "assistant" && ev.Message.Usage != nil:
 		r.ContextMax = max(r.ContextMax, ev.Message.Usage.Context())
 	}
@@ -624,7 +620,7 @@ func ReadResult(path string) (Read, error) {
 	// its result.
 	if rd.Found {
 		rd.Result.ContextMax = carried.ContextMax
-		rd.Result.RateLimitStatus, rd.Result.RateLimitReset = carried.RateLimitStatus, carried.RateLimitReset
+		rd.Result.RateLimit = carried.RateLimit
 		rd.Result.loggedAt = carried.loggedAt
 		if rd.Result.Text == "" {
 			rd.Result.Text = carried.Text

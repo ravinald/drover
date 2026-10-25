@@ -2347,11 +2347,11 @@ func TestFaultWaitOnClaudesWeeklyReset(t *testing.T) {
 	}
 }
 
-// The same refusal end to end: a reset the bound does not cover parks the item
-// runner_fault, with the instant in the park.
-func TestADriveParksOnAWeeklyResetPastItsBound(t *testing.T) {
+// The same refusal end to end, at usage_admission = "off": the park stands as
+// it did before the action existed, naming the event's reset.
+func TestADriveParksOnAWeeklyResetPastItsBoundWhenAdmissionIsOff(t *testing.T) {
 	t.Cleanup(func() { driveFor, driveNoMerge = 0, false })
-	driveProject(t)
+	driveProjectWith(t, "\n[drive]\nmerge_gate = [\"stub-gate\"]\n\n[supervise]\nusage_admission = \"off\"\n")
 	bin := t.TempDir()
 	stub(t, filepath.Join(bin, "stub-impl"), "#!/bin/sh\n"+
 		"printf '%s\\n' \"{\\\"type\\\":\\\"rate_limit_event\\\",\\\"rate_limit_info\\\":{\\\"status\\\":\\\"rejected\\\",\\\"resetsAt\\\":$(($(date +%s)+172800))}}\"\n"+

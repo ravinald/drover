@@ -64,6 +64,7 @@ var resolved = map[string]string{
 	"forge.checks_wait":       strconv.Quote("10m"),
 	"usage.session_max_hours": strconv.Itoa(DefaultSessionMaxHours),
 	"usage.context_warn":      strconv.Itoa(DefaultContextWarn),
+	"usage.overage.mode":      strconv.Quote(OveragePause),
 }
 
 // walkKeys collects one Key per toml-tagged field, descending into nested

@@ -30,7 +30,7 @@ func usageRow(id, stage, logPath string, res runlog.Result) (ledger.Row, bool) {
 	return ledger.Row{
 		ID: id, Stage: stage, Log: filepath.Base(logPath), Usage: &u, Model: res.Model,
 		SessionID: res.SessionID, CostUSD: res.Cost, DurationMS: res.DurationMS, Turns: res.NumTurns,
-		Source: ledger.SourceHeadless, ContextMax: &ctx,
+		Source: ledger.SourceHeadless, ContextMax: &ctx, RateLimit: res.RateLimit,
 	}, true
 }
 

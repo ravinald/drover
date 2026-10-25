@@ -317,7 +317,7 @@ func (s *session) launchOrWait(ctx context.Context, it backlog.Item, stage, name
 ) (runner.Outcome, error) {
 	for attempt := 0; ; attempt++ {
 		oc, err := s.launch(ctx, it, stage, name, logBase, body, banner)
-		if !oc.Result.Faulted() || ctx.Err() != nil {
+		if !oc.Result.Faulted() || ctx.Err() != nil || s.holdsRefusals() && quotaRefused(oc.Result) {
 			return oc, err
 		}
 		wait, why := faultWait(oc.Result, attempt, deadline, time.Now())
@@ -330,6 +330,18 @@ func (s *session) launchOrWait(ctx context.Context, it backlog.Item, stage, name
 			return oc, err
 		}
 	}
+}
+
+// holdsRefusals reports a drive whose usage_admission answers a quota refusal
+// by holding rather than by waiting in place or parking: every drive but one
+// whose policy is off, where the park stands as it did before the action
+// existed.
+func (s *session) holdsRefusals() bool {
+	if s.slot == nil || s.slot.sched.usage == nil {
+		return false
+	}
+	p, _ := s.cfg.Policy("usage_admission")
+	return p != polOff
 }
 
 // faultWait is how long to hold before relaunching, and zero for "do not".
@@ -501,6 +513,11 @@ type DriveItem struct {
 	// handed is a park whose hand-off drive already emitted, carrying where to
 	// work, so the item's own parked event does not emit a second, emptier one.
 	handed bool
+	// requeue is the boundary a quota-refused launch sends the item back to,
+	// at the head of the queue, and refusal the hold that refusal takes. An
+	// item carrying one is not done: the dispatcher queues it again.
+	requeue *lease.Hold
+	refusal *usageStep
 }
 
 // CatchUp is one catch-up that merged something: the trunk commit the branch
@@ -791,11 +808,12 @@ lists them. --dry-run takes no id.
 
 --events, beside --json, also writes one event object per line as things
 happen: queued, dispatched, preflight, stage, check, parked, filed,
-needs_operator, needs_supervisor, merged, paused, resumed and exit. Each carries "event", which is how a reader tells it from an item's
+needs_operator, needs_supervisor, merged, paused, resumed, usage_warning and exit. Each carries "event", which is how a reader tells it from an item's
 report, "ts", "drive", "id" where one item is meant, and "action" where a [supervise]
 catalog action produced it. A park whose action is at operator policy emits needs_operator,
-and [supervise] notify runs once per needs_operator with the event on stdin,
-with or without --events; a notifier that fails is reported once and never
+and [supervise] notify runs once per needs_operator and usage_warning, and on
+the resumed that lifts a usage hold, with the event on stdin, with or without
+--events; a notifier that fails is reported once and never
 stops the drive. Every drive also appends each event to
 $XDG_STATE_HOME/drover/drives/<project>/<drive id>.jsonl whatever the flags,
 which is the file attach and watch read; a write there that fails is reported
@@ -824,7 +842,24 @@ worktree_links_gap (files the verify command reads that the worktrees lack, warn
 the first verify command runs) and host_load_admission (at auto, dispatch holds while the
 1-minute load exceeds [drive] max_load). --dry-run prints a preflight section;
 on Linux with strace on PATH it runs each item's verify command once in your checkout to
-see what it reads.`,
+see what it reads.
+
+usage_admission reads the newest rate_limit reading Claude Code left on a
+usage row of any registered project, before each dispatch and before each
+stage that launches a session. Crossing [usage.weekly] or [usage.five_hour]
+notify_remaining (the percent of the window left) emits usage_warning once per
+window per reset, recorded in the ledger so no drive in any project sends it
+twice, and runs [supervise] notify on it. Crossing pause_remaining, entering
+purchased credit under [usage.overage] mode = "pause", reaching max_usd under
+mode = "continue", or a reading the service refuses sessions under, holds the
+drive: running sessions finish their stage, nothing new starts, and the drive
+pauses through its lease as --pause does, emitting paused and needs_operator.
+A session refused for quota goes back to the head of the queue at the stage
+that was refused instead of parking runner_fault. A hold whose reset falls
+inside --for or --until lifts on its own at the reset, emitting resumed;
+drive --resume lifts any hold at once. A deadline that arrives first ends the
+drive with exit 0 and each item it held reports held. At usage_admission =
+"off" nothing holds and a refusal parks runner_fault as before.`,
 	Example: `  drover drive --for 8h              # the ready queue, until the clock runs out
   drover drive B1 B4                # these two, in this order
   drover drive --for 8h --no-merge  # drive it all, merge none of it
@@ -841,6 +876,7 @@ see what it reads.`,
   drover drive --pause --all --wait # hold every registered project's drive until each is quiet
   drover drive --resume --all       # resume them, each onto the binary installed now
   drover drive --cleanup --apply    # remove the clean trees and empty branches drives left
+  drover drive --for 48h            # held on a spent week, it resumes at the reset
   drover drive --detach --for 8h    # the same drive, in a session of its own, then:
   drover attach                     # its events from the start, until it exits
   drover drive --stop               # drain it and let it exit, sending no signal
@@ -1351,7 +1387,7 @@ func (s *session) drive(ctx context.Context, ids []string, reviewer string, dead
 	for _, it := range items {
 		pending = append(pending, newQueued(it, named))
 	}
-	return s.driveQueued(ctx, pending, reviewer, deadline, 0, s.newFindingWatch())
+	return s.driveQueued(ctx, pending, reviewer, deadline, 0, s.newFindingWatch(), nil)
 }
 
 // finished is one item's account and the slot it ran in, sent back to the
@@ -1376,8 +1412,9 @@ type finished struct {
 //
 // dispatched is how many items count against --max-items already: those a
 // drive dispatched before it re-executed itself, zero for any other. watch is
-// what that drive knew of the findings its sessions filed, new for any other.
-func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer string, deadline time.Time, dispatched int, watch *findingWatch) error {
+// what that drive knew of the findings its sessions filed, new for any other,
+// and waived the usage holds a resume of it released.
+func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer string, deadline time.Time, dispatched int, watch *findingWatch, waived []string) error {
 	enc := json.NewEncoder(os.Stdout)
 	var done []DriveItem
 	seen := make(map[string]bool, len(pending))
@@ -1385,6 +1422,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		seen[q.it.ID.Bare()] = true
 	}
 	sched := newDriveSched()
+	sched.usage = newUsageGate(deadline, waived...)
 	// seq numbers this process's dispatches, which order the trunk stage. It
 	// is not dispatched: an item a re-exec carried over is dispatched again
 	// here, and counts against --max-items only once, in the process that
@@ -1422,6 +1460,30 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			s.reexec(sched, pending, running, dispatched, deadline, watch)
 		}
 		reviewer = s.inputs.reviewer
+		if u, at := sched.usage.holding(); u != nil && !stopped {
+			now := time.Now()
+			switch {
+			case !at.IsZero() && !now.Before(at):
+				s.resumeFromUsage(sched)
+			case !deadline.IsZero() && !now.Before(deadline):
+				// Exit 0: the drive did what its bound allowed, and every item it
+				// did not reach is held rather than failed.
+				fmt.Fprintln(os.Stderr, "· the deadline arrived while the drive was held on usage; stopping, and each item it holds reports held")
+				stopped = true
+				sched.drain(errUsageDeadline)
+				for _, q := range pending {
+					d := heldItem(q.it, u)
+					done = append(done, d)
+					activeDrive.Load().note(d)
+					if driveJSON {
+						if err := enc.Encode(d); err != nil {
+							return err
+						}
+					}
+				}
+				pending = nil
+			}
+		}
 		paused := sched.isPaused()
 		if paused && !stopped && ctx.Err() != nil {
 			fmt.Fprintln(os.Stderr, "· interrupted while paused; stopping")
@@ -1456,6 +1518,12 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			}
 			if !carried && admit.hold(s.cfg) {
 				loadHeld = true
+				break
+			}
+			// Carried items too: an item a refusal sent back is the first one
+			// this hold exists to keep from launching again.
+			if s.admitUsage(sched) {
+				paused = true
 				break
 			}
 			q := pending[i]
@@ -1522,6 +1590,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 				continue
 			}
 		}
+		from := running[r.slot]
 		delete(running, r.slot)
 		d := r.d
 		if driveJobs > 1 {
@@ -1531,6 +1600,18 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		// one only through the files.
 		if err := s.reload(); err != nil {
 			fmt.Fprintf(os.Stderr, "· the backlog and ledger would not reload after %s: %v\n", d.ID, err)
+		}
+		if d.requeue != nil && !stopped {
+			back := newQueued(from.it, true)
+			if it, err := s.item(d.ID); err == nil {
+				back = newQueued(it, true)
+			}
+			back.hold = d.requeue
+			pending = append([]queued{back}, pending...)
+			fmt.Fprintf(os.Stderr, "· %s: %s; it goes back to the head of the queue at its %s stage\n", d.ID, d.Reason, d.requeue.At)
+			events.emit(DriveEvent{Event: evQueued, ID: d.ID, Action: "usage_admission", Stage: d.requeue.At, Position: 1})
+			s.holdForUsage(sched, *d.refusal)
+			continue
 		}
 		events.itemEvents(d)
 		watch.finished(s, &d, running, queuedIDs(pending, running))
@@ -1705,6 +1786,11 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 
 	park := func(cause, why string) DriveItem {
 		d.Outcome, d.Park, d.Reason = outcomeParked, cause, why
+		// A deadline that arrived behind a usage hold stopped nothing the item
+		// did: the account had nothing left to give it.
+		if cause == parkDrained && s.slot != nil && errors.Is(s.slot.sched.draining(), errUsageDeadline) {
+			d.Outcome, d.Park = outcomeHeld, ""
+		}
 		s.leaveItem(&d)
 		return d
 	}
@@ -1718,7 +1804,18 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 	// walking on spends a branch, a push and two dead sessions per item to
 	// rediscover it. launchOrWait has already waited wherever waiting could
 	// have helped, so reaching here means it could not.
-	faulted := func(who string, oc runner.Outcome) DriveItem {
+	faulted := func(who, stage string, oc runner.Outcome) DriveItem {
+		// A refusal the reading names is the account and not the runner: the
+		// item goes back to the head of the queue at the stage that was
+		// refused, and the drive holds until the window resets. The launch
+		// counts against no rerun and no round, since nothing ran.
+		if s.holdsRefusals() && quotaRefused(oc.Result) {
+			u := refusalStep(oc.Result.RateLimit, time.Now())
+			u.Reason = fmt.Sprintf("%s's %s session was refused: %s", who, stage, u.Reason)
+			d.Outcome, d.Reason = outcomeHeld, u.Reason
+			d.requeue, d.refusal = s.requeueAt(it, stage), &u
+			return d
+		}
 		pd := sessionDetail(oc, nil)
 		d.setDetail(pd)
 		if pd.Detail == detailAuth {
@@ -1937,7 +2034,7 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 			}
 			continue
 		case passFaulted:
-			return faulted(reviewer, oc)
+			return faulted(reviewer, ledger.StageReview, oc)
 		case passStanding:
 			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath)+
 				". "+standingNext(d.ID, s.ledger.State(d.ID).Note))
@@ -1978,7 +2075,7 @@ func (s *session) reviewHead(d *DriveItem, park func(cause, why string) DriveIte
 // launch reads its detail from it.
 func (s *session) implementRound(ctx context.Context, it backlog.Item, d *DriveItem, implementer, base string,
 	banner launchInfo, deadline time.Time, park func(cause, why string) DriveItem,
-	faulted func(string, runner.Outcome) DriveItem, last **runner.Outcome, lastErr *error,
+	faulted func(string, string, runner.Outcome) DriveItem, last **runner.Outcome, lastErr *error,
 ) (out DriveItem, stop bool) {
 	// A stage boundary. A drive that is stopping lets the stage in flight
 	// finish and launches nothing after it.
@@ -2000,7 +2097,7 @@ func (s *session) implementRound(ctx context.Context, it backlog.Item, d *DriveI
 	// asks the forge about an empty branch while the review reads a diff
 	// that does not exist.
 	if ic.Result.Faulted() {
-		return faulted(implementer, ic), true
+		return faulted(implementer, ledger.StageImplement, ic), true
 	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "  · %s: run exited %d (%v); asking the ledger anyway\n", d.ID, ic.Exit, err)
@@ -2477,9 +2574,11 @@ func (s *session) catchUpPlan(it backlog.Item) string {
 // driveSummary is the count on stderr, so --json's stdout carries the document
 // and nothing else.
 func (s *session) driveSummary(done []DriveItem, totals DriveTotals) {
-	var reviewed, byGate, atForge, parked, skipped int
+	var reviewed, byGate, atForge, parked, skipped, heldBack int
 	for _, d := range done {
 		switch d.Outcome {
+		case outcomeHeld:
+			heldBack++
 		case outcomeReviewed:
 			reviewed++
 		case outcomeMergedByGate:
@@ -2507,6 +2606,9 @@ func (s *session) driveSummary(done []DriveItem, totals DriveTotals) {
 	}
 	if atForge > 0 {
 		merged += fmt.Sprintf(" · %d merged immediately", atForge)
+	}
+	if heldBack > 0 {
+		merged += fmt.Sprintf(" · %d held on usage", heldBack)
 	}
 	fmt.Fprintf(os.Stderr, "\n%d attempted · %d ready to merge%s · %d parked · %d skipped\n",
 		len(done), reviewed, merged, parked, skipped)
@@ -2719,6 +2821,11 @@ func driveFollowUp(d DriveItem, item string, drafted bool, maxReviewRounds int, 
 		return followUp{
 			pr + " merged at the forge at once, and not finished" + because,
 			"nothing yet: the next drover drive finishes it, or drover finish " + id,
+		}
+	case outcomeHeld:
+		return followUp{
+			"held: " + d.Reason,
+			"nothing yet: drover drive " + id + " once the window resets, or now to spend what is left",
 		}
 	case outcomeSkipped:
 		switch d.Park {

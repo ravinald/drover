@@ -169,6 +169,7 @@ func (s *session) statusReport(scoped, tracker bool, now time.Time) StatusReport
 	if report.Usage = s.reportUsage(now); report.Usage != nil {
 		report.LongSessions = s.longSessions(report.Usage.start, now)
 	}
+	report.RateLimit = statusRateLimit(s.readAccount(), now)
 	// Asked under the gate a tracker read answers to, so --no-tracker and a
 	// drive's render leave the forge alone. A drive's render judges the
 	// register as the drive last read it; with no rows read, the error says
@@ -225,6 +226,9 @@ func localize(rows []Row, report *StatusReport, loc *time.Location) {
 	}
 	if report.Usage != nil && report.Usage.Window != "7d" {
 		in(&report.Usage.Window)
+	}
+	if report.RateLimit != nil {
+		in(&report.RateLimit.TS)
 	}
 	for i := range report.Drives {
 		in(&report.Drives[i].Started)

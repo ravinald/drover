@@ -226,6 +226,20 @@ type Row struct {
 	// ContextMax is a pointer so a usage row carries it at zero, a 429's or a
 	// log with no assistant event, while every other row omits it.
 	ContextMax *int64 `json:"context_max,omitempty"`
+	// RateLimit is the last rate_limit_event the session's log carried, the
+	// account's state as that session left it, and absent on a row from a
+	// runner that writes none. drive's usage admission reads the newest one
+	// across every registered project, because the limit is the account's.
+	RateLimit *runlog.RateLimit `json:"rate_limit,omitempty"`
+	// UsageWarning and ResetsAt are the seventeenth shape: one row per
+	// usage_warning a drive sent, naming the window (weekly, five_hour,
+	// overage, overage_usd) and the reset of the window it was about. A set
+	// window is what makes it this shape, and Load keeps these rows in
+	// Ledger.Warnings, because they name no item. One row per pair is the
+	// whole guard against a second notice: a restarted drive, or a drive in
+	// another project on the same account, reads it and sends nothing.
+	UsageWarning string `json:"usage_warning,omitempty"`
+	ResetsAt     int64  `json:"resets_at,omitempty"`
 	// FirstTS is the first message of an interactive row's day, beside TS for
 	// the last, and Started the session's first message on any day.
 	FirstTS string `json:"first_ts,omitempty"`
@@ -585,8 +599,25 @@ type Ledger struct {
 	Path string
 	Rows []Row
 	// Usage is every usage row, in file order, and the only place they are.
-	Usage     []Row
+	Usage []Row
+	// Warnings is every usage_warning row, in file order.
+	Warnings  []Row
 	Malformed []Malformed
+}
+
+// UsageRowID is the id a usage_warning row carries. Like DriveRowID it holds
+// no digit, so no namespace can mint an item under it.
+const UsageRowID = "usage"
+
+// Warned reports whether a usage_warning row already names the window and the
+// reset.
+func (l *Ledger) Warned(window string, resetsAt int64) bool {
+	for _, r := range l.Warnings {
+		if r.UsageWarning == window && r.ResetsAt == resetsAt {
+			return true
+		}
+	}
+	return false
 }
 
 // HasSession reports whether a usage row from source names the runner's
@@ -668,6 +699,10 @@ func Load(path string) (*Ledger, error) {
 		}
 		if r.Usage != nil {
 			l.Usage = append(l.Usage, r)
+			continue
+		}
+		if r.UsageWarning != "" {
+			l.Warnings = append(l.Warnings, r)
 			continue
 		}
 		if r.ID == "" {

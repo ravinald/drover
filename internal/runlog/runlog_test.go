@@ -564,3 +564,82 @@ func TestWeightedCountsACacheReadAtItsWeight(t *testing.T) {
 		t.Errorf("Weighted(%+v) = %v, want 1 + 20 + 300 + 0.1*4000", u, got)
 	}
 }
+
+// Four rate_limit_event lines copied from logs on this machine: the five-hour
+// allowed row, the weekly allowed_warning row, and both rejected rows, one on
+// purchased credit and one out of it. uuid and session_id are kept as written.
+const (
+	limitAllowed      = `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1788426000,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.09,"resetsAt":1788426000},"seven_day":{"utilization":0.13,"resetsAt":1788750000}}},"uuid":"56c383ca-3cea-4043-a542-da57e5f7961b","session_id":"f1ff57f7-3561-4176-a3ca-e59d2e256c67"}`
+	limitWarning      = `{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1792983600,"rateLimitType":"seven_day","utilization":0.79,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"surpassedThreshold":0.75,"unifiedWindows":{"five_hour":{"utilization":0.09,"resetsAt":1792747800},"seven_day":{"utilization":0.79,"resetsAt":1792983600}},"overageEnabled":false},"uuid":"3b8cf781-b1f8-4f53-a6b2-b1fea02127a2","session_id":"4405dc6f-76be-4e49-b057-1f1ac716f195"}`
+	limitOverage      = `{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1792983600,"rateLimitType":"seven_day","overageStatus":"allowed","overageResetsAt":1793491200,"isUsingOverage":true,"overageInUse":true,"unifiedWindows":{"five_hour":{"utilization":0.07,"resetsAt":1792801800,"status":"allowed"},"seven_day":{"utilization":1,"resetsAt":1792983600,"status":"rejected","surpassedThreshold":1}}},"uuid":"0b40a1ca-5bcb-4e9d-b89f-aa65bd962b5c","session_id":"a52520f8-1959-4fca-a2c2-ab89b12ae048"}`
+	limitOutOfCredits = `{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1792983600,"rateLimitType":"seven_day","overageStatus":"rejected","overageDisabledReason":"out_of_credits","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0,"resetsAt":1792834200,"status":"allowed"},"seven_day":{"utilization":1,"resetsAt":1792983600,"status":"rejected","surpassedThreshold":1}}},"uuid":"d23f9d46-1928-4efa-9cd2-ee3f20cfec20","session_id":"0380041e-a385-4e1c-a11e-32dd3f6cadbb"}`
+)
+
+func TestEveryRateLimitRowKindReadsIntoTheResult(t *testing.T) {
+	before := time.Unix(1788000000, 0)
+	for _, c := range []struct {
+		name, line, status, kind string
+		week, five               int
+		overage, refused         bool
+		reason                   string
+	}{
+		{"five-hour allowed", limitAllowed, "allowed", WindowFiveHour, 87, 91, false, false, "org_level_disabled"},
+		{"weekly allowed_warning", limitWarning, "allowed_warning", WindowSevenDay, 21, 91, false, false, "org_level_disabled"},
+		{"weekly rejected on overage", limitOverage, "rejected", WindowSevenDay, 0, 93, true, false, ""},
+		{"weekly rejected out of credits", limitOutOfCredits, "rejected", WindowSevenDay, 0, 100, false, true, OutOfCredits},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := logfile(t, t.TempDir(), "01-x.20261024-120000.000000000.jsonl",
+				limitAllowed+"\n"+c.line+"\n"+okResult+"\n")
+			rd, err := ReadResult(p)
+			if err != nil || !rd.Found {
+				t.Fatalf("found=%v err=%v", rd.Found, err)
+			}
+			rl := rd.Result.RateLimit
+			if rl == nil {
+				t.Fatal("the result carries no reading")
+			}
+			if rl.Status != c.status || rl.RateLimitType != c.kind {
+				t.Errorf("status %q type %q, want %q %q: the last event of the session is the one kept", rl.Status, rl.RateLimitType, c.status, c.kind)
+			}
+			if got, ok := rl.Remaining(WindowSevenDay, before); !ok || got != c.week {
+				t.Errorf("weekly remaining = %d (%v), want %d", got, ok, c.week)
+			}
+			if got, ok := rl.Remaining(WindowFiveHour, before); !ok || got != c.five {
+				t.Errorf("five-hour remaining = %d (%v), want %d", got, ok, c.five)
+			}
+			if rl.InOverage() != c.overage || rl.Refused() != c.refused {
+				t.Errorf("overage %v refused %v, want %v %v", rl.InOverage(), rl.Refused(), c.overage, c.refused)
+			}
+			if rl.OverageDisabledReason != c.reason {
+				t.Errorf("overage reason %q, want %q", rl.OverageDisabledReason, c.reason)
+			}
+			if rl.ResetsAt == 0 || rl.SevenDay == nil || rl.SevenDay.ResetsAt == 0 {
+				t.Errorf("resets lost: %+v", rl)
+			}
+		})
+	}
+}
+
+// A window read before its reset says nothing about the window after it.
+func TestAWindowPastItsResetReadsFull(t *testing.T) {
+	p := logfile(t, t.TempDir(), "01-x.20261024-120000.000000000.jsonl", limitOutOfCredits+"\n"+okResult+"\n")
+	rd, _ := ReadResult(p)
+	after := time.Unix(1792983600, 0)
+	if got, _ := rd.Result.RateLimit.Remaining(WindowSevenDay, after); got != 100 {
+		t.Errorf("remaining after the reset = %d, want 100", got)
+	}
+	if rd.Result.RateLimit.Current(after) {
+		t.Error("a refusal whose window reset still reads as current")
+	}
+}
+
+// codex and agy write no such event, and their results carry no reading.
+func TestARunnerWithoutTheEventCarriesNoReading(t *testing.T) {
+	p := logfile(t, t.TempDir(), "01-x.20261024-120000.000000000.jsonl",
+		`{"type":"turn.completed","usage":{"input_tokens":1}}`+"\n")
+	rd, _ := ReadResult(p)
+	if rd.Result.RateLimit != nil {
+		t.Errorf("a codex session reads %+v", rd.Result.RateLimit)
+	}
+}
