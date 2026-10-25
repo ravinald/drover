@@ -40,7 +40,8 @@ type supervised struct {
 	// supervisor, and what it reports. The brief renders it.
 	supervisor string
 	// operator is what to run when the action stops at operator, carried by a
-	// needs_operator event and handed to [supervise] notify. {id} is the item.
+	// needs_operator event and sent to each [notify] destination routing it. {id}
+	// is the item.
 	operator string
 }
 
@@ -193,7 +194,7 @@ var catalog = []supervised{
 const mergeDrivePR = "Merge a pull request drive opened for {id} with the project's [git] merge_method, then run `drover finish {id}`, only when all of these hold: the ledger names the pull request on a row drive wrote; the item's latest review pass is `passed` and came from a session drover launched; every check on the head is green; and the forge reports it mergeable. Report each merge."
 
 // parkActions names the catalog action each park drive already makes belongs
-// to, so the event stream and [supervise] notify can say who owns it before the
+// to, so the event stream and [notify] can say who owns it before the
 // item implementing the action has changed what drive does about it.
 var parkActions = map[string]string{
 	parkTrunkRed:            "report_trunk_red",
