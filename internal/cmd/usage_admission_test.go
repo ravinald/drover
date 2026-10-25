@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -65,14 +68,52 @@ func TestJudgeUsage(t *testing.T) {
 				t.Errorf("warnings %v, want %v", got, c.warn)
 			}
 			hold := ""
-			if v.hold != nil {
-				hold = v.hold.Window
-				if !strings.Contains(v.hold.Reason, "reset") && !strings.Contains(v.hold.Reason, "max_usd") {
-					t.Errorf("the hold does not say when it lifts: %q", v.hold.Reason)
+			if h := v.hold(nil); h != nil {
+				hold = h.Window
+				if !strings.Contains(h.Reason, "reset") && !strings.Contains(h.Reason, "max_usd") {
+					t.Errorf("the hold does not say when it lifts: %q", h.Reason)
 				}
 			}
 			if hold != c.hold {
 				t.Errorf("hold %q, want %q", hold, c.hold)
+			}
+		})
+	}
+}
+
+// A resume past one hold waives that window alone. Resuming past the weekly
+// percent is spending its last points, not consenting to purchased credit or to
+// going past max_usd, and those still hold in the same week, as does a service
+// that refuses sessions.
+func TestAWaivedWeeklyHoldLeavesTheOthersStanding(t *testing.T) {
+	now := time.Now()
+	reset := now.Add(30 * time.Hour)
+	weekly := "\n[usage.weekly]\nnotify_remaining = 20\npause_remaining = 5\n"
+	before := reading("allowed_warning", "seven_day", 0.96, 0.1, reset, false, "")
+	for _, c := range []struct {
+		name, toml string
+		r          *runlog.RateLimit
+		spent      float64
+		want       string
+		refused    bool
+	}{
+		{"overage under the default pause", weekly, reading("rejected", "seven_day", 1, 0.1, reset, true, ""), 80, stepOverage, false},
+		{"overage at max_usd under continue", "\n[usage.weekly]\npause_remaining = 5\n[usage.overage]\nmode = \"continue\"\nmax_usd = 50.0\n",
+			reading("rejected", "seven_day", 1, 0.1, reset, true, ""), 80, stepOverageUSD, false},
+		{"out of credits", weekly, reading("rejected", "seven_day", 1, 0.1, reset, false, runlog.OutOfCredits), 0, stepWeekly, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cfg := usageConfig(t, c.toml)
+			g := newUsageGate(time.Time{})
+			first := judgeUsage(cfg, accountReading{Reading: before}, now).hold(g.waived)
+			if first == nil || first.Window != stepWeekly {
+				t.Fatalf("before: hold %+v, want the weekly level", first)
+			}
+			g.hold = first
+			g.release(true)
+			h := judgeUsage(cfg, accountReading{Reading: c.r, OverageUSD: c.spent}, now).hold(g.waived)
+			if h == nil || h.Window != c.want || h.refused != c.refused {
+				t.Errorf("after the weekly hold was waived: hold %+v, want %s (refused %v)", h, c.want, c.refused)
 			}
 		})
 	}
@@ -322,6 +363,7 @@ func TestStatusCarriesTheNewestReading(t *testing.T) {
 
 // --dry-run says whether usage_admission would hold now, and why.
 func TestADryRunSaysWhetherUsageWouldHold(t *testing.T) {
+	t.Cleanup(func() { driveDry = false })
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	s := driveProject(t)
 	out := capture(t, func() { _ = execute(t, "drive", "--dry-run") })
@@ -335,5 +377,68 @@ func TestADryRunSaysWhetherUsageWouldHold(t *testing.T) {
 	out = capture(t, func() { _ = execute(t, "drive", "--dry-run") })
 	if !strings.Contains(out, "the run would hold now: ") || !strings.Contains(out, "out_of_credits") {
 		t.Errorf("the preflight does not say the run would hold on the refusal:\n%s", out)
+	}
+}
+
+// A resume past a usage hold that re-executes onto a newer binary carries the
+// waiver across: the new process dispatches on the reading the resume released
+// rather than pausing and notifying on it again.
+func TestAResumeOntoAReplacedBinaryKeepsTheUsageHoldReleased(t *testing.T) {
+	enqueueFixture(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfgPath := filepath.Join(".", config.FileName)
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, cfgPath, string(raw)+"\n[usage.weekly]\npause_remaining = 5\n")
+	row := ledger.Row{Usage: &runlog.Usage{Input: 1}, SessionID: "earlier", Source: ledger.SourceHeadless,
+		RateLimit: reading("allowed_warning", "seven_day", 0.97, 0.1, time.Now().Add(30*time.Hour), false, "")}
+	if err := ledger.Append("ledger.jsonl", row); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "drover")
+	asDrover(t, bin, 1)
+
+	var stdout, stderr bytes.Buffer
+	c := exec.Command(bin, "drive", "1", "--json", "--events")
+	c.Env = append(os.Environ(), envAsDrover+"=1")
+	c.Stdout, c.Stderr = &stdout, &stderr
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- c.Wait() }()
+	t.Cleanup(func() {
+		_ = c.Process.Kill()
+		<-exited
+	})
+
+	path := mustLeasePath(t)
+	waitLease(t, path, func(l lease.Lease) bool { return l.Paused && slices.Contains(l.Queue, "1") })
+	asDrover(t, bin, 2)
+	if err := resumeDrive(io.Discard); err != nil {
+		t.Fatalf("--resume: %v\n%s", err, stderr.String())
+	}
+	select {
+	case err := <-exited:
+		exited <- err
+		if err != nil {
+			t.Fatalf("drive: %v\n%s", err, stderr.String())
+		}
+	case <-time.After(time.Minute):
+		t.Fatalf("the re-executed drive never finished: it held again on the reading the resume released\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "re-executed onto") {
+		t.Errorf("the resume never re-executed:\n%s", stderr.String())
+	}
+	var paused int
+	for _, e := range usageEventsIn(stdout.String()) {
+		if e.Event == evPaused && e.Action == "usage_admission" {
+			paused++
+		}
+	}
+	if paused != 1 {
+		t.Errorf("usage_admission paused the drive %d times, want 1\n%s", paused, stdout.String())
 	}
 }

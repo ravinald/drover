@@ -3,7 +3,9 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -98,11 +100,22 @@ type usageStep struct {
 	Remaining *int
 	Resets    time.Time
 	Reason    string
+	// refused is a hold the service refusing sessions takes, rather than a
+	// level crossed.
+	refused bool
 }
 
 // key is what a warning row and a waived hold are matched on: the window and
-// the reset of the window it is about.
-func (u usageStep) key() string { return u.Window + "@" + strconv.FormatInt(u.Resets.Unix(), 10) }
+// the reset of the window it is about. A refusal keys apart from the level on
+// the same window, since resuming past a level is not resuming past a service
+// that turns sessions away.
+func (u usageStep) key() string {
+	k := u.Window + "@" + strconv.FormatInt(u.Resets.Unix(), 10)
+	if u.refused {
+		k = "refused:" + k
+	}
+	return k
+}
 
 // event fills the fields usage_warning, paused, needs_operator and resumed
 // carry about one step.
@@ -115,10 +128,24 @@ func (u usageStep) event(ev DriveEvent) DriveEvent {
 }
 
 // usageVerdict is what one reading means under the config: the notices to send
-// and the hold to take, nil for none.
+// and every hold the reading crosses, in the order admission takes them.
+//
+// Every hold and not only the first, because a waiver is per window: resuming
+// past the weekly percent is spending its last few points, not consenting to
+// purchased credit or to going past max_usd, which key on the same reset.
 type usageVerdict struct {
 	warnings []usageStep
-	hold     *usageStep
+	holds    []usageStep
+}
+
+// hold is the first hold whose key waived does not name, nil for none.
+func (v usageVerdict) hold(waived map[string]bool) *usageStep {
+	for i := range v.holds {
+		if !waived[v.holds[i].key()] {
+			return &v.holds[i]
+		}
+	}
+	return nil
 }
 
 // localReset is a reset instant as an operator reads it, on their own clock.
@@ -147,11 +174,7 @@ func judgeUsage(cfg *config.Config, a accountReading, now time.Time) usageVerdic
 	if r == nil {
 		return v
 	}
-	take := func(u usageStep) {
-		if v.hold == nil {
-			v.hold = &u
-		}
-	}
+	take := func(u usageStep) { v.holds = append(v.holds, u) }
 	for _, w := range windowNames {
 		left, ok := r.Remaining(w.window, now)
 		if !ok {
@@ -215,7 +238,7 @@ func refusalStep(r *runlog.RateLimit, now time.Time) usageStep {
 	if r.OverageDisabledReason == runlog.OutOfCredits {
 		why = "the " + says + " window is spent and so is the purchased credit (out_of_credits)"
 	}
-	u := usageStep{Window: table, Resets: reset, Reason: why + ", so the service refuses sessions; it resets " + localReset(reset)}
+	u := usageStep{Window: table, Resets: reset, refused: true, Reason: why + ", so the service refuses sessions; it resets " + localReset(reset)}
 	if left, ok := r.Remaining(r.RateLimitType, now); ok {
 		u.Remaining = &left
 	}
@@ -251,8 +274,22 @@ type usageGate struct {
 	sent map[string]bool
 }
 
-func newUsageGate(deadline time.Time) *usageGate {
-	return &usageGate{deadline: deadline, waived: map[string]bool{}, sent: map[string]bool{}}
+// newUsageGate is the gate for one drive process, with the holds a resume
+// already waived: a re-exec's are carried over in the handoff, so the
+// process a resume replaced does not retake the hold that resume released.
+func newUsageGate(deadline time.Time, waived ...string) *usageGate {
+	g := &usageGate{deadline: deadline, waived: map[string]bool{}, sent: map[string]bool{}}
+	for _, k := range waived {
+		g.waived[k] = true
+	}
+	return g
+}
+
+// waivedKeys is every hold a resume released, in a stable order.
+func (g *usageGate) waivedKeys() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Sorted(maps.Keys(g.waived))
 }
 
 // holding is the step the drive is paused on, and when it lifts on its own.
@@ -285,16 +322,16 @@ func (s *session) admitUsage(q *driveSched) bool {
 	v := judgeUsage(s.cfg, a, time.Now())
 	s.sendUsageWarnings(q.usage, v.warnings, a)
 	p, _ := s.cfg.Policy("usage_admission")
-	if p == polOff || v.hold == nil {
+	if p == polOff {
 		return false
 	}
 	q.usage.mu.Lock()
-	waived := q.usage.waived[v.hold.key()]
+	h := v.hold(q.usage.waived)
 	q.usage.mu.Unlock()
-	if waived {
+	if h == nil {
 		return false
 	}
-	return s.holdForUsage(q, *v.hold)
+	return s.holdForUsage(q, *h)
 }
 
 // sendUsageWarnings emits each warning no registered project already sent,
@@ -403,13 +440,13 @@ func (s *session) usagePlan() string {
 		return "no usage row in any registered project carries a rate_limit reading; the run dispatches"
 	}
 	now := time.Now()
-	v := judgeUsage(s.cfg, a, now)
+	h := judgeUsage(s.cfg, a, now).hold(nil)
 	left := readingLine(a.Reading, now)
 	switch {
 	case p == polOff:
 		return left + "; not acted on"
-	case v.hold != nil:
-		return left + "; the run would hold now: " + v.hold.Reason
+	case h != nil:
+		return left + "; the run would hold now: " + h.Reason
 	}
 	return left + " (" + a.Project + ", " + a.At.Local().Format("Jan 2 15:04") + "); the run dispatches"
 }

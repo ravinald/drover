@@ -811,8 +811,9 @@ happen: queued, dispatched, preflight, stage, check, parked, filed,
 needs_operator, needs_supervisor, merged, paused, resumed, usage_warning and exit. Each carries "event", which is how a reader tells it from an item's
 report, "ts", "drive", "id" where one item is meant, and "action" where a [supervise]
 catalog action produced it. A park whose action is at operator policy emits needs_operator,
-and [supervise] notify runs once per needs_operator with the event on stdin,
-with or without --events; a notifier that fails is reported once and never
+and [supervise] notify runs once per needs_operator and usage_warning, and on
+the resumed that lifts a usage hold, with the event on stdin, with or without
+--events; a notifier that fails is reported once and never
 stops the drive. Every drive also appends each event to
 $XDG_STATE_HOME/drover/drives/<project>/<drive id>.jsonl whatever the flags,
 which is the file attach and watch read; a write there that fails is reported
@@ -1386,7 +1387,7 @@ func (s *session) drive(ctx context.Context, ids []string, reviewer string, dead
 	for _, it := range items {
 		pending = append(pending, newQueued(it, named))
 	}
-	return s.driveQueued(ctx, pending, reviewer, deadline, 0, s.newFindingWatch())
+	return s.driveQueued(ctx, pending, reviewer, deadline, 0, s.newFindingWatch(), nil)
 }
 
 // finished is one item's account and the slot it ran in, sent back to the
@@ -1411,8 +1412,9 @@ type finished struct {
 //
 // dispatched is how many items count against --max-items already: those a
 // drive dispatched before it re-executed itself, zero for any other. watch is
-// what that drive knew of the findings its sessions filed, new for any other.
-func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer string, deadline time.Time, dispatched int, watch *findingWatch) error {
+// what that drive knew of the findings its sessions filed, new for any other,
+// and waived the usage holds a resume of it released.
+func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer string, deadline time.Time, dispatched int, watch *findingWatch, waived []string) error {
 	enc := json.NewEncoder(os.Stdout)
 	var done []DriveItem
 	seen := make(map[string]bool, len(pending))
@@ -1420,7 +1422,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		seen[q.it.ID.Bare()] = true
 	}
 	sched := newDriveSched()
-	sched.usage = newUsageGate(deadline)
+	sched.usage = newUsageGate(deadline, waived...)
 	// seq numbers this process's dispatches, which order the trunk stage. It
 	// is not dispatched: an item a re-exec carried over is dispatched again
 	// here, and counts against --max-items only once, in the process that

@@ -580,7 +580,7 @@
           "type": "array",
           "items": { "type": "string" },
           "minItems": 1,
-          "description": "Argv run once per needs_operator event, with the event JSON on stdin. A failing or missing notifier is reported once per drive and never stops it."
+          "description": "Argv run once per needs_operator and usage_warning event, and on the resumed that lifts a usage hold, with the event JSON on stdin. A failing or missing notifier is reported once per drive and never stops it."
         },
         "ntfy": {
           "type": "object",
