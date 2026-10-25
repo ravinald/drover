@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ravinald/drover/internal/config"
@@ -215,8 +216,7 @@ type notifier struct {
 }
 
 // destination is one [notify.destinations.<name>] with its queue. pending,
-// held, dropped and retired are read under the notifier's mu; failed and loose
-// only by the destination's own goroutine.
+// held and retired are read under the notifier's mu.
 type destination struct {
 	config.Destination
 	n        *notifier
@@ -226,10 +226,20 @@ type destination struct {
 	// keep back.
 	pending map[string][]DriveEvent
 	held    []notice
-	dropped bool
 	retired bool
-	failed  bool
-	loose   bool
+	said    *stderrSaid
+}
+
+// stderrSaid is what a destination has already said on stderr, each said once per
+// drive. It outlives a reload for a destination the reload left pointing where
+// it did, and is atomic because a retired destination's goroutine may still be
+// draining its queue while its successor sends.
+type stderrSaid struct{ failed, loose, dropped atomic.Bool }
+
+// sameEndpoint reports whether b sends where a did, which is what decides
+// whether a failure a reported still speaks for b.
+func sameEndpoint(a, b config.Destination) bool {
+	return a.Name == b.Name && a.Type == b.Type && a.URL == b.URL && a.TokenFile == b.TokenFile && slices.Equal(a.Argv, b.Argv)
 }
 
 func newNotifier(cfg *config.Config) *notifier {
@@ -241,10 +251,17 @@ func newNotifier(cfg *config.Config) *notifier {
 // load starts a goroutine per destination cfg names. Called with mu held, or
 // before the notifier is shared.
 func (n *notifier) load(cfg *config.Config) {
+	prev := n.dests
 	n.routing = cfg.Notifications()
 	n.dests = nil
 	for _, d := range n.routing.Destinations {
-		dest := &destination{Destination: d, n: n, queue: make(chan notice, queueDepth), pending: map[string][]DriveEvent{}}
+		said := &stderrSaid{}
+		for _, p := range prev {
+			if sameEndpoint(p.Destination, d) {
+				said = p.said
+			}
+		}
+		dest := &destination{Destination: d, n: n, queue: make(chan notice, queueDepth), pending: map[string][]DriveEvent{}, said: said}
 		n.dests = append(n.dests, dest)
 		n.wg.Add(1)
 		go dest.run()
@@ -484,8 +501,7 @@ func (n *notifier) enqueueLocked(d *destination, nt notice) {
 	case d.queue <- nt:
 	default:
 		d.inflight.Done()
-		if !d.dropped {
-			d.dropped = true
+		if d.said.dropped.CompareAndSwap(false, true) {
 			fmt.Fprintf(os.Stderr, "· [notify.destinations.%s] is %d messages behind; dropping this one and any more it cannot take, without reporting them\n",
 				d.Name, queueDepth)
 		}
@@ -596,20 +612,17 @@ func (d *destination) send(nt notice) {
 	where := "[notify.destinations." + d.Name + "]"
 	switch d.Type {
 	case config.DestNtfy:
-		if loose := tokenLoose(d.TokenFile); loose != "" && !d.loose {
-			d.loose = true
+		if loose := tokenLoose(d.TokenFile); loose != "" && d.said.loose.CompareAndSwap(false, true) {
 			fmt.Fprintf(os.Stderr, "· %s %s; the send goes out\n", where, loose)
 		}
 		res, err := postNtfy(d.Destination, nt, d.n.click(nt.event))
-		if err != nil && !d.failed {
-			d.failed = true
+		if err != nil && d.said.failed.CompareAndSwap(false, true) {
 			fmt.Fprintf(os.Stderr, "· %s POST %s failed (%v)%s; the drive goes on, and later failures here are not reported\n",
 				where, d.URL, err, res.bodyClause())
 		}
 	case config.DestCommand:
 		out, err := runArgvNotifier(d.n.root, d.Argv, nt.payload())
-		if err != nil && !d.failed {
-			d.failed = true
+		if err != nil && d.said.failed.CompareAndSwap(false, true) {
 			fmt.Fprintf(os.Stderr, "· %s %s failed (%v)%s; the drive goes on, and later failures here are not reported\n",
 				where, strings.Join(d.Argv, " "), err, outClause(out))
 		}

@@ -249,6 +249,30 @@ notify_remaining = 20
 	if ds := c.Notifications().Destinations; len(ds) != 1 || ds[0].Events["needs_operator"] != "high" || len(ds[0].Events) != 1 {
 		t.Errorf("a bare table migrated to %+v, want needs_operator at high", ds)
 	}
+
+	// A name quoted in a comment is not one the array routes, on its closing
+	// line or between its elements, and the comments stay in the file.
+	for _, c := range []struct{ in, want string }{
+		{"[supervise.ntfy]\nurl = \"https://h/t\"\nevents = [\"needs_operator\", \"exit\"]  # dropped \"parked\" because it was noisy\n",
+			"[notify.destinations.ntfy]\ntype = \"ntfy\"\nurl = \"https://h/t\"\nevents = { needs_operator = \"high\", exit = \"high\" }  # dropped \"parked\" because it was noisy\n"},
+		{"[supervise.ntfy]\nurl = \"https://h/t\"\nevents = [\n  \"needs_operator\", # \"soon\"\n  \"exit\",\n] # end\n",
+			"[notify.destinations.ntfy]\ntype = \"ntfy\"\nurl = \"https://h/t\"\n# \"soon\"\nevents = { needs_operator = \"high\", exit = \"high\" } # end\n"},
+	} {
+		withGlobal(t, c.in)
+		if out, err := exec.Command("bash", script, GlobalPath()).CombinedOutput(); err != nil { // #nosec G204 -- the repository's own script
+			t.Fatalf("migrate a commented events array: %v\n%s", err, out)
+		}
+		if got, _ := os.ReadFile(GlobalPath()); string(got) != c.want { // #nosec G304 -- written above
+			t.Errorf("%q migrated to\n%s\nwant\n%s", c.in, got, c.want)
+		}
+		cfg, err := Load(project(t, schemaLine+"project = \"widget\"\n"))
+		if err != nil {
+			t.Fatalf("the migrated file does not load: %v", err)
+		}
+		if ds := cfg.Notifications().Destinations; len(ds) != 1 || len(ds[0].Events) != 2 || ds[0].Events["needs_operator"] != "high" || ds[0].Events["exit"] != "high" {
+			t.Errorf("a commented events array migrated to %+v, want needs_operator and exit alone", ds)
+		}
+	}
 }
 
 // Every key under notify. is documented in the [notify] section of

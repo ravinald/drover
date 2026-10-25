@@ -117,7 +117,7 @@ func TestNtfySendsTheEventsItRoutesAtTheirPriorities(t *testing.T) {
 			es.w = os.Stdout
 			es.stage("1", stageGate)
 			es.emit(DriveEvent{Event: evParked, ID: "1", Reason: "parked for a reason"})
-			es.needsOperator("1", "auth_expired", "the runner's credentials expired", "claude login, then drover drive 1")
+			es.needsOperator("1", "auth_expired", "the runner's credentials expired", "claude login, then drover drive 1", 0)
 			es.notifier.idle()
 			es.emit(DriveEvent{Event: evMerged, ID: "1", PR: 4, Title: "1: the first item"})
 			es.notifier.idle()
@@ -227,8 +227,8 @@ func TestDestinationsFailAndWaitAlone(t *testing.T) {
 	es := notifyFixture(t, extra)
 
 	stderr := captureErr(t, func() {
-		es.needsOperator("1", "auth_expired", "", "claude login")
-		es.needsOperator("2", "auth_expired", "", "claude login")
+		es.needsOperator("1", "auth_expired", "", "claude login", 0)
+		es.needsOperator("2", "auth_expired", "", "claude login", 0)
 		deadline := time.Now().Add(5 * time.Second)
 		for len(okSeen()) < 2 && time.Now().Before(deadline) {
 			time.Sleep(10 * time.Millisecond)
@@ -272,12 +272,52 @@ func TestNtfyHungServerIsCutAtTheBound(t *testing.T) {
 	clockAt(t, time.Now().Add(-10*time.Second))
 
 	stderr := captureErr(t, func() {
-		es.needsOperator("1", "auth_expired", "", "claude login")
-		es.needsOperator("1", "auth_expired", "", "claude login")
+		es.needsOperator("1", "auth_expired", "", "claude login", 0)
+		es.needsOperator("1", "auth_expired", "", "claude login", 0)
 		es.notifier.idle()
 	})
 	if n := strings.Count(stderr, "[notify.destinations.phone]"); n != 1 || !strings.Contains(stderr, "deadline exceeded") {
 		t.Errorf("want one report of the deadline, got:\n%s", stderr)
+	}
+}
+
+// A resume reloads the destinations, and one still sending where it did keeps
+// the failure it already reported, while one the operator pointed elsewhere
+// reports afresh.
+func TestNtfyFailureIsReportedOnceAcrossAReload(t *testing.T) {
+	bad, seen := ntfyServer(t, http.StatusForbidden, `{"error":"forbidden"}`)
+	es, _ := ntfyFixture(t, bad.URL+"/drover", `{ needs_operator = "high" }`)
+	stderr := captureErr(t, func() {
+		es.needsOperator("1", "auth_expired", "", "claude login", 0)
+		es.notifier.idle()
+		es.notifier.reload(es.cfg)
+		es.needsOperator("1", "auth_expired", "", "claude login", 0)
+		es.notifier.idle()
+	})
+	if n := strings.Count(stderr, "[notify.destinations.phone]"); n != 1 {
+		t.Errorf("%d reports across a reload of the same config, want 1:\n%s", n, stderr)
+	}
+	if n := len(seen()); n != 2 {
+		t.Errorf("%d sends, want 2: the reloaded destination still sends", n)
+	}
+
+	path := filepath.Join(es.cfg.Root, config.FileName)
+	raw, err := os.ReadFile(path) // #nosec G304 -- the fixture's own config
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, path, strings.Replace(string(raw), bad.URL+"/drover", bad.URL+"/elsewhere", 1))
+	moved, err := config.Load(es.cfg.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr = captureErr(t, func() {
+		es.notifier.reload(moved)
+		es.needsOperator("1", "auth_expired", "", "claude login", 0)
+		es.notifier.idle()
+	})
+	if n := strings.Count(stderr, "/elsewhere"); n != 1 {
+		t.Errorf("%d reports from the destination moved to another url, want 1:\n%s", n, stderr)
 	}
 }
 
@@ -290,8 +330,8 @@ func TestNtfyLooseTokenFileWarnsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	stderr := captureErr(t, func() {
-		es.needsOperator("1", "auth_expired", "", "claude login")
-		es.needsOperator("1", "auth_expired", "", "claude login")
+		es.needsOperator("1", "auth_expired", "", "claude login", 0)
+		es.needsOperator("1", "auth_expired", "", "claude login", 0)
 		es.notifier.idle()
 	})
 	if n := strings.Count(stderr, "chmod 600 "+token); n != 1 {
@@ -323,6 +363,29 @@ func TestNtfyClickOpensThePullRequest(t *testing.T) {
 	}
 	if asked != 1 {
 		t.Errorf("the repository was resolved %d times, want once per drive", asked)
+	}
+}
+
+// The operator stop a park carries opens the same pull request the park does,
+// since that pull request is what the operator is told to review.
+func TestNtfyNeedsOperatorOpensTheParkedPullRequest(t *testing.T) {
+	srv, seen := ntfyServer(t, http.StatusOK, "")
+	es, _ := ntfyFixture(t, srv.URL+"/drover", `{ parked = "default", needs_operator = "high" }`)
+	es.notifier.forge = func() string { return "https://github.com/o/r" }
+	es.itemEvents(DriveItem{ID: "B2", Outcome: outcomeParked, Park: "protected_paths",
+		Reason: "this branch changes scripts/merge-gate.sh", PR: 42})
+	es.notifier.idle()
+	got := seen()
+	if len(got) != 2 {
+		t.Fatalf("%d sends, want the park and its operator stop", len(got))
+	}
+	for i, want := range []string{"default", "high"} {
+		if p := got[i].header.Get("Priority"); p != want {
+			t.Errorf("send %d went out at %q, want %q", i, p, want)
+		}
+		if c := got[i].header.Get("Click"); c != "https://github.com/o/r/pull/42" {
+			t.Errorf("send %d Click is %q, want the pull request", i, c)
+		}
 	}
 }
 
@@ -444,7 +507,7 @@ func TestCoalescingFoldsEventsOfAKind(t *testing.T) {
 
 	es.emit(DriveEvent{Event: evFiled, ID: "B91", Kind: "register", Ref: "40"})
 	es.emit(DriveEvent{Event: evFiled, ID: "B91", Kind: "register", Ref: "41"})
-	es.needsOperator("B92", "triage_finding", "", "drover follow-ups")
+	es.needsOperator("B92", "triage_finding", "", "drover follow-ups", 0)
 	es.emit(DriveEvent{Event: evFiled, ID: "B92", Kind: "register", Ref: "42"})
 	es.notifier.idle()
 	if got := seen(); len(got) != 1 || !strings.HasPrefix(got[0].body, "triage_finding") {
@@ -504,7 +567,7 @@ func TestQuietHoursHoldAndRelease(t *testing.T) {
 	es.emit(DriveEvent{Event: evMerged, ID: "1", PR: 3, Title: "1: one"})
 	es.emit(DriveEvent{Event: evStage, ID: "2", Stage: stageGate})
 	es.emit(DriveEvent{Event: evParked, ID: "2", Park: "gate_refused"})
-	es.needsOperator("2", "auth_expired", "", "claude login")
+	es.needsOperator("2", "auth_expired", "", "claude login", 0)
 	es.notifier.idle()
 	got := seen()
 	if len(got) != 2 || got[0].header.Get("Priority") != "high" || got[1].header.Get("Priority") != "low" {

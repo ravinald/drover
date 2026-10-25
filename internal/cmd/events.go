@@ -392,7 +392,7 @@ func (es *eventSink) itemEvents(d DriveItem) {
 			case ev.Action == "signoff":
 				run = d.signoff
 			}
-			es.needsOperator(d.ID, ev.Action, d.Reason, run)
+			es.needsOperator(d.ID, ev.Action, d.Reason, run, d.PR)
 		}
 	}
 	if d.Merged {
@@ -402,13 +402,14 @@ func (es *eventSink) itemEvents(d DriveItem) {
 
 // needsOperator emits the stop for one action at operator policy. run is what
 // the operator has to do where the park knows better than the catalog's
-// sentence, and empty to take that sentence.
-func (es *eventSink) needsOperator(id, key, reason, run string) {
+// sentence, and empty to take that sentence. pr is the pull request the stop
+// concerns, 0 for none, and is what a notifier links the message to.
+func (es *eventSink) needsOperator(id, key, reason, run string, pr int) {
 	if run == "" {
 		run = strings.ReplaceAll(action(key).operator, "{id}", id)
 	}
 	es.emit(DriveEvent{Event: evNeedsOperator, ID: id, Action: key, Policy: string(polOperator),
-		Reason: reason, Run: run})
+		Reason: reason, Run: run, PR: pr})
 }
 
 // handOff emits the stop for an action drive leaves to somebody else:
@@ -456,7 +457,7 @@ func (es *eventSink) filed(f FiledFinding) {
 	es.emit(ev)
 	switch {
 	case scaffold && config.Policy(ev.Policy) == polOperator:
-		es.needsOperator(f.Ref, ev.Action, "a session filed this scaffold, and its requirements are unwritten", "")
+		es.needsOperator(f.Ref, ev.Action, "a session filed this scaffold, and its requirements are unwritten", "", 0)
 	case !scaffold && f.uncovered():
 		es.triage(f)
 	}

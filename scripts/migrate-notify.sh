@@ -52,8 +52,11 @@ function header(line,   h) {
 # depth is the brackets a line opens less those it closes, outside strings and
 # comments, which is how far a multi-line array is from closing. ml carries a
 # multi-line string (''' or """) open at the end of one line into the next,
-# since an argv holding a script is usually written as one.
-function depth(s,   i, c, d, q, three) {
+# since an argv holding a script is usually written as one. While collect is
+# set it also records each one-line string it closes in ev, and the line's
+# comment, with the space before it, in cm: a name quoted in a comment is
+# prose, not an event the array routes.
+function depth(s,   i, c, d, q, three, from, j) {
 	d = 0; q = ""
 	for (i = 1; i <= length(s); i++) {
 		c = substr(s, i, 1)
@@ -63,10 +66,19 @@ function depth(s,   i, c, d, q, three) {
 			else if (three == ml) { ml = ""; i += 2 }
 		} else if (q != "") {
 			if (c == "\\" && q == "\"") i++
-			else if (c == q) q = ""
+			else if (c == q) {
+				q = ""
+				if (collect) ev[++nev] = substr(s, from, i - from)
+			}
 		} else if (three == "'''" || three == "\"\"\"") { ml = three; i += 2 }
-		else if (c == "\"" || c == "'") q = c
-		else if (c == "#") break
+		else if (c == "\"" || c == "'") { q = c; from = i + 1 }
+		else if (c == "#") {
+			if (collect) {
+				for (j = i - 1; j > 0 && substr(s, j, 1) ~ /[ \t]/; j--) ;
+				cm[++ncm] = substr(s, j + 1)
+			}
+			break
+		}
 		else if (c == "[") d++
 		else if (c == "]") d--
 	}
@@ -88,9 +100,8 @@ NR == FNR {
 	if (cap != "") {
 		skip[FNR] = 1
 		if (cap == "notify") notifyText = notifyText "\n" $0
-		else eventsText = eventsText " " $0
 		open += depth($0)
-		if (open <= 0) cap = ""
+		if (open <= 0) { cap = ""; collect = 0 }
 		next
 	}
 	if (tbl == "" && $0 ~ /^[ \t]*supervise[ \t]*[.=]/) die("line " FNR ": supervise is written as a dotted key or an inline table; rewrite it by hand")
@@ -106,10 +117,10 @@ NR == FNR {
 	}
 	if (tbl == "[supervise.ntfy]" && $0 ~ /^[ \t]*events[ \t]*=/) {
 		eventsLine = FNR
-		eventsText = $0
-		sub(/^[ \t]*events[ \t]*=/, "", eventsText)
+		collect = 1
 		open = depth($0)
 		if (open > 0) cap = "events"
+		else collect = 0
 		next
 	}
 	if (tbl == "[supervise.ntfy]" && $0 ~ /^[ \t]*priority[ \t]*=/) {
@@ -128,12 +139,7 @@ FNR == 1 {
 	if (priority == "") priority = "high"
 	routed = ""
 	if (eventsLine) {
-		rest = eventsText
-		while (match(rest, /"[^"]*"|'[^']*'/)) {
-			name = substr(rest, RSTART + 1, RLENGTH - 2)
-			routed = routed (routed == "" ? "" : ", ") name " = \"" priority "\""
-			rest = substr(rest, RSTART + RLENGTH)
-		}
+		for (i = 1; i <= nev; i++) routed = routed (i > 1 ? ", " : "") ev[i] " = \"" priority "\""
 	} else routed = "needs_operator = \"" priority "\""
 }
 FNR == ntfyHead {
@@ -142,7 +148,13 @@ FNR == ntfyHead {
 	if (!eventsLine) print "events = { " routed " }"
 	next
 }
-FNR == eventsLine { print "events = { " routed " }"; next }
+# A multi-line array's comments go above the one line it becomes, and the last
+# of them stays on that line, as a one-line array's comment does.
+FNR == eventsLine {
+	for (i = 1; i < ncm; i++) { c = cm[i]; sub(/^[ \t]+/, "", c); print c }
+	print "events = { " routed " }" (ncm ? cm[ncm] : "")
+	next
+}
 skip[FNR] { next }
 { print }
 END {

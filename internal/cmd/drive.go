@@ -4392,7 +4392,7 @@ func (s *session) dispatchCatchUp(d *DriveItem, park func(cause, why string) Dri
 		}
 		report(catchUpParked, why, paths)
 		d.Outcome, d.Park, d.Reason, d.handed = outcomeParked, parkTrunkConflict, why, true
-		events.handOff(key, who, DriveEvent{ID: d.ID, Reason: why, Branch: d.Branch, Tree: s.tree, Paths: paths})
+		events.handOff(key, who, DriveEvent{ID: d.ID, Reason: why, PR: d.PR, Branch: d.Branch, Tree: s.tree, Paths: paths})
 		return *d, true
 	}
 	limit := s.cfg.Review.MaxReviewRounds
