@@ -214,9 +214,12 @@ type notifier struct {
 	forgeOnce sync.Once
 	forgeURL  string
 
-	mu        sync.Mutex
-	dests     []*destination
-	closed    bool
+	mu     sync.Mutex
+	dests  []*destination
+	closed bool
+	// exited is the exit routed, after which no reminder goes out: the exit
+	// message is the last word, and close releases mu before it sets closed.
+	exited    bool
 	releaseAt time.Time
 	wg        sync.WaitGroup
 }
@@ -302,6 +305,9 @@ func (n *notifier) route(e DriveEvent) {
 	defer n.mu.Unlock()
 	if n.closed {
 		return
+	}
+	if e.Event == evExit {
+		n.exited = true
 	}
 	now := notifyClock()
 	n.releaseLocked(now)

@@ -43,8 +43,8 @@ type answerMark struct {
 	// scaffold is the item still carrying the intake stop marker, which a body
 	// row answers only by removing.
 	scaffold bool
-	// paused is the drive's lease reading paused, for a needs_operator naming
-	// no item: the pause raised it, so a resume answers it.
+	// paused is the drive's lease reading paused, for a needs_operator a pause
+	// raised: a resume answers that one and no other.
 	paused bool
 }
 
@@ -60,9 +60,17 @@ type answerProbe interface {
 // paused flag, which drive --resume clears.
 type ledgerProbe struct{}
 
+// An answer is read from whatever raised the stop. A usage_admission stop is
+// raised by the pause and answered by the resume. A triage_finding stop is
+// raised by a follow-up's coverage, which no ledger row records, so neither its
+// filing item's rows nor a resume answer it, even when it names that item.
+// Any other stop naming an item is raised by that item's state.
 func (ledgerProbe) mark(cfg *config.Config, e DriveEvent) answerMark {
-	if e.ID == "" {
+	switch {
+	case e.Action == "usage_admission":
 		return answerMark{rows: -1, paused: held != nil && held.Current().Paused}
+	case e.Action == "triage_finding" || e.ID == "":
+		return answerMark{rows: -1}
 	}
 	s, err := openFrom(cfg)
 	if err != nil {
@@ -85,10 +93,13 @@ func (ledgerProbe) mark(cfg *config.Config, e DriveEvent) answerMark {
 // reminder too many costs a glance, and one too few is the idle queue this
 // exists to prevent.
 func (ledgerProbe) answered(cfg *config.Config, e DriveEvent, m answerMark) string {
-	if e.ID == "" {
+	switch {
+	case e.Action == "usage_admission":
 		if m.paused && held != nil && !held.Current().Paused {
 			return answeredResumed
 		}
+		return ""
+	case e.Action == "triage_finding" || e.ID == "":
 		return ""
 	}
 	s, err := openFrom(cfg)
@@ -141,7 +152,7 @@ func (n *notifier) watchLocked(e DriveEvent, dests []*destination, prio map[stri
 // reminder still gets its answered message.
 func (n *notifier) remind(r *reminder, name string) {
 	n.mu.Lock()
-	if n.closed || r.done {
+	if n.closed || n.exited || r.done {
 		n.mu.Unlock()
 		return
 	}
@@ -151,7 +162,7 @@ func (n *notifier) remind(r *reminder, name string) {
 
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if n.closed || r.done {
+	if n.closed || n.exited || r.done {
 		return
 	}
 	if action != "" {

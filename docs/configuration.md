@@ -1016,12 +1016,12 @@ A `needs_operator` the operator misses leaves the queue idle until they look. A 
 Before each reminder the drive reads the ledger, the backlog and its lease, and sends nothing for a `needs_operator` already answered. It counts as answered when:
 
 - the item it names merged (a done row), was run again (a stage row, from `drover drive <id>` or `drive --enqueue`), was accepted (the body row `drover accept` writes, on a body that no longer carries the stop marker), or was shelved;
-- for one naming no item, raised by a pause such as a usage hold, the drive resumed from that pause;
+- for one a usage hold raised, the drive resumed from that pause, and a resume answers no other stop;
 - the drive exited.
 
 When a reminded `needs_operator` is answered while the drive runs, each destination that sent at least one reminder for it gets one message at `low`: `answered: <action> <id>`, where the action is `merged`, `rerun`, `accepted`, `shelved` or `resumed`. A destination that sent only the first message gets nothing more. The answer is read when the next reminder comes due, so the message trails the answer by up to `repeat`; past `repeat_max` the drive still reads at that interval, sending nothing until the answer.
 
-Reminders live in the drive process and nowhere else. A drive that exits, including one that re-executes onto a new binary, has nothing left to repeat, and the `exit` message is the last word on it. A `needs_operator` naming no item that no pause raised, such as a `triage_finding` stop filed by several items, has no answer the ledger records, so it repeats until `repeat_max` or the exit.
+Reminders live in the drive process and nowhere else. A drive that exits, including one that re-executes onto a new binary, has nothing left to repeat, and the `exit` message is the last word on it. A `triage_finding` stop is raised by a follow-up's coverage, which the ledger does not record, so whether it names its one filing item or none, its filer's rows and a resume answer nothing and it repeats until `repeat_max` or the exit. So does any other `needs_operator` naming no item that no usage hold raised.
 
 ### Tokens and testing
 

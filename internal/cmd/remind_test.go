@@ -152,6 +152,25 @@ func TestAnExitEndsTheReminders(t *testing.T) {
 	}
 }
 
+// The exit is routed before the notifier closes, and a reminder coming due in
+// between sends nothing: the exit message stays the last word.
+func TestNoReminderFollowsTheExitMessage(t *testing.T) {
+	es, probe, timers, seen := repeatFixture(t, "repeat = \"5m\"\n")
+	es.needsOperator("1", "auth_expired", "", "claude login", 0)
+	fire(t, es, timers)
+	code := 0
+	es.notifier.route(DriveEvent{Event: evExit, Drive: "D1", Code: &code, Summary: &ExitSummary{}})
+	reads := probe.reads
+	fire(t, es, timers)
+	if got := at(seen, "/phone"); len(got) != 2 {
+		t.Errorf("%d sends to phone, want the first and one reminder, the exit routed to nobody here", len(got))
+	}
+	if probe.reads != reads || len(*timers) != 2 {
+		t.Errorf("between the exit and the close the probe was read %d more times and %d timers set, want neither", probe.reads-reads, len(*timers)-2)
+	}
+	es.notifier.close()
+}
+
 // The drive's own probe reads what the operator's commands write: a stage row
 // is a rerun, a done row a merge, accept's body row on a scaffold an accept,
 // the shelf a shelve, and drive --resume clearing the lease a resume. A row
@@ -242,6 +261,31 @@ func TestTheLedgerProbeReadsTheOperatorsAnswer(t *testing.T) {
 	_ = h.Update(func(l *lease.Lease) { l.Paused = false })
 	if got := p.answered(s.cfg, usage, m); got != answeredResumed {
 		t.Errorf("a resumed drive answered %q, want %q", got, answeredResumed)
+	}
+
+	s = fixture(t, "")
+	tri := DriveEvent{Event: evNeedsOperator, ID: "1", Action: "triage_finding", Ref: "42"}
+	m = p.mark(s.cfg, tri)
+	if err := s.record(ledger.Row{ID: "1", Stage: "review", Date: today}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.record(ledger.Row{ID: "1", Merged: &merged, Date: today}); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.answered(s.cfg, tri, m); got != "" {
+		t.Errorf("a single-filer triage after its filer's stage and done rows answered %q, want nothing", got)
+	}
+
+	_ = h.Update(func(l *lease.Lease) { l.Paused = true })
+	multi := DriveEvent{Event: evNeedsOperator, Action: "triage_finding", Ref: "43"}
+	m = p.mark(s.cfg, multi)
+	mt := p.mark(s.cfg, tri)
+	_ = h.Update(func(l *lease.Lease) { l.Paused = false })
+	if got := p.answered(s.cfg, multi, m); got != "" {
+		t.Errorf("a no-id triage raised during a pause answered %q after the resume, want nothing", got)
+	}
+	if got := p.answered(s.cfg, tri, mt); got != "" {
+		t.Errorf("a single-filer triage raised during a pause answered %q after the resume, want nothing", got)
 	}
 }
 
