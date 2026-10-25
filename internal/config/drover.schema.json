@@ -606,7 +606,7 @@
                 "type": "object",
                 "minProperties": 1,
                 "propertyNames": {
-                  "enum": ["started", "queued", "dispatched", "preflight", "stage", "check", "parked", "filed", "needs_operator", "needs_supervisor", "merged", "paused", "resumed", "config_changed", "usage_warning", "exit", "exit_undone"]
+                  "enum": ["started", "queued", "dispatched", "preflight", "stage", "check", "parked", "filed", "needs_operator", "needs_supervisor", "merged", "paused", "resumed", "reexec_waiting", "config_changed", "usage_warning", "exit", "exit_undone"]
                 },
                 "additionalProperties": {
                   "type": "string",

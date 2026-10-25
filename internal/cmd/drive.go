@@ -819,8 +819,8 @@ lists them. --dry-run takes no id.
 
 --events, beside --json, also writes one event object per line as things
 happen: started, queued, dispatched, preflight, stage, check, parked, filed,
-needs_operator, needs_supervisor, merged, paused, resumed, config_changed,
-usage_warning and exit. Each carries "event", which is how a reader tells it from an item's
+needs_operator, needs_supervisor, merged, paused, resumed, reexec_waiting,
+config_changed, usage_warning and exit. Each carries "event", which is how a reader tells it from an item's
 report, "ts", "drive", "id" where one item is meant, and "action" where a [supervise]
 catalog action produced it. A park whose action is at operator policy emits
 needs_operator. exit carries a summary: what merged, parked, skipped and was

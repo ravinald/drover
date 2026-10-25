@@ -152,6 +152,8 @@ func sampleEvent(kind, project string) DriveEvent {
 		e.Reason, e.Action, e.Policy, e.Run = "", "test", string(polSupervisor), testReason
 	case evMerged:
 		e.Reason, e.Title = "", "TEST: "+testReason
+	case evReexecWaiting:
+		e.ID, e.Waiting = "", []WaitingItem{{ID: "TEST", Stage: "review"}}
 	case evConfigChanged:
 		e.Tables = []string{"[drive]"}
 	case evUsageWarning:
