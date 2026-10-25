@@ -41,12 +41,18 @@ The exit event ends the watch whenever it was written, so watch on a drive
 that has already exited returns at once: 0 with that event when --until
 names exit, 3 otherwise.
 
+--until takes any event a drive emits: queued, dispatched, preflight, stage,
+check, parked, filed, needs_operator, merged, paused, resumed, usage_warning
+and exit. usage_warning is a [usage] notify level crossed; a usage hold
+arrives as paused and needs_operator with action usage_admission.
+
 This is the loop a supervising session would otherwise write around sleep and
 the ledger. watch reads only; an interrupt exits 1 and leaves the drive
 running.`,
 	Example: `  drover watch --until parked,needs_operator,merged,exit
   drover watch D3 --until exit
   drover watch --until parked,needs_operator,merged,exit --after 7
+  drover watch --until usage_warning,needs_operator,exit
 
   {"event":"parked","ts":"2026-10-18T09:40:51Z","seq":8,"drive":"D3","id":"4",
    "park":"no_record","reason":"the review recorded nothing"}`,

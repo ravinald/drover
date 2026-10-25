@@ -60,6 +60,9 @@ type driveSched struct {
 	// of it, and the trunk's branch protection does not change between merges.
 	trunkResults map[string]trunkResult
 	forgeWait    *forgeWait
+	// usage is usage_admission's hold, read by the dispatcher and by every
+	// item at each stage that launches a session.
+	usage *usageGate
 }
 
 func newDriveSched() *driveSched {

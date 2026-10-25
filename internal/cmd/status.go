@@ -158,6 +158,9 @@ type StatusReport struct {
 	// usage row, and LongSessions is empty, not absent, when none ran long.
 	Usage        *ReportUsage   `json:"usage,omitempty"`
 	LongSessions *[]LongSession `json:"long_sessions,omitempty"`
+	// RateLimit is the newest rate_limit reading among every registered
+	// project's usage rows, absent when no usage row carries one.
+	RateLimit *StatusRateLimit `json:"rate_limit,omitempty"`
 	// all is every row before --all and --sev scoped them, which is what a
 	// template's attention list reads: a merged item nobody audited is waiting on
 	// somebody whether or not the view shows merged rows.
@@ -355,6 +358,14 @@ B1 --json prints.`,
   is every session in the window open past [usage] session_max_hours or at a
   context past [usage] context_warn, empty when none is. usage and
   long_sessions are both absent from a ledger with no usage row.
+
+  rate_limit is the newest reading Claude Code left on a usage row of any
+  registered project: reading as the row carries it, the project and ts of
+  that row, remaining the percent of each window left now (weekly,
+  five_hour; 100 once that window reset), and overage, true while sessions
+  draw on purchased credit. It is absent when no usage row carries a
+  reading. Without --json the footer prints it as one line:
+    account: weekly 21% left, five-hour 91% left, not on purchased credit, week resets Sun Oct 25 20:00 PDT (read Oct 22 14:03 in drover)
 
   drover status --json --window 3   # trends, one entry per day and the total:
     {"items":[],"trends":{"window":3,"from":"2026-10-15","to":"2026-10-17",
@@ -1005,6 +1016,9 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
 	// the part someone acts on.
 	if prErr != nil && prWidth > 0 {
 		fmt.Fprintf(w, "pull requests unread: %v\n", prErr)
+	}
+	if a := s.readAccount(); a.Reading != nil {
+		fmt.Fprintf(w, "account: %s (read %s in %s)\n", readingLine(a.Reading, time.Now()), a.At.Local().Format("Jan 2 15:04"), a.Project)
 	}
 
 	// Named in text as well as marked in the table: the marker is one glyph in a

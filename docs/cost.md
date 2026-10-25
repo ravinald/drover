@@ -24,6 +24,7 @@ drover's design keeps sessions short where it controls them. Each of the followi
 - **Bounded review rounds.** `[review] max_review_rounds` caps how many times one item can go back, and a review that sends back the same evidence twice parks instead of looping.
 - **Waiting outside the model.** `drive` waits for checks, merges, slots and the trunk in its own loop, and `drover watch` blocks without a session behind it.
 - **Bounded drives.** `--for`, `--until` and `--max-items` put a ceiling on how much one drive can launch ([Bound every drive](playbook.md#bound-every-drive)).
+- **Bounded account spend, when you set the levels.** `[usage.weekly]` and `[usage.five_hour]` `notify_remaining` and `pause_remaining` are the bound on what drives spend of the account: one warns at a percent of the window left, the other holds every drive before it starts a session past it. `[usage.overage]` holds a drive once the week is spent and sessions would run on purchased credit, or caps that at a list-price `max_usd`. These need configuring, and the percent is the service's own figure; [Running past the weekly allotment](operating.md#running-past-the-weekly-allotment) covers choosing them.
 
 The patterns in the following section all live outside those limits, in sessions drover didn't launch and can't bound.
 
@@ -79,11 +80,17 @@ outcome: success · error false · 72 turns · $9.90
 
 The dollar figure is the runner's own `total_cost_usd`, at the provider's list price. On a subscription plan it isn't what you pay, and it doesn't measure the plan's limit, which providers weight in their own way. Use it to compare runs with each other, not to predict when a limit arrives. Every headless log under the log directory keeps the same result event, so the figures stay readable after the item merges.
 
+`drover status` ends with one line about the account itself, read from the newest `rate_limit` reading any registered project recorded:
+
+```text
+account: weekly 21% left, five-hour 91% left, not on purchased credit, week resets Sun Oct 25 20:00 PDT (read Oct 22 14:03 in drover)
+```
+
+The percentages are the service's own, as of that reading; `status --json` carries the same as [`rate_limit`](automation.md#rate_limit). Nothing reports a remaining balance of purchased credit, because the service reports none.
+
 Not yet covered:
 
-- Token counts per session are not recorded in the ledger, so `drover status` and the built-in dashboards show no usage.
-- Interactive sessions, including operator sessions, leave no log, so drover records nothing about what they spent.
-- `drive` has no budget: nothing holds dispatch as an account approaches its limit. Bound each drive with `--for` or `--until` and `--max-items` instead.
+- Interactive sessions write no `rate_limit` reading drover reads, so a week spent mostly in your own sessions shows up only once a drive's next session reports it.
 
 ## Where to go next
 

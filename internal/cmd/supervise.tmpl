@@ -29,7 +29,7 @@ launches are agents, not supervisors, and cannot start drives.
 Run drives as `drover drive <ids> --json --events --detach`. The drive runs in
 a session of its own rather than under yours, so restarting you leaves it
 running, and the command prints its id once it holds the lease. Wait on it with
-`drover watch --until parked,needs_operator,merged,exit`, which blocks until
+`drover watch --until parked,needs_operator,merged,usage_warning,exit`, which blocks until
 the drive emits one of those, prints it as one JSON object and exits 0, or
 exits 3 when the drive exited without one. Every event carries `seq`, its
 place in the drive's event file. Pass `--after <seq>` with the `seq` of the
@@ -62,6 +62,16 @@ Each event is one JSON object carrying `event`. Events:
   what the operator has to do.{{ if .Notify }} [supervise] notify has already
   been run for it.{{ end }}
 - `merged`: an item's pull request merged. `pr` is its number.
+- `usage_warning`: the account crossed a `[usage]` notify level. `window`,
+  `remaining` (the percent of it left) and `resets_at`. Report it and do
+  nothing else: the drive goes on, and the notice is the operator's.
+- `paused` and `needs_operator` with `action` `usage_admission`: the account
+  reached a pause level, ran onto purchased credit, or was refused. Running
+  items finish their stage and nothing new starts. Do nothing about it: the
+  hold lifts at `resets_at` when the drive's bound covers it, and otherwise
+  `drover drive --resume` is the operator's, since it spends what they kept
+  back, unless `pause_for_config_change` is `supervisor` here. A `resumed`
+  with the same action is the hold lifting at the reset; report it.
 - `exit`: the drive ended. `code` is its exit status.
 
 Every event carries `ts`, `id` where one item is meant, and `action` where a

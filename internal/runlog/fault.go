@@ -164,8 +164,8 @@ func RetryAt(text string) time.Time {
 // rate_limit_event states a quota reset as an epoch, which no sentence it
 // rewords can break, so a rejected one wins over the prose.
 func retryAt(r Result) time.Time {
-	if r.Fault == FaultQuota && r.RateLimitStatus == "rejected" && r.RateLimitReset > 0 {
-		return time.Unix(r.RateLimitReset, 0)
+	if rl := r.RateLimit; r.Fault == FaultQuota && rl != nil && rl.Status == "rejected" && rl.ResetsAt > 0 {
+		return time.Unix(rl.ResetsAt, 0)
 	}
 	ref := r.loggedAt
 	if ref.IsZero() {

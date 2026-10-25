@@ -35,6 +35,9 @@ const (
 	evExit            = "exit"
 	evPaused          = "paused"
 	evResumed         = "resumed"
+	// evUsageWarning is a [usage] notify level crossed, sent once per window
+	// per reset. It pauses nothing.
+	evUsageWarning = "usage_warning"
 )
 
 // The stages a stage event names. implement and review are ledger stages; the
@@ -105,6 +108,14 @@ type DriveEvent struct {
 	// Changed is which inputs a resume reloaded differ from those before it,
 	// on resumed alone: config, prompt, review, verify, binary.
 	Changed []string `json:"changed,omitempty"`
+	// Window, Remaining and ResetsAt are the usage level behind a
+	// usage_warning, and behind the paused, needs_operator and resumed that
+	// usage_admission emits: weekly, five_hour, overage or overage_usd, the
+	// percent of that window left (absent for overage, which has no figure),
+	// and its reset in local time, RFC 3339.
+	Window    string `json:"window,omitempty"`
+	Remaining *int   `json:"remaining,omitempty"`
+	ResetsAt  string `json:"resets_at,omitempty"`
 	// Kind, Ref, FiledBy, Owners, Coverage, BlockedOn and Ambiguous are one
 	// finding a session filed, on filed and on the triage_finding stop, as the
 	// filing item's report carries it.
@@ -202,12 +213,20 @@ func (es *eventSink) emit(e DriveEvent) {
 	if e.Event == evExit {
 		es.closeFile()
 	}
-	if e.Event == evNeedsOperator {
+	if notifies(e) {
 		es.runNotify(e)
 	}
-	if es.ntfyOn && slices.Contains(es.ntfy.Events, e.Event) {
+	if es.ntfyOn && (slices.Contains(es.ntfy.Events, e.Event) || notifies(e) && slices.Contains(es.ntfy.Events, evNeedsOperator)) {
 		es.sendNtfy(e)
 	}
+}
+
+// notifies reports an event [supervise] notify runs on: needs_operator, a
+// usage_warning, and the resumed that lifts a usage hold, which owes whoever
+// was told the drive stopped the news that it started again.
+func notifies(e DriveEvent) bool {
+	return e.Event == evNeedsOperator || e.Event == evUsageWarning ||
+		e.Event == evResumed && e.Action == "usage_admission"
 }
 
 // openFile starts the event file of a drive that just took its id, emptying

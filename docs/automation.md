@@ -174,6 +174,8 @@ A drive reads `.drover.toml` once. `drover drive --pause` tells the drive runnin
 
 `drover drive --resume` checks the config and the prompt and review templates in its own process and refuses with exit `3`, asking the drive nothing, when one will not load or render. Otherwise the drive reloads them itself and runs the launch's preflight under its own flags (the reviewer, the merge gate, the origin, gh and each runner's sign-in), and a failure there is refused with exit `3` as well. Either way the drive stays paused and says why in `refused`. Once a resume takes, each held item adopts the reloaded config at its boundary, and one whose verify command changed reruns it there (see [`resumed`](#drive---events)).
 
+A [usage hold](#drive---events) pauses the drive through this same lease state, `"paused":true`, and `--resume` lifts it the same way; it also lifts on its own at its window's reset when the drive's `--for` or `--until` covers it.
+
 The templates are read from disk at every launch whether or not the drive was paused. What a resume adds is the check before anything launches, and the `resumed` event naming what changed.
 
 A supervisor runs `--pause` and `--resume` only while `[supervise] pause_for_config_change` is `supervisor`, and never edits `.drover.toml` itself. At `operator`, the default, both are the operator's; at `off`, `--pause` refuses for everybody.
@@ -904,7 +906,7 @@ Stdout carries the document and nothing else. Every count, warning and summary g
 
 Each park is said on stderr the moment it happens, before the next item starts, as an indented `! <id> parked <park> at <head>: <first line of the reason>`. `<head>` is the branch's commit, shortened, or `no head` where the branch has none. The summary after the queue drains repeats every park; the line is what an operator watching `--follow` sees in time to act on it.
 
-`outcome` is one of `ready_to_merge`, `merged_by_drover`, `merged_immediately`, `parked` or `skipped`. Where the trunk has required status checks, drive asks the forge to merge with `--auto`, so the merge completes after drive has moved on and the next drive's reconciliation records it; that item reads `ready_to_merge` with `merged`, and stderr says the merge is queued. drive learns whether the trunk has required checks by reading `repos/{owner}/{repo}/branches/<trunk>/protection/required_status_checks` once per drive. Where `[drive] merge_gate` is declared and that read answers no required checks (404, or 403 on a plan that cannot protect the branch) or fails, drive skips `--auto` and merges on the merge gate's word, as `merged_by_drover` below, and says why on stderr. `merged` is the field that says drive asked, and it is absent on an item nothing merged: a park, a branch `protected_paths` refused, or a run under `--no-merge`.
+`outcome` is one of `ready_to_merge`, `merged_by_drover`, `merged_immediately`, `parked`, `skipped` or `held`. `held` is an item a [usage hold](#drive---events) kept from starting or finishing when the drive's `--for` or `--until` arrived first: the drive exits 0, `reason` names the hold, nothing parked and no park row is written, and the next drive picks the item up. Where the trunk has required status checks, drive asks the forge to merge with `--auto`, so the merge completes after drive has moved on and the next drive's reconciliation records it; that item reads `ready_to_merge` with `merged`, and stderr says the merge is queued. drive learns whether the trunk has required checks by reading `repos/{owner}/{repo}/branches/<trunk>/protection/required_status_checks` once per drive. Where `[drive] merge_gate` is declared and that read answers no required checks (404, or 403 on a plan that cannot protect the branch) or fails, drive skips `--auto` and merges on the merge gate's word, as `merged_by_drover` below, and says why on stderr. `merged` is the field that says drive asked, and it is absent on an item nothing merged: a park, a branch `protected_paths` refused, or a run under `--no-merge`.
 
 `gh pr merge --auto` also succeeds when the forge merges on the spot because nothing waits, so drive asks the forge afterwards whether the pull request merged. One that did reads `merged_immediately`, with `merged`, `pr`, and `finished` once drive finishes it in the same drive. With `[drive] merge_gate` declared, the merge gate then reads the merged head first; a refusal cannot undo the merge, so the item is left unfinished, the reason names the pull request and the merge gate's last lines, and the drive stops. A merge state drive cannot read leaves the item `ready_to_merge`, with a reason saying the next drive's reconciliation decides it.
 
@@ -1018,6 +1020,36 @@ A `push_failed` park with `push_hook` belongs to `push_refused_by_hook`, which s
 
 `forge_down` and `runner_fault` are the two parks that end the drive rather than the item, and `drive` then exits 1. A trunk that did not receive this merge is the trunk every later item builds on; a service that is down and an account with nothing left in it are true of the next item as well, and walking the queue anyway spends a branch, a push and two dead sessions per item to rediscover it.
 
+#### rate_limit
+
+`rate_limit` is the newest reading Claude Code left on a usage row of any project in the [per-user registry](#projects---json), this one included, because the limit is the account's. It is absent when no usage row carries a reading, which is every ledger written only by codex or agy.
+
+```json
+{
+  "rate_limit": {
+    "reading": {
+      "status": "allowed_warning",
+      "rate_limit_type": "seven_day",
+      "resets_at": 1792983600,
+      "five_hour": { "utilization": 0.09, "resets_at": 1792747800 },
+      "seven_day": { "utilization": 0.79, "resets_at": 1792983600 },
+      "overage_status": "rejected",
+      "overage_disabled_reason": "org_level_disabled"
+    },
+    "project": "drover",
+    "ts": "2026-10-22T14:03:11-07:00",
+    "remaining": { "weekly": 21, "five_hour": 91 },
+    "overage": false
+  }
+}
+```
+
+`reading` is the usage row's [`rate_limit`](#writing-to-the-ledger-without-the-binary) as written, `project` the registered project whose row it is and `ts` that row's time, in the report's zone. `remaining` is the percent of each window left now, `100 - utilization * 100`: the reading's own figure until that window's `resets_at` passes, and 100 after it, since the account has started over. `overage` is true while sessions draw on purchased credit (the weekly window `rejected` with `is_using_overage`). `unread` names each registered project whose ledger would not read, when one would not, so a reading older than one in that ledger is not mistaken for the newest. `status` without `--json` prints the same reading as one footer line:
+
+```
+account: weekly 21% left, five-hour 91% left, not on purchased credit, week resets Sun Oct 25 20:00 PDT (read Oct 22 14:03 in drover)
+```
+
 ### `drive --events`
 
 `drive --json --events` writes, beside each item's report, one event object per line as things happen. Every event carries `event`, which no item report has, so a reader splits the stream on that key. Every event also carries `ts` (RFC 3339, UTC), `drive` (the drive's id, taken with the lease; absent only on the `exit` of a drive whose id would not allocate because the ledger would not open), `seq` (the event's line in the drive's event file, from 1, and the cursor [`watch --after`](#detaching-from-a-drive) takes; absent where `drive` is), `project` (the project's name as [`drover projects`](#projects---json) lists it, so a notifier serving several projects reads it rather than working it out from its directory), `id` where one item is meant, and `action` where a [`[supervise]`](configuration.md#supervise) catalog action produced it. `--events` without `--json` refuses with exit `3`. The same objects go to the drive's event file whatever the flags; see [Detaching from a drive](#detaching-from-a-drive).
@@ -1115,8 +1147,9 @@ The branch update drive makes before an item's own implement session, or its `--
 | `at_limit`                            | `override_review_limit`       |
 | `stopped`, `interrupted`              | `cleanup_interrupted_drive`   |
 | `stale_citations`                     | `stale_citations`             |
+| the `held` outcome, which is no park  | `usage_admission`             |
 
-`preflight`: a check drive ran before spending a session. `action` is the check's key (`stale_citations`, `deps_lint`, `worktree_links_gap` or `host_load_admission`) and `policy` its policy here. One event per finding, with `reason` the sentence the drive printed, or one with `reason` `clean` for a check that found nothing. `stale_citations` carries `id`. `host_load_admission` emits on a change of state rather than per dispatch: `clean` on the first admission and again as each hold ends, the hold's reason as it starts, and the error at the first load it cannot read. A `deps_lint` refusal emits its event before the drive exits `3`, with no `exit` event after it.
+`preflight`: a check drive ran before spending a session. `action` is the check's key (`stale_citations`, `deps_lint`, `worktree_links_gap` or `host_load_admission`; `usage_admission` reports through `usage_warning`, `paused` and `needs_operator` instead) and `policy` its policy here. One event per finding, with `reason` the sentence the drive printed, or one with `reason` `clean` for a check that found nothing. `stale_citations` carries `id`. `host_load_admission` emits on a change of state rather than per dispatch: `clean` on the first admission and again as each hold ends, the hold's reason as it starts, and the error at the first load it cannot read. A `deps_lint` refusal emits its event before the drive exits `3`, with no `exit` event after it.
 
 ```json
 {
@@ -1191,13 +1224,39 @@ The branch update drive makes before an item's own implement session, or its `--
 { "event": "merged", "ts": "2026-10-16T22:45:00Z", "id": "E36", "pr": 252 }
 ```
 
-`paused`: `drive --pause` reached the drive. It dispatches nothing more, and each running item holds at its next stage boundary.
+`paused`: `drive --pause` reached the drive, or [`usage_admission`](configuration.md#supervise) held it. It dispatches nothing more, and each running item holds at its next stage boundary. A usage hold carries `action` `usage_admission`, `policy`, and `window`, `remaining` and `resets_at` as `usage_warning` does, with `reason` naming the level crossed: `the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT`, a window entered on purchased credit under `[usage.overage] mode = "pause"`, a list-price sum at `max_usd`, or a refusal, `impl's review session was refused: the weekly window is spent and so is the purchased credit (out_of_credits), so the service refuses sessions; it resets …`. A `needs_operator` with the same fields and `run` `drover drive --resume` follows it at every policy, so `notify` and `ntfy` reach the operator.
 
 ```json
 { "event": "paused", "ts": "2026-10-16T22:50:00Z" }
+{
+  "event": "paused",
+  "ts": "2026-10-24T09:12:40Z",
+  "action": "usage_admission",
+  "policy": "auto",
+  "reason": "the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT",
+  "window": "weekly",
+  "remaining": 4,
+  "resets_at": "2026-10-25T20:00:00-07:00"
+}
 ```
 
-`resumed`: `drive --resume` reloaded the drive's inputs. The event without `id` is the drive's own; one with `id` is an item leaving the boundary it was held at, and `stage` is where it goes next (`implement`, `review` or `update_branch`). `changed` names which inputs differ from what the drive, or that item, ran under before: `config` (the `.drover.toml` bytes), `prompt`, `review` (the template text) and `verify` (the item's own verify command, or for the drive's event the whole `[verify]` table). An item whose `verify` changed runs the new command on its tree before it goes on, with a `stage` event for `gate`, and a refusal is sent back to it as a merge gate's would be. A drive that [re-executed onto a new binary](#resuming-onto-a-new-binary) emits one `resumed` with `changed` `binary` from the new process.
+A session the service refused for quota (its reading `rejected` with no overage, or `out_of_credits`) is held rather than parked: its item goes back to the head of the queue at the stage that was refused, with a `queued` event carrying `action` `usage_admission`, `stage` and `position` 1, and the refused launch counts against neither `rerun_lost_review` nor `max_review_rounds`. A quota fault with no reading, codex's or agy's, waits or parks `runner_fault` as before, and so does every quota fault at `usage_admission = "off"`.
+
+`usage_warning`: the newest reading crossed a [`[usage]` notify level](configuration.md#usageweekly-and-usagefive_hour). `window` is `weekly` or `five_hour` with `remaining` the percent of it left, `overage` (the weekly allotment spent and sessions drawing on purchased credit, sent when `[usage.weekly] notify_remaining` is set) or `overage_usd` (the list-price sum at `[usage.overage] notify_usd`); neither overage form carries `remaining`, since the service reports no credit figure. `resets_at` is the window's reset in local time and `reason` the sentence. It pauses nothing. Each is sent once per window per reset: drive appends a ledger row naming both first, and sends nothing a row in any registered project already names. `[supervise] notify` runs on it as on `needs_operator`, and `[supervise.ntfy]` sends it when its `events` names `usage_warning` or `needs_operator`.
+
+```json
+{
+  "event": "usage_warning",
+  "ts": "2026-10-23T18:40:02Z",
+  "action": "usage_admission",
+  "reason": "the weekly window has 18% left, at or below [usage.weekly] notify_remaining 20; it resets Sun Oct 25 20:00 PDT",
+  "window": "weekly",
+  "remaining": 18,
+  "resets_at": "2026-10-25T20:00:00-07:00"
+}
+```
+
+`resumed`: `drive --resume` reloaded the drive's inputs. The event without `id` is the drive's own; one with `id` is an item leaving the boundary it was held at, and `stage` is where it goes next (`implement`, `review` or `update_branch`). `changed` names which inputs differ from what the drive, or that item, ran under before: `config` (the `.drover.toml` bytes), `prompt`, `review` (the template text) and `verify` (the item's own verify command, or for the drive's event the whole `[verify]` table). An item whose `verify` changed runs the new command on its tree before it goes on, with a `stage` event for `gate`, and a refusal is sent back to it as a merge gate's would be. A drive that [re-executed onto a new binary](#resuming-onto-a-new-binary) emits one `resumed` with `changed` `binary` from the new process. A usage hold lifting on its own at its window's reset (plus a minute), which it does when the reset falls inside `--for` or `--until`, emits `resumed` with `action` `usage_admission`, the hold's `window`, `remaining` and `resets_at`, and `reason` `the weekly hold reached its reset at Sun Oct 25 20:00 PDT, so the drive dispatches again`; `[supervise] notify` runs on that one too. `drive --resume` lifts a usage hold at any time and emits the ordinary `resumed`, and the same reading does not hold the drive again before its window resets.
 
 ```json
 {
@@ -1606,6 +1665,26 @@ A usage row records one session's tokens, and a set `usage` object is what makes
   "date": "2026-10-17",
   "ts": "2026-10-17T03:15:18-07:00"
 }
+```
+
+A row from a session whose log carried a `rate_limit_event` adds `rate_limit`, the last one it wrote, renamed into the ledger's own case: `status` (`allowed`, `allowed_warning`, `rejected`), `rate_limit_type` (the window that status is about), `resets_at` (a Unix second), `five_hour` and `seven_day` (each `utilization` from 0 to 1, its `resets_at`, and `status` where the event gave one), `is_using_overage`, `overage_status` and `overage_disabled_reason` (`out_of_credits` once purchased credit is spent). It is absent on a row from a runner that writes no such event, codex and agy among them. `status --json` reports the newest one as [`rate_limit`](#rate_limit), and `drive`'s usage admission judges it.
+
+```json
+"rate_limit": {
+  "status": "rejected",
+  "rate_limit_type": "seven_day",
+  "resets_at": 1792983600,
+  "five_hour": { "utilization": 0, "resets_at": 1792834200, "status": "allowed" },
+  "seven_day": { "utilization": 1, "resets_at": 1792983600, "status": "rejected" },
+  "overage_status": "rejected",
+  "overage_disabled_reason": "out_of_credits"
+}
+```
+
+A `usage_warning` drive sent leaves one row under `"id":"usage"`, an id no namespace can mint, naming the window and the reset it was about, with `note` the sentence. Any row naming the pair stops a second notice, in this project or another registered one; `check` and every item reader skip it.
+
+```json
+{"id":"usage","usage_warning":"weekly","resets_at":1792983600,"note":"the weekly window has 18% left, at or below [usage.weekly] notify_remaining 20; it resets Sun Oct 25 20:00 PDT","drive":"D9","date":"2026-10-23","ts":"2026-10-23T11:40:02-07:00"}
 ```
 
 The counts are tokens as the API reported them, not the subscription's quota accounting, and `cost_usd` is list price, not what a subscription charged. drover's other readers ignore usage rows: no stage, pass or run count changes because one is there, and `check` reads one with an empty `id` as a usage row rather than a malformed line.

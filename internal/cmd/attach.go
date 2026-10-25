@@ -26,7 +26,7 @@ import (
 // may name.
 var driveEventNames = []string{
 	evQueued, evDispatched, evPreflight, evStage, evCheck, evParked, evFiled,
-	evNeedsOperator, evMerged, evPaused, evResumed, evExit,
+	evNeedsOperator, evMerged, evPaused, evResumed, evUsageWarning, evExit,
 }
 
 // driveEventsPath is where a drive keeps its events, one object per line,
@@ -248,6 +248,11 @@ func eventLine(e DriveEvent) string {
 		add("code", strconv.Itoa(*e.Code))
 	}
 	add("changed", strings.Join(e.Changed, ","))
+	add("window", e.Window)
+	if e.Remaining != nil {
+		add("remaining", strconv.Itoa(*e.Remaining)+"%")
+	}
+	add("resets_at", e.ResetsAt)
 	add("seq", num(e.Seq))
 	for _, kv := range [][2]string{{"reason", e.Reason}, {"run", e.Run}, {"evidence", e.Evidence}} {
 		if kv[1] != "" {
@@ -466,6 +471,11 @@ read is reported once on stderr and attach goes on with the events.
 
 --item limits the output to one item's events and the exit. An id the drive
 has not reached prints nothing until it does, since it may be enqueued later.
+
+Every event the drive emits prints, usage_warning among them: a [usage]
+notify level crossed, with the window, the percent of it left and its reset.
+A usage hold prints as paused and needs_operator with action=usage_admission,
+and the resume at the reset as resumed with the same action.
 
 --since skips events stamped before it. --json prints each line as the drive
 wrote it, the objects documented under drive --events; without it each event

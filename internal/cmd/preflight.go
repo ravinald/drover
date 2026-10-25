@@ -660,5 +660,6 @@ func (s *session) preflightPlan(w io.Writer, items []backlog.Item) {
 		}
 		row("host_load_admission", fmt.Sprintf("load %.2f against [drive] max_load %g; the run %s", load, s.cfg.Loop.LoadCeiling(), verb))
 	}
+	row("usage_admission", s.usagePlan())
 	fmt.Fprintln(w)
 }

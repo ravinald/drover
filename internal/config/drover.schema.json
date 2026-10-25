@@ -455,7 +455,7 @@
     "usage": {
       "type": "object",
       "additionalProperties": false,
-      "description": "How status reads the usage rows: the window the report-level totals cover, the budget they are measured against, and when a session has run long enough to name. The budget sums every project in the per-user registry, because the limit is per account.",
+      "description": "How status reads the usage rows: the window the report-level totals cover, the budget they are measured against, and when a session has run long enough to name; and, in [usage.weekly], [usage.five_hour] and [usage.overage], when drive warns and holds on the account's own rate_limit reading. The budget and the reading both span every project in the per-user registry, because the limit is per account.",
       "properties": {
         "weekly_budget": {
           "type": "integer",
@@ -478,6 +478,67 @@
           "minimum": 1,
           "default": 400000,
           "description": "The largest context, in tokens, a session may reach before status lists it under long_sessions."
+        },
+        "weekly": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The two levels drive acts on for Claude's seven-day window, each the percent of the window left as the service reports it (100 - utilization * 100), not tokens and not dollars. Unset means that step does not happen for this window. When both are set, pause_remaining must be below notify_remaining.",
+          "properties": {
+            "notify_remaining": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99,
+              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and runs [supervise] notify and [supervise.ntfy] on it. It does not pause or slow the drive. Unset sends none."
+            },
+            "pause_remaining": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99,
+              "description": "The fail-safe level: at or below this percent left, usage_admission holds dispatch and every stage that would launch a session, and the drive pauses until the window resets or drive --resume. Unset holds nothing on this window."
+            }
+          }
+        },
+        "five_hour": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The two levels drive acts on for Claude's five-hour window, each the percent of the window left as the service reports it (100 - utilization * 100), not tokens and not dollars. Unset means that step does not happen for this window. When both are set, pause_remaining must be below notify_remaining.",
+          "properties": {
+            "notify_remaining": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99,
+              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and runs [supervise] notify and [supervise.ntfy] on it. It does not pause or slow the drive. Unset sends none."
+            },
+            "pause_remaining": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99,
+              "description": "The fail-safe level: at or below this percent left, usage_admission holds dispatch and every stage that would launch a session, and the drive pauses until the window resets or drive --resume. Unset holds nothing on this window."
+            }
+          }
+        },
+        "overage": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What drive does once the weekly allotment is spent and sessions run on purchased extra-usage credit. The service reports no remaining-credit figure, only whether overage is in use and, at the end, out_of_credits; the dollar sums here are list-price cost_usd from the usage rows, not the credit the account was charged.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["pause", "continue"],
+              "default": "pause",
+              "description": "pause holds the drive as soon as a reading shows the weekly window rejected with overage in use. continue keeps dispatching on purchased credit, bounded by max_usd when set."
+            },
+            "max_usd": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Under mode = continue, the list-price cost_usd of usage rows on overage since the weekly window began, summed across every project in the per-user registry, at which usage_admission holds the drive. Unset is no cap."
+            },
+            "notify_usd": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Under mode = continue, the same sum at which drive emits one usage_warning on the way to max_usd. Must be below max_usd when both are set."
+            }
+          }
         }
       }
     },

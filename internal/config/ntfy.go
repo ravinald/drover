@@ -29,7 +29,7 @@ type Ntfy struct {
 
 // NtfyEvents are the drive events [supervise.ntfy] events may name.
 func NtfyEvents() []string {
-	return []string{"needs_operator", "needs_supervisor", "parked", "exit"}
+	return []string{"needs_operator", "needs_supervisor", "parked", "usage_warning", "exit"}
 }
 
 // NtfyPriorities are ntfy's own priority names, lowest first.

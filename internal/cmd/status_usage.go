@@ -129,27 +129,40 @@ func (s *session) reportUsage(now time.Time) *ReportUsage {
 // in [start, now], this one's included, and the projects whose ledger would
 // not read. The limit is per account, so one project's share of it says
 // nothing about how close the account is.
-//
-// Ledgers are counted once each by resolved path: a drive's worktree reaches
-// its project's ledger through a link, and a worktree registered beside its
-// parent would otherwise count the same rows twice. A registered root that is
-// gone or holds no config is not a project, as in status --all-projects, and
-// counts nothing without being unread.
 func (s *session) accountUsage(start, now time.Time) (float64, []string) {
 	var total float64
-	sum := func(rows []ledger.Row) {
-		for _, r := range rows {
+	ledgers, unread := s.accountLedgers()
+	for _, al := range ledgers {
+		for _, r := range al.ledger.Usage {
 			if inWindow(r, start, now) {
 				total += runlog.Weighted(*r.Usage)
 			}
 		}
 	}
+	return total, unread
+}
+
+// accountLedger is one registered project's ledger, as accountLedgers read it.
+type accountLedger struct {
+	project string
+	ledger  *ledger.Ledger
+}
+
+// accountLedgers is this project's ledger and every other registered
+// project's, and the projects whose ledger would not read, nil when none.
+//
+// Ledgers are read once each by resolved path: a drive's worktree reaches its
+// project's ledger through a link, and a worktree registered beside its parent
+// would otherwise count the same rows twice. A registered root that is gone or
+// holds no config is not a project, as in status --all-projects, and counts
+// nothing without being unread.
+func (s *session) accountLedgers() ([]accountLedger, []string) {
+	out := []accountLedger{{project: s.cfg.Project, ledger: s.ledger}}
 	seen := map[string]bool{resolved(s.cfg.Abs(s.cfg.Paths.Ledger)): true}
-	sum(s.ledger.Usage)
 	unread := []string{}
 	reg, err := projects.Read(projects.Path(config.GlobalPath()))
 	if err != nil {
-		return total, append(unread, fmt.Sprintf("the project registry: %v", err))
+		return out, append(unread, fmt.Sprintf("the project registry: %v", err))
 	}
 	live, parents, _ := hostProjects(reg)
 	for _, p := range live {
@@ -171,12 +184,12 @@ func (s *session) accountUsage(start, now time.Time) (float64, []string) {
 			unread = append(unread, fmt.Sprintf("%s (%s): %v", p.Project, p.Root, err))
 			continue
 		}
-		sum(l.Usage)
+		out = append(out, accountLedger{project: p.Project, ledger: l})
 	}
 	if len(unread) == 0 {
-		return total, nil
+		return out, nil
 	}
-	return total, unread
+	return out, unread
 }
 
 // longSessions is every session with a usage row in [start, now] whose rows,

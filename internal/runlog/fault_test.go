@@ -182,7 +182,7 @@ func TestClaudeWeeklyLimitNamesItsReset(t *testing.T) {
 // wait on: the session failed on something else.
 func TestARateLimitEventAloneIsNotAQuota(t *testing.T) {
 	r := Classify(Result{IsError: true, Transport: true, Text: "API Error: 529 Overloaded",
-		RateLimitStatus: "rejected", RateLimitReset: 1792983600})
+		RateLimit: &RateLimit{Status: "rejected", ResetsAt: 1792983600}})
 	if r.Fault != FaultTransient || !r.RetryAt.IsZero() {
 		t.Errorf("fault %q at %v, want %q and no instant", r.Fault, r.RetryAt, FaultTransient)
 	}

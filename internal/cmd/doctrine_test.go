@@ -2,11 +2,13 @@ package cmd
 
 import (
 	"maps"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/prompts"
 )
 
@@ -322,6 +324,28 @@ func TestEveryCopyOfTheAuditPositionAgrees(t *testing.T) {
 			if i := stepIndex(c.text, later, c.drawn); i >= 0 && i < at {
 				t.Errorf("%s puts %s before %s; the audit level is written while the branch is still there", c.name, later, pos.Step)
 			}
+		}
+	}
+}
+
+// Every [usage] key this build reads is documented where an operator looks for
+// it. The keys are walked off the Config types, so a key added there and not to
+// the page fails here rather than reading as undocumented silence.
+func TestEveryUsageKeyIsInTheConfigurationReference(t *testing.T) {
+	b, err := os.ReadFile("../../docs/configuration.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(b)
+	for _, k := range config.Keys() {
+		if !strings.HasPrefix(k.Dotted, "usage.") {
+			continue
+		}
+		if !strings.Contains(doc, "`"+k.Name+"`") {
+			t.Errorf("docs/configuration.md never names `%s` (%s)", k.Name, k.Dotted)
+		}
+		if !strings.Contains(doc, "["+k.Table+"]") {
+			t.Errorf("docs/configuration.md never names the table [%s] that %s sits in", k.Table, k.Dotted)
 		}
 	}
 }
