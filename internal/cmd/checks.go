@@ -64,13 +64,37 @@ var infraPatterns = []string{
 	"Temporary failure in name resolution",
 	"connection reset by peer",
 	"TLS handshake timeout",
+	// govulncheck on a standard-library finding: the runner's setup-go installs
+	// the toolchain, so the patch release that fixes it arrives on a rerun and
+	// no diff can supply it.
+	"from the Go standard library",
 }
+
+// failurePatterns pick out the lines of a code failure's log that say what
+// failed, matched against each line with its timestamp stripped. [forge]
+// failure_patterns adds to them.
+var failurePatterns = []string{
+	`^--- FAIL`,                     // go test, one test
+	`^FAIL\b`,                       // go test, one package
+	`^\S+:\d+:\d+: .*\(\w[\w-]*\)$`, // a golangci-lint finding, linter named last
+	`^\S+\.\w+:\d+:\d+: `,           // a compiler or vet error
+	`^Vulnerability #\d+`,           // govulncheck
+	`^\s*Found in: `,
+	`^\s*Fixed in: `,
+	`^panic: `,
+}
+
+// failureMax is how many lines a failure carries.
+const failureMax = 5
 
 // judged is one red check and what drive took it for.
 type judged struct {
 	run      forgeCheck
 	class    string
 	evidence string
+	// failure is what the job log says failed, read whenever the log was, so a
+	// check read as code by any path carries it.
+	failure []string
 	// workflow is the Actions run to rerun, zero for a check no workflow run
 	// produced.
 	workflow int64
@@ -78,11 +102,13 @@ type judged struct {
 
 // settled is what settleChecks concluded about a head before the gate reads
 // it. A park stops the item; none reports a head no workflow ran on, for a
-// verify refusal that follows to say so.
+// verify refusal that follows to say so; code is the red checks left for the
+// gate, for a refusal that follows to say what failed.
 type settled struct {
 	park, reason string
 	stop         error
 	none         string
+	code         []judged
 }
 
 // settleChecks waits for the checks on sha and classifies every red one before
@@ -164,10 +190,14 @@ func (s *session) actOnReds(ctx context.Context, d *DriveItem, sha string, reds 
 	// A code failure goes to the gate, which sends it back, so rerunning the
 	// infra failures beside it would spend reruns on a head that is going back.
 	if has(ledger.ClassCode) {
+		var code []judged
 		for _, j := range reds {
 			s.recordCheck(d.ID, sha, j, false, "")
+			if j.class == ledger.ClassCode {
+				code = append(code, j)
+			}
 		}
-		return settled{}, nil
+		return settled{code: code}, nil
 	}
 
 	var workflows []int64
@@ -177,12 +207,12 @@ func (s *session) actOnReds(ctx context.Context, d *DriveItem, sha string, reds 
 		}
 	}
 	if spent, limit := s.ledger.Reruns(d.ID, sha), s.cfg.ForgeReruns(); spent+len(workflows) > limit {
-		for _, j := range reds {
-			j.class = ledger.ClassCode
-			j.evidence += fmt.Sprintf("; %d of %d reruns of this head spent, so it is the code's", spent, limit)
-			s.recordCheck(d.ID, sha, j, false, "")
+		for i := range reds {
+			reds[i].class = ledger.ClassCode
+			reds[i].evidence += fmt.Sprintf("; %d of %d reruns of this head spent, so it is the code's", spent, limit)
+			s.recordCheck(d.ID, sha, reds[i], false, "")
 		}
-		return settled{}, nil
+		return settled{code: reds}, nil
 	}
 	if infraPol != polAuto {
 		var lines []string
@@ -227,8 +257,9 @@ func (s *session) classify(ctx context.Context, r forgeCheck) judged {
 			j.class, j.evidence = ledger.ClassInfra, "the job failed with no step run"
 			return j
 		}
-		if log, err := s.ghAPI(ctx, "repos/"+s.repo()+"/actions/jobs/"+strconv.FormatInt(r.ID, 10)+"/logs"); err == nil {
-			if line := infraLine(string(log), append(slices.Clone(infraPatterns), s.cfg.Forge.InfraPatterns...)); line != "" {
+		if log, err := s.jobLog(ctx, r.ID); err == nil {
+			j.failure = failureLines(log, s.failurePatterns())
+			if line := infraLine(log, append(slices.Clone(infraPatterns), s.cfg.Forge.InfraPatterns...)); line != "" {
 				j.class, j.evidence = ledger.ClassInfra, line
 				return j
 			}
@@ -269,15 +300,90 @@ func infraLine(log string, patterns []string) string {
 		low := strings.ToLower(line)
 		for _, p := range patterns {
 			if strings.Contains(low, strings.ToLower(p)) {
-				line = strings.TrimSpace(logStamp.ReplaceAllString(strings.TrimSpace(line), ""))
-				if len(line) > evidenceMax {
-					line = line[:evidenceMax]
-				}
-				return line
+				return logLine(line)
 			}
 		}
 	}
 	return ""
+}
+
+// logEscape is a terminal escape sequence, which Actions keeps in a job log
+// for the colors a step printed.
+var logEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+// logAnnotation is the workflow command Actions prefixes to a line a step
+// reported as an error or a warning.
+var logAnnotation = regexp.MustCompile(`^##\[(error|warning|notice)\]`)
+
+// logLine is one log line as a person reads it: no timestamp, no annotation,
+// no escapes, and bounded at evidenceMax.
+func logLine(line string) string {
+	line = logStamp.ReplaceAllString(strings.TrimSpace(line), "")
+	line = logAnnotation.ReplaceAllString(logEscape.ReplaceAllString(line, ""), "")
+	line = strings.TrimSpace(line)
+	if len(line) > evidenceMax {
+		line = line[:evidenceMax]
+	}
+	return line
+}
+
+// failureEnd marks where a make target or an Actions step gave up, the line a
+// log with no failure pattern in it is read back from.
+var failureEnd = regexp.MustCompile(`^(make: \*\*\*|Error:)`)
+
+// failureLines are up to failureMax lines of log matching one of patterns,
+// read as logLine reads them. A log matching none falls back to the last
+// failureMax non-blank lines before the first make or Actions error, and nil
+// when it has neither.
+func failureLines(log string, patterns []*regexp.Regexp) []string {
+	var lines []string
+	for _, raw := range strings.Split(log, "\n") {
+		if l := logLine(raw); l != "" && !strings.HasPrefix(l, "##[") {
+			lines = append(lines, l)
+		}
+	}
+	var hit []string
+	for _, l := range lines {
+		if slices.ContainsFunc(patterns, func(p *regexp.Regexp) bool { return p.MatchString(l) }) {
+			if hit = append(hit, l); len(hit) == failureMax {
+				return hit
+			}
+		}
+	}
+	if len(hit) > 0 {
+		return hit
+	}
+	end := slices.IndexFunc(lines, failureEnd.MatchString)
+	if end < 0 {
+		return nil
+	}
+	return lines[max(0, end-failureMax):end]
+}
+
+// failurePatterns are the built-in failure patterns and [forge]
+// failure_patterns, compiled. Load refuses a pattern that does not compile, so
+// one that fails here is skipped rather than fatal.
+func (s *session) failurePatterns() []*regexp.Regexp {
+	var out []*regexp.Regexp
+	for _, p := range append(slices.Clone(failurePatterns), s.cfg.Forge.FailurePatterns...) {
+		if re, err := regexp.Compile(p); err == nil {
+			out = append(out, re)
+		}
+	}
+	return out
+}
+
+// jobLog is one Actions job's log. gh 2.103 refuses to print a response
+// holding terminal escapes unless told to, and a job log holds the colors its
+// steps printed; an older gh has no such flag, so it is asked plainly when the
+// flag is refused.
+func (s *session) jobLog(ctx context.Context, job int64) (string, error) {
+	path := "repos/" + s.repo() + "/actions/jobs/" + strconv.FormatInt(job, 10) + "/logs"
+	out, err := s.ghAPI(ctx, "--allow-escape-sequences", path)
+	if err != nil {
+		out, err = s.ghAPI(ctx, path)
+	}
+	return string(out), err
 }
 
 // stepsRun counts the steps of an Actions job that ran to a conclusion. A job
@@ -400,13 +506,14 @@ func (s *session) repo() string {
 	return "{owner}/{repo}"
 }
 
-// ghAPI reads one forge path from the project root.
-func (s *session) ghAPI(ctx context.Context, path string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "gh", "api", path) // #nosec G204 -- path is built from forge ids and project config
+// ghAPI reads one forge path from the project root. Any flags precede the
+// path.
+func (s *session) ghAPI(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "gh", append([]string{"api"}, args...)...) // #nosec G204 -- args are fixed flags and a path built from forge ids and project config
 	cmd.Dir = s.cfg.Root
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("gh api %s: %w", path, err)
+		return nil, fmt.Errorf("gh api %s: %w", strings.Join(args, " "), err)
 	}
 	return out, nil
 }
@@ -420,6 +527,40 @@ func (s *session) recordCheck(id, sha string, j judged, rerun bool, act string) 
 		fmt.Fprintf(os.Stderr, "  · %s: the ledger would not record %s as %s: %v\n", id, row.Check, j.class, err)
 	}
 	events.emit(DriveEvent{Event: evCheck, ID: id, Action: act, Head: sha, Check: row.Check, Class: j.class, Evidence: j.evidence})
+}
+
+// checkURL is where a person reads a check: its own page, or the app's.
+func checkURL(r forgeCheck) string {
+	if r.HTMLURL != "" {
+		return r.HTMLURL
+	}
+	return r.DetailsURL
+}
+
+// codeReason is a code failure as a park's reason names it: the check and the
+// first line its log says failed, or what classify found when it read none.
+func codeReason(j judged) string {
+	if len(j.failure) > 0 {
+		return j.run.Name + " failed: " + j.failure[0]
+	}
+	return j.run.Name + " failed: " + j.evidence
+}
+
+// codeEvidence is the lines a park carries for its code failures, each check's
+// headed by its name where there is more than one.
+func codeEvidence(code []judged) string {
+	var lines []string
+	for _, j := range code {
+		if len(code) > 1 {
+			lines = append(lines, j.run.Name+":")
+		}
+		if len(j.failure) > 0 {
+			lines = append(lines, j.failure...)
+		} else {
+			lines = append(lines, j.evidence)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // noneFirst heads a gate's refusal with the report that no workflow ran on the

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ func ownState(t *testing.T) string {
 	followPoll = 20 * time.Millisecond
 	t.Cleanup(func() {
 		followPoll = poll
-		attachJSON, attachSince, watchUntil, watchSince, watchAfter = false, "", nil, "", -1
+		attachJSON, attachSession, attachItem, attachSince, watchUntil, watchSince, watchAfter = false, false, "", "", nil, "", -1
 		driveStop, driveDetach = false, false
 	})
 	return dir
@@ -453,5 +454,308 @@ func TestAReopenedEventFileNumbersOnFromItsLines(t *testing.T) {
 	}
 	if !slices.Equal(seqs, []int{1, 3, 4}) || !slices.Equal(lines, seqs) {
 		t.Errorf("reopened file carries seqs %v on lines %v, want 1, 3, 4 on the lines they name", seqs, lines)
+	}
+}
+
+// lockedBuffer is an output attach writes from its own goroutine while the
+// test reads it.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// sessionRig is a drive's event file and session logs written by hand, with a
+// lease held in this process while the drive is meant to be running.
+type sessionRig struct {
+	t    *testing.T
+	root string
+	f    followed
+	held *lease.Handle
+}
+
+func newSessionRig(t *testing.T, running bool) *sessionRig {
+	t.Helper()
+	poll := followPoll
+	followPoll = 10 * time.Millisecond
+	t.Cleanup(func() { followPoll = poll })
+	root := t.TempDir()
+	r := &sessionRig{t: t, root: root, f: followed{
+		id: "D1", events: filepath.Join(root, "D1.jsonl"), lease: filepath.Join(root, lease.FileName), root: root,
+	}}
+	if running {
+		h, err := lease.Acquire(r.f.lease, lease.Lease{Command: "drive", Root: root, Drive: "D1"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.held = h
+		t.Cleanup(func() { _, _ = h.Close() })
+	}
+	return r
+}
+
+func (r *sessionRig) appendTo(path, line string) {
+	r.t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 -- the test's own directory
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		r.t.Fatal(err)
+	}
+}
+
+func (r *sessionRig) emit(e DriveEvent) {
+	r.t.Helper()
+	e.TS, e.Drive = time.Now().UTC().Format(time.RFC3339), "D1"
+	b, err := json.Marshal(e)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	r.appendTo(r.f.events, string(b))
+}
+
+func (r *sessionRig) launched(id, log string) {
+	r.emit(DriveEvent{Event: evDispatched, ID: id})
+	r.emit(DriveEvent{Event: evStage, ID: id, Stage: ledger.StageImplement, Log: log})
+}
+
+// say appends one assistant event of Claude's stream-json to a session log.
+func (r *sessionRig) say(log, text string) {
+	r.appendTo(filepath.Join(r.root, log),
+		`{"type":"assistant","message":{"content":[{"type":"text","text":`+strconv.Quote(text)+`}]}}`)
+}
+
+func (r *sessionRig) bash(log, command string) {
+	r.appendTo(filepath.Join(r.root, log),
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":`+strconv.Quote(command)+`}}]}}`)
+}
+
+type attachOpts struct {
+	session, json bool
+	item          string
+}
+
+// attach starts following the rig's drive as attach does, and returns its
+// stdout and stderr and a channel carrying what follow returned.
+func (r *sessionRig) attach(o attachOpts) (out, errOut *lockedBuffer, done chan error) {
+	out, errOut, done = &lockedBuffer{}, &lockedBuffer{}, make(chan error, 1)
+	a := newAttacher(r.f, out, errOut)
+	a.session, a.json, a.item = o.session, o.json, o.item
+	f := r.f
+	f.tick = a.tick
+	go func() {
+		done <- f.follow(r.t.Context(), func(line []byte, _ int, end int64, e DriveEvent) bool {
+			a.event(line, end, e)
+			return false
+		})
+	}()
+	return out, errOut, done
+}
+
+func eventually(t *testing.T, what string, buf *lockedBuffer, cond func(string) bool) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); !cond(buf.String()); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("never saw %s; printed:\n%s", what, buf.String())
+		}
+	}
+}
+
+func attachReturned(t *testing.T, done chan error) {
+	t.Helper()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("attach: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("attach never returned after the exit event")
+	}
+}
+
+func exitEvent() DriveEvent { return DriveEvent{Event: evExit, Code: new(int)} }
+
+// A session running when attach starts is followed as its log grows, from a
+// log that does not exist yet, and dropped at the item's next event: what the
+// log gains after that is not printed.
+func TestAttachSessionFollowsARunningSessionsLog(t *testing.T) {
+	r := newSessionRig(t, true)
+	r.launched("1", "logs/1.jsonl")
+	if err := os.MkdirAll(filepath.Join(r.root, "logs"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	out, _, done := r.attach(attachOpts{session: true})
+	eventually(t, "the stage line", out, func(s string) bool { return strings.Contains(s, "stage=implement") })
+
+	r.bash("logs/1.jsonl", "make build &&\n  make check")
+	eventually(t, "the tool call", out, func(s string) bool { return strings.Contains(s, "1 > Bash make build && make check") })
+	r.say("logs/1.jsonl", "Committing.")
+	eventually(t, "the text", out, func(s string) bool { return strings.Contains(s, "1 · Committing.") })
+
+	r.say("logs/1.jsonl", "Last words before the park.")
+	r.emit(DriveEvent{Event: evParked, ID: "1", Park: passSilent})
+	eventually(t, "the park", out, func(s string) bool { return strings.Contains(s, "park="+passSilent) })
+	r.say("logs/1.jsonl", "After the park.")
+	time.Sleep(10 * followPoll)
+	r.emit(exitEvent())
+	attachReturned(t, done)
+
+	got := out.String()
+	if strings.Contains(got, "After the park.") {
+		t.Errorf("attach printed activity after the item's next event:\n%s", got)
+	}
+	last := strings.Index(got, "Last words before the park.")
+	if last < 0 || last > strings.Index(got, "park="+passSilent) {
+		t.Errorf("the log's last line before the park is missing or follows it:\n%s", got)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(got), "\n") {
+		if strings.Contains(line, " 1 ") && !strings.HasPrefix(line, "20") && !strings.HasPrefix(line, activityIndent+"1 ") {
+			t.Errorf("activity line %q is not indented under the item", line)
+		}
+	}
+}
+
+// Replaying, a session that finished before attach started prints its stage
+// line alone, and one still running is read from its first line.
+func TestAttachSessionReplaysAFinishedSessionWithoutActivity(t *testing.T) {
+	r := newSessionRig(t, true)
+	r.launched("1", "1.jsonl")
+	r.say("1.jsonl", "finished long ago")
+	r.emit(DriveEvent{Event: evParked, ID: "1", Park: passSilent})
+	r.launched("2", "2.jsonl")
+	r.say("2.jsonl", "still at it")
+
+	out, _, done := r.attach(attachOpts{session: true})
+	eventually(t, "item 2's activity", out, func(s string) bool { return strings.Contains(s, "2 · still at it") })
+	r.emit(exitEvent())
+	attachReturned(t, done)
+	if got := out.String(); strings.Contains(got, "finished long ago") || strings.Count(got, "stage=implement") != 2 {
+		t.Errorf("attach replayed a finished session's activity, or dropped a stage line:\n%s", got)
+	}
+
+	// A drive that has exited has no session running, whatever its last
+	// events were.
+	gone := newSessionRig(t, false)
+	gone.launched("1", "1.jsonl")
+	gone.say("1.jsonl", "cut off")
+	gone.emit(exitEvent())
+	out, _, done = gone.attach(attachOpts{session: true})
+	attachReturned(t, done)
+	if got := out.String(); strings.Contains(got, "cut off") || !strings.Contains(got, "stage=implement") {
+		t.Errorf("attach on an exited drive printed:\n%s", got)
+	}
+}
+
+// --item keeps one item's events and activity, and the exit, out of two
+// items whose sessions run at once; an id the drive never reaches prints the
+// exit alone.
+func TestAttachItemFiltersTwoInterleavedItems(t *testing.T) {
+	r := newSessionRig(t, true)
+	out, _, done := r.attach(attachOpts{session: true, item: "2"})
+	r.launched("1", "1.jsonl")
+	r.launched("2", "2.jsonl")
+	r.bash("1.jsonl", "echo one")
+	r.bash("2.jsonl", "echo two")
+	eventually(t, "item 2's tool call", out, func(s string) bool { return strings.Contains(s, "2 > Bash echo two") })
+	r.emit(DriveEvent{Event: evParked, ID: "1", Park: passSilent})
+	r.emit(DriveEvent{Event: evParked, ID: "2", Park: passSilent})
+	r.emit(exitEvent())
+	attachReturned(t, done)
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		if strings.Contains(line, "one") || strings.Contains(line, "  1") || strings.Contains(line, " 1 ") {
+			t.Errorf("--item 2 printed item 1's %q", line)
+		}
+	}
+	if got := out.String(); !strings.Contains(got, "dispatched     2") || !strings.Contains(got, "exit") {
+		t.Errorf("--item 2 printed:\n%s", got)
+	}
+
+	out, errOut, done := r.attach(attachOpts{item: "F9"})
+	attachReturned(t, done)
+	if lines := strings.Split(strings.TrimSpace(out.String()), "\n"); len(lines) != 1 || !strings.Contains(lines[0], "exit") || errOut.String() != "" {
+		t.Errorf("--item for an id the drive never reached printed\n%s\nstderr %q", out.String(), errOut.String())
+	}
+}
+
+// A log that will not read is named once, with the error, and attach goes on
+// following the drive's events.
+func TestAttachSessionReportsAnUnreadableLogAndGoesOn(t *testing.T) {
+	r := newSessionRig(t, true)
+	// A directory opens and will not read.
+	if err := os.Mkdir(filepath.Join(r.root, "1.jsonl"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	out, errOut, done := r.attach(attachOpts{session: true})
+	r.launched("1", "1.jsonl")
+	eventually(t, "the read error", errOut, func(s string) bool { return strings.Contains(s, filepath.Join(r.root, "1.jsonl")) })
+	time.Sleep(10 * followPoll)
+	r.emit(DriveEvent{Event: evParked, ID: "1", Park: passSilent})
+	r.emit(exitEvent())
+	attachReturned(t, done)
+	if n := strings.Count(errOut.String(), "\n"); n != 1 {
+		t.Errorf("the unreadable log was reported %d times:\n%s", n, errOut.String())
+	}
+	if !strings.Contains(out.String(), "park="+passSilent) {
+		t.Errorf("attach stopped following the events after the unreadable log:\n%s", out.String())
+	}
+}
+
+// Under --json every line is a drive event keyed event or an activity keyed
+// activity, never both and never neither.
+func TestAttachSessionJSONKeysEachLineOnce(t *testing.T) {
+	r := newSessionRig(t, true)
+	out, _, done := r.attach(attachOpts{session: true, json: true})
+	r.launched("1", "1.jsonl")
+	r.bash("1.jsonl", "go test ./...")
+	r.say("1.jsonl", "green")
+	eventually(t, "the text activity", out, func(s string) bool { return strings.Contains(s, `"text":"green"`) })
+	r.emit(DriveEvent{Event: evParked, ID: "1", Park: passSilent})
+	r.emit(exitEvent())
+	attachReturned(t, done)
+
+	var acts []SessionActivity
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var keys map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(line), &keys); err != nil {
+			t.Fatalf("attach --json printed %q: %v", line, err)
+		}
+		_, ev := keys["event"]
+		_, act := keys["activity"]
+		if ev == act {
+			t.Errorf("line %s carries event=%v activity=%v, want exactly one", line, ev, act)
+		}
+		if act {
+			var a SessionActivity
+			if err := json.Unmarshal([]byte(line), &a); err != nil {
+				t.Fatal(err)
+			}
+			acts = append(acts, a)
+		}
+	}
+	want := []SessionActivity{
+		{Activity: "tool", Drive: "D1", ID: "1", Stage: ledger.StageImplement, Tool: "Bash", Text: "Bash go test ./..."},
+		{Activity: "text", Drive: "D1", ID: "1", Stage: ledger.StageImplement, Text: "green"},
+	}
+	for i := range acts {
+		if _, err := time.Parse(time.RFC3339, acts[i].TS); err != nil {
+			t.Errorf("activity %d carries ts %q", i, acts[i].TS)
+		}
+		acts[i].TS = ""
+	}
+	if !slices.Equal(acts, want) {
+		t.Errorf("activities %+v, want %+v", acts, want)
 	}
 }

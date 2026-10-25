@@ -434,6 +434,11 @@
           "items": { "type": "string", "minLength": 1 },
           "description": "Log lines, matched case-insensitively as substrings of a failed job's log, that mark the failure as infrastructure. They add to the built-in list."
         },
+        "failure_patterns": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Go regular expressions matched against each line of a code failure's job log, timestamp stripped, that pick out the lines saying what failed for the park and the send-back. They add to the built-in list."
+        },
         "reruns": {
           "type": "integer",
           "minimum": 0,
@@ -444,6 +449,96 @@
           "type": "string",
           "default": "10m",
           "description": "How long a head may show no check run at all before drive reports that no workflow ran on it, as a Go duration."
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How status reads the usage rows: the window the report-level totals cover, the budget they are measured against, and when a session has run long enough to name; and, in [usage.weekly], [usage.five_hour] and [usage.overage], when drive warns and holds on the account's own rate_limit reading. The budget and the reading both span every project in the per-user registry, because the limit is per account.",
+      "properties": {
+        "weekly_budget": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The operator's estimate of the weekly limit in weighted tokens (input + output + cache_create + 0.1 * cache_read). The service publishes no such figure. Unset means no budget."
+        },
+        "reset": {
+          "type": "string",
+          "pattern": "^\\S+ [0-9]{1,2}:[0-9]{2} \\S+$",
+          "description": "When the weekly limit starts over: a weekday, a 24-hour time and an IANA zone, as \"Sat 20:00 America/Los_Angeles\". Unset means the window is the last 7 days."
+        },
+        "session_max_hours": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 24,
+          "description": "How many hours a session's usage rows may span, started to the latest ts, before status lists it under long_sessions."
+        },
+        "context_warn": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 400000,
+          "description": "The largest context, in tokens, a session may reach before status lists it under long_sessions."
+        },
+        "weekly": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The two levels drive acts on for Claude's seven-day window, each the percent of the window left as the service reports it (100 - utilization * 100), not tokens and not dollars. Unset means that step does not happen for this window. When both are set, pause_remaining must be below notify_remaining.",
+          "properties": {
+            "notify_remaining": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99,
+              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and sends it to each [notify] destination routing usage_warning. It does not pause or slow the drive. Unset sends none."
+            },
+            "pause_remaining": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99,
+              "description": "The fail-safe level: at or below this percent left, usage_admission holds dispatch and every stage that would launch a session, and the drive pauses until the window resets or drive --resume. Unset holds nothing on this window."
+            }
+          }
+        },
+        "five_hour": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The two levels drive acts on for Claude's five-hour window, each the percent of the window left as the service reports it (100 - utilization * 100), not tokens and not dollars. Unset means that step does not happen for this window. When both are set, pause_remaining must be below notify_remaining.",
+          "properties": {
+            "notify_remaining": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99,
+              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and sends it to each [notify] destination routing usage_warning. It does not pause or slow the drive. Unset sends none."
+            },
+            "pause_remaining": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 99,
+              "description": "The fail-safe level: at or below this percent left, usage_admission holds dispatch and every stage that would launch a session, and the drive pauses until the window resets or drive --resume. Unset holds nothing on this window."
+            }
+          }
+        },
+        "overage": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What drive does once the weekly allotment is spent and sessions run on purchased extra-usage credit. The service reports no remaining-credit figure, only whether overage is in use and, at the end, out_of_credits; the dollar sums here are list-price cost_usd from the usage rows, not the credit the account was charged.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["pause", "continue"],
+              "default": "pause",
+              "description": "pause holds the drive as soon as a reading shows the weekly window rejected with overage in use. continue keeps dispatching on purchased credit, bounded by max_usd when set."
+            },
+            "max_usd": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Under mode = continue, the list-price cost_usd of usage rows on overage since the weekly window began, summed across every project in the per-user registry, at which usage_admission holds the drive. Unset is no cap."
+            },
+            "notify_usd": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Under mode = continue, the same sum at which drive emits one usage_warning on the way to max_usd. Must be below max_usd when both are set."
+            }
+          }
         }
       }
     },
@@ -473,6 +568,77 @@
         }
       }
     },
+    "notify": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where a drive's events go. Each destination routes the events it names, each at its own ntfy priority; an event a destination does not name is not sent to it. Sends to different destinations do not wait on each other, and a failure is reported once per destination per drive and never stops the drive.",
+      "properties": {
+        "coalesce": {
+          "type": "string",
+          "default": "0s",
+          "description": "A duration: events of one kind for one destination arriving within it go out as one message listing their ids. 0s is off. needs_operator, needs_supervisor and exit are never coalesced or delayed."
+        },
+        "quiet_hours": {
+          "type": "string",
+          "pattern": "^[0-2][0-9]:[0-5][0-9]-[0-2][0-9]:[0-5][0-9]$",
+          "description": "HH:MM-HH:MM in local time, which may cross midnight. Messages routed below high are held until it ends, then sent as one message per destination; an exit inside it folds what was held into the exit message at priority min unless exit is routed at high or above. needs_operator and needs_supervisor are never held. Unset means none."
+        },
+        "destinations": {
+          "type": "object",
+          "description": "One table per destination, [notify.destinations.<name>]. A project destination wins over the per-user one of the same name key by key; destinations of different names both apply.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "events"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["ntfy", "command"],
+                "description": "ntfy POSTs each routed event to url; command runs argv with the event as one JSON line on stdin, priority and message added."
+              },
+              "events": {
+                "type": "object",
+                "minProperties": 1,
+                "propertyNames": {
+                  "enum": ["started", "queued", "dispatched", "preflight", "stage", "check", "parked", "filed", "needs_operator", "needs_supervisor", "merged", "paused", "resumed", "usage_warning", "exit", "exit_undone"]
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "enum": ["min", "low", "default", "high", "urgent"]
+                },
+                "description": "Each event this destination takes, mapped to its ntfy priority. exit_undone is an exit leaving an item parked, skipped or held, and defaults to high wherever exit is routed."
+              },
+              "url": {
+                "type": "string",
+                "description": "ntfy only. The topic URL, such as https://ntfy.sh/<topic>. Must be https:// unless the host is a loopback address."
+              },
+              "token_file": {
+                "type": "string",
+                "description": "ntfy only. A file holding the bearer token, starting with / or ~/, read at each send. Unset sends no Authorization header."
+              },
+              "argv": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "description": "command only. Run from the project root with the event on stdin, bounded at 30 seconds."
+              },
+              "repeat": {
+                "type": "string",
+                "description": "A duration of at least 5m: while the drive runs, a needs_operator this destination took and nobody answered is sent again this often, at the same priority, its title suffixed (reminder N of M). Answered means the item was accepted, merged, rerun or shelved, or the drive resumed from the pause that raised it. Unset sends no reminders. Repeats end when the drive exits."
+              },
+              "repeat_max": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 6,
+                "description": "The most reminders one needs_operator gets at this destination. Read only where repeat is set."
+              }
+            }
+          }
+        }
+      }
+    },
     "supervise": {
       "type": "object",
       "description": "Who carries out each supervised action: auto (drive does it), supervisor (a session `drover supervise` started may do it and reports it), operator (drover stops, notifies and waits), off (nothing happens; today's park stands). Keys are the action catalog `drover config` prints; an omitted key takes its default, and a policy above an action's ceiling is a load error.",
@@ -482,10 +648,12 @@
           "description": "The template `drover supervise` renders its prompt from. Unset uses the built-in one."
         },
         "notify": {
-          "type": "array",
-          "items": { "type": "string" },
-          "minItems": 1,
-          "description": "Argv run once per needs_operator event, with the event JSON on stdin. A failing or missing notifier is reported once per drive and never stops it."
+          "not": {},
+          "description": "Removed: [notify] destinations replace it. A config carrying it is refused at load; scripts/migrate-notify.sh rewrites it in place."
+        },
+        "ntfy": {
+          "not": {},
+          "description": "Removed: [notify] destinations replace it. A config carrying it is refused at load; scripts/migrate-notify.sh rewrites it in place."
         }
       },
       "additionalProperties": {

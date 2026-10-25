@@ -16,6 +16,7 @@ import (
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/lease"
+	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/prompts"
 )
 
@@ -212,6 +213,12 @@ func (s *session) heldAt(ctx context.Context, it backlog.Item, next string) []st
 	if s.slot == nil || s.inputs == nil {
 		return nil
 	}
+	// usage_admission before each stage that launches a session, so a drive
+	// whose account ran low while this item's last session ran starts nothing
+	// more. The hold below is where the item then waits.
+	if (next == ledger.StageImplement || next == ledger.StageReview) && s.slot.sched.draining() == nil {
+		s.admitUsage(s.slot.sched)
+	}
 	if driveHeld != nil && s.slot.sched.isPaused() {
 		driveHeld(it.ID.Bare(), next)
 	}
@@ -301,6 +308,7 @@ func (s *session) answerControl(sched *driveSched) {
 				fmt.Fprintf(os.Stderr, "· drive --resume refused, and the drive stays paused: %v\n", err)
 				break
 			}
+			releaseUsage(sched)
 			sched.mu.Lock()
 			sched.reexec = to.String()
 			sched.mu.Unlock()
@@ -318,6 +326,7 @@ func (s *session) answerControl(sched *driveSched) {
 		s.cfg, s.inputs = in.cfg, in
 		s.backlog, s.ledger, s.shelf = next.backlog, next.ledger, next.shelf
 		events.reconfigure(in.cfg)
+		releaseUsage(sched)
 		sched.resume(in)
 		what := "nothing it reads had changed"
 		if len(changed) > 0 {
@@ -332,6 +341,17 @@ func (s *session) answerControl(sched *driveSched) {
 	paused, reexec := sched.paused, sched.reexec
 	sched.mu.Unlock()
 	_ = held.Update(func(l *lease.Lease) { l.Paused, l.Answered, l.Refused, l.Reexec = paused, req, refused, reexec })
+}
+
+// releaseUsage lifts a usage hold an operator resumed past, and waives it, so
+// the next admission does not take the same hold on the same reading.
+func releaseUsage(sched *driveSched) {
+	if sched.usage == nil {
+		return
+	}
+	if u := sched.usage.release(true); u != nil {
+		fmt.Fprintf(os.Stderr, "· drive --resume releases the usage hold on the %s window, which stays released until it resets\n", u.Window)
+	}
 }
 
 // errNoDrive is a control request with no drive to take it.

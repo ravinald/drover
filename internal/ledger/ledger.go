@@ -19,6 +19,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ravinald/drover/internal/runlog"
 )
 
 // Row is one record. Every shape shares a struct so that field order — which
@@ -202,6 +204,46 @@ type Row struct {
 	Outcomes []Outcome `json:"outcomes,omitempty"`
 	Version  string    `json:"version,omitempty"`
 	Replaced string    `json:"replaced,omitempty"`
+	// Usage and the fields after it are the sixteenth shape: one row per
+	// session whose tokens drover read, a headless session's from its log and
+	// an interactive one's from Claude Code's transcript, one row per local day
+	// it ran. A set usage is what makes it this shape, and a usage row may name
+	// no item, which no other shape may. Load keeps these rows in
+	// Ledger.Usage rather than Rows, so a reader that folds stages, passes or
+	// launches cannot count a session twice.
+	//
+	// The counts are tokens as the API reported them, not the subscription's
+	// quota, and CostUSD is the runner's list-price figure. No weighted number
+	// is stored: the weights are a guess about the quota and will change, and a
+	// stored guess outlives the change.
+	Usage      *runlog.Usage `json:"usage,omitempty"`
+	Model      string        `json:"model,omitempty"`
+	SessionID  string        `json:"session_id,omitempty"`
+	CostUSD    float64       `json:"cost_usd,omitempty"`
+	DurationMS int64         `json:"duration_ms,omitempty"`
+	Turns      int           `json:"turns,omitempty"`
+	Source     string        `json:"source,omitempty"`
+	// ContextMax is a pointer so a usage row carries it at zero, a 429's or a
+	// log with no assistant event, while every other row omits it.
+	ContextMax *int64 `json:"context_max,omitempty"`
+	// RateLimit is the last rate_limit_event the session's log carried, the
+	// account's state as that session left it, and absent on a row from a
+	// runner that writes none. drive's usage admission reads the newest one
+	// across every registered project, because the limit is the account's.
+	RateLimit *runlog.RateLimit `json:"rate_limit,omitempty"`
+	// UsageWarning and ResetsAt are the seventeenth shape: one row per
+	// usage_warning a drive sent, naming the window (weekly, five_hour,
+	// overage, overage_usd) and the reset of the window it was about. A set
+	// window is what makes it this shape, and Load keeps these rows in
+	// Ledger.Warnings, because they name no item. One row per pair is the
+	// whole guard against a second notice: a restarted drive, or a drive in
+	// another project on the same account, reads it and sends nothing.
+	UsageWarning string `json:"usage_warning,omitempty"`
+	ResetsAt     int64  `json:"resets_at,omitempty"`
+	// FirstTS is the first message of an interactive row's day, beside TS for
+	// the last, and Started the session's first message on any day.
+	FirstTS string `json:"first_ts,omitempty"`
+	Started string `json:"started,omitempty"`
 	// VerifyMS is the wall time in milliseconds of the verify command drive ran
 	// for this item, carried on the next row drive appended for the item
 	// through its own session after the verify command exited, whatever that
@@ -500,6 +542,13 @@ func (l *Ledger) Resolution(id string, issue int) (Resolution, bool) {
 const (
 	StageImplement = "implement" // `run` handed the prompt to a runner
 	StageReview    = "review"    // `review` handed the brief to a runner
+	StageDraft     = "draft"     // `draft` handed the drafting prompt to a runner
+)
+
+// Where a usage row's counts were read from.
+const (
+	SourceHeadless    = "headless"    // the stream-json log of a session drover launched
+	SourceInteractive = "interactive" // a Claude Code transcript
 )
 
 // Level levels, weakest first. Each subsumes the one before.
@@ -547,9 +596,50 @@ type Malformed struct {
 
 // Ledger is a parsed file.
 type Ledger struct {
-	Path      string
-	Rows      []Row
+	Path string
+	Rows []Row
+	// Usage is every usage row, in file order, and the only place they are.
+	Usage []Row
+	// Warnings is every usage_warning row, in file order.
+	Warnings  []Row
 	Malformed []Malformed
+}
+
+// UsageRowID is the id a usage_warning row carries. Like DriveRowID it holds
+// no digit, so no namespace can mint an item under it.
+const UsageRowID = "usage"
+
+// Warned reports whether a usage_warning row already names the window and the
+// reset.
+func (l *Ledger) Warned(window string, resetsAt int64) bool {
+	for _, r := range l.Warnings {
+		if r.UsageWarning == window && r.ResetsAt == resetsAt {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSession reports whether a usage row from source names the runner's
+// session id. An empty source matches either.
+func (l *Ledger) HasSession(source, sessionID string) bool {
+	for _, r := range l.Usage {
+		if r.SessionID == sessionID && (source == "" || r.Source == source) {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSessionDay reports whether an interactive usage row already covers one
+// session on one local date.
+func (l *Ledger) HasSessionDay(sessionID, date string) bool {
+	for _, r := range l.Usage {
+		if r.Source == SourceInteractive && r.SessionID == sessionID && r.Date == date {
+			return true
+		}
+	}
+	return false
 }
 
 // State is what the rows resolve to for one id.
@@ -605,6 +695,14 @@ func Load(path string) (*Ledger, error) {
 		var r Row
 		if err := json.Unmarshal([]byte(text), &r); err != nil {
 			l.Malformed = append(l.Malformed, Malformed{Line: n, Text: text, Err: err})
+			continue
+		}
+		if r.Usage != nil {
+			l.Usage = append(l.Usage, r)
+			continue
+		}
+		if r.UsageWarning != "" {
+			l.Warnings = append(l.Warnings, r)
 			continue
 		}
 		if r.ID == "" {
@@ -988,7 +1086,7 @@ func Append(path string, r Row) error {
 // processes recording one fact can both read the file without it, then both
 // append. Under the lock the second one reads the first one's row.
 func AppendUnless(path string, r Row, skip func(*Ledger) bool) (bool, error) {
-	if r.ID == "" {
+	if r.ID == "" && r.Usage == nil {
 		return false, fmt.Errorf("row has no id")
 	}
 	return appendLocked(path, r, skip)

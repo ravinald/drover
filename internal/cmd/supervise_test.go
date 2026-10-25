@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/ravinald/drover/internal/config"
+	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/runner"
 )
 
@@ -105,18 +107,16 @@ func TestInitSuperviseAppendsOnlyWhereNoTableExists(t *testing.T) {
 	}
 
 	// A table the project wrote by hand: the printed replacement is pasted over
-	// it, so whatever it does not carry is deleted with no error. A lost notify
-	// means needs_operator stops reaching anyone.
+	// it, so whatever it does not carry is deleted with no error. A lost
+	// template means the supervising session is briefed from the wrong prompt.
 	existing := string(before) + "\n[supervise]\n" +
 		"report_trunk_red = \"auto\"\n" +
 		"resolve_conflict = \"supervisor\"\n" +
 		"accept = 3\n" +
-		"notify = [\"notify-send\", \"dro\\\"ver\"]\n" +
 		"template = \"prompt.tmpl\"\n" +
 		"from_a_later_release = \"x\"\n"
 	write(t, path, existing)
 	carried := []string{
-		`notify = ["notify-send", "dro\"ver"]`,
 		`template = "prompt.tmpl"`,
 		`from_a_later_release = "x"`,
 	}
@@ -163,9 +163,6 @@ func TestInitSuperviseAppendsOnlyWhereNoTableExists(t *testing.T) {
 	}
 	if p, _ := cfg.Policy("report_trunk_red"); p != config.PolicyAuto {
 		t.Errorf("report_trunk_red is %q after the paste, want auto", p)
-	}
-	if got := cfg.Notify(); len(got) != 2 || got[1] != `dro"ver` {
-		t.Errorf("notify is %q after the paste", got)
 	}
 	if cfg.SuperviseTemplate() == "" {
 		t.Error("template is gone after the paste")
@@ -380,6 +377,21 @@ func TestEventsCarryAParkAsItHappens(t *testing.T) {
 	if last := evs[len(evs)-1]; last.Event != evExit || last.Code == nil || *last.Code != 0 {
 		t.Errorf("the stream ends on %+v, want exit with code 0", last)
 	}
+
+	// Before anything is dispatched the drive says what it is about to run,
+	// and it closes on what it left undone.
+	at := slices.IndexFunc(evs, func(e DriveEvent) bool { return e.Event == evStarted })
+	if at < 0 || at > slices.IndexFunc(evs, func(e DriveEvent) bool { return e.Event == evDispatched }) {
+		t.Fatalf("no started event ahead of the first dispatch among %+v", evs)
+	}
+	if st := evs[at]; st.Drive == "" || st.Jobs != 1 || !slices.Contains(st.Queue, "2") || st.Deadline != "" {
+		t.Errorf("started is %+v, want the drive, its queue and --jobs, with no deadline", st)
+	}
+	sum := evs[len(evs)-1].Summary
+	if sum == nil || sum.Ended != endedDrained || sum.Parked < 1 ||
+		!slices.ContainsFunc(sum.Undone, func(u UndoneItem) bool { return u.ID == "2" && u.Park == passSilent }) {
+		t.Errorf("the exit summary is %+v, want item 2's park among what the drained drive left undone", sum)
+	}
 }
 
 // The exit event is the drive's exit status as a supervisor reads it, so a
@@ -462,7 +474,7 @@ func TestAFailingNotifierLeavesTheDriveAlone(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			write(t, config.FileName, string(raw)+"\n[supervise]\nnotify = [\""+c.notify(bin)+"\"]\n")
+			write(t, config.FileName, string(raw)+"\n[notify.destinations.desk]\ntype = \"command\"\nargv = [\""+c.notify(bin)+"\"]\nevents = { needs_operator = \"high\" }\n")
 			git(t, ".", "commit", "-q", "-am", "notify")
 			git(t, ".", "push", "-q", "origin", "main")
 			// A denied path holds item 1's merge, and merge_protected_paths is at
@@ -485,7 +497,7 @@ func TestAFailingNotifierLeavesTheDriveAlone(t *testing.T) {
 			if !needs {
 				t.Fatalf("no needs_operator for item 1's denied path among %+v", evs)
 			}
-			if n := strings.Count(stderr, "[supervise] notify"); n != 1 {
+			if n := strings.Count(stderr, "[notify.destinations.desk]"); n != 1 {
 				t.Errorf("the notifier's failure was reported %d times, want once:\n%s", n, stderr)
 			}
 			if c.name == "exits non-zero" {
@@ -493,9 +505,9 @@ func TestAFailingNotifierLeavesTheDriveAlone(t *testing.T) {
 				if err != nil {
 					t.Fatalf("the notifier never ran: %v", err)
 				}
-				var e DriveEvent
-				if json.Unmarshal(got, &e) != nil || e.Event != evNeedsOperator {
-					t.Errorf("the notifier was handed %q, want the needs_operator event", got)
+				var e NotifyPayload
+				if json.Unmarshal(got, &e) != nil || e.Event != evNeedsOperator || e.Priority != "high" {
+					t.Errorf("the notifier was handed %q, want the needs_operator event at high", got)
 				}
 			}
 		})
@@ -521,6 +533,57 @@ func TestSuperviseDryRunPrintsTheBrief(t *testing.T) {
 	for _, want := range []string{"| `resolve_conflict` | operator |", "drover drive 1 --json --events", "needs_operator", "`supervise`, `unaccept`"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the prompt does not carry %q:\n%s", want, out)
+		}
+	}
+}
+
+// A stage that launches a session names its log, the file the runner's stream
+// went to, so attach can follow it; a stage that launches nothing names none.
+func TestStageEventsNameTheSessionLog(t *testing.T) {
+	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
+	mergeProject(t)
+
+	evs, stderr, err := driveEventsOf(t)
+	if err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	wd, _ := os.Getwd()
+	cfg, err := config.Load(wd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := map[string]bool{}
+	for _, e := range evs {
+		if e.Event != evStage {
+			continue
+		}
+		if e.Stage != ledger.StageImplement && e.Stage != ledger.StageReview {
+			if e.Log != "" {
+				t.Errorf("%s stage of %s names log %q and launches no session", e.Stage, e.ID, e.Log)
+			}
+			continue
+		}
+		if e.Log == "" {
+			t.Errorf("%s stage of %s names no log", e.Stage, e.ID)
+			continue
+		}
+		path := sessionLog(cfg.Root, e.Log)
+		b, err := os.ReadFile(path) // #nosec G304 -- the test's own log directory
+		if err != nil || !strings.Contains(string(b), `"type":"result"`) {
+			t.Errorf("%s stage of %s names %s, which holds %q (%v), not the fake runner's stream", e.Stage, e.ID, path, b, err)
+		}
+		named[path] = true
+	}
+	written, err := filepath.Glob(filepath.Join(cfg.LogDir(), "*.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(written) == 0 || len(written) != len(named) {
+		t.Errorf("the runners wrote %v and the stage events named %v", written, named)
+	}
+	for _, w := range written {
+		if !named[w] {
+			t.Errorf("%s was written and no stage event names it", w)
 		}
 	}
 }
