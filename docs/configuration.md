@@ -965,17 +965,19 @@ A drive runs unattended, so what it does has to reach somebody who is not watchi
 
 Each destination takes:
 
-| Key          | Type   | Applies to | Default  | Meaning                                                                                                                                                                                                                                                                                         |
-| ------------ | ------ | ---------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `type`       | string | both       | required | `ntfy` POSTs each routed event to an [ntfy](https://ntfy.sh) topic; `command` runs an argv with each routed event on stdin.                                                                                                                                                                     |
-| `events`     | table  | both       | required | An inline table mapping each event the destination takes to an ntfy priority: `min`, `low`, `default`, `high` or `urgent`. An event the table does not name is not sent there. Any event a drive emits may be named, and `exit_undone`, described below.                                        |
-| `url`        | string | `ntfy`     | required | The topic URL, such as `https://ntfy.sh/<topic>`. It must be `https://` unless the host is a loopback address, must name a topic in its path, and may not carry credentials.                                                                                                                    |
-| `token_file` | string | `ntfy`     | unset    | A file holding the access token, sent as `Authorization: Bearer <token>`. It must start with `/` or `~/`, and is read at every send, so a rotated token takes effect on the next message. Unset sends no token.                                                                                 |
-| `argv`       | array  | `command`  | required | The command, run from the project root with 30 seconds to finish. It reads the event as one JSON line on stdin with `priority`, `message` (the body an ntfy destination would send) and, for a coalesced or held message, `folded` added. See [`drive --events`](automation.md#drive---events). |
+| Key          | Type     | Applies to | Default  | Meaning                                                                                                                                                                                                                                                                                                                       |
+| ------------ | -------- | ---------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `type`       | string   | both       | required | `ntfy` POSTs each routed event to an [ntfy](https://ntfy.sh) topic; `command` runs an argv with each routed event on stdin.                                                                                                                                                                                                   |
+| `events`     | table    | both       | required | An inline table mapping each event the destination takes to an ntfy priority: `min`, `low`, `default`, `high` or `urgent`. An event the table does not name is not sent there. Any event a drive emits may be named, and `exit_undone`, described below.                                                                      |
+| `url`        | string   | `ntfy`     | required | The topic URL, such as `https://ntfy.sh/<topic>`. It must be `https://` unless the host is a loopback address, must name a topic in its path, and may not carry credentials.                                                                                                                                                  |
+| `token_file` | string   | `ntfy`     | unset    | A file holding the access token, sent as `Authorization: Bearer <token>`. It must start with `/` or `~/`, and is read at every send, so a rotated token takes effect on the next message. Unset sends no token.                                                                                                               |
+| `argv`       | array    | `command`  | required | The command, run from the project root with 30 seconds to finish. It reads the event as one JSON line on stdin with `priority`, `message` (the body an ntfy destination would send) and, for a coalesced or held message, `folded` added, and `reminder` on a reminder. See [`drive --events`](automation.md#drive---events). |
+| `repeat`     | duration | both       | unset    | How often an unanswered `needs_operator` this destination took is sent again while the drive runs, at least `5m`. Unset sends each one once. See [Reminders](#reminders).                                                                                                                                                     |
+| `repeat_max` | integer  | both       | `6`      | The most reminders one `needs_operator` gets here. Read only where `repeat` is set.                                                                                                                                                                                                                                           |
 
 The events a drive emits are `started`, `queued`, `dispatched`, `preflight`, `stage`, `check`, `parked`, `filed`, `needs_operator`, `needs_supervisor`, `merged`, `paused`, `resumed`, `usage_warning` and `exit`, each described under [`drive --events`](automation.md#drive---events). `exit_undone` is a routing key rather than an event: an exit that leaves any item parked, skipped or held is sent at `exit_undone`'s priority instead of `exit`'s, and it defaults to `high` wherever `exit` is routed, so a drive that exited 0 with work left behind reaches the phone louder than one that finished everything.
 
-An unknown key, type, event name or priority, a malformed URL, a destination with no `type`, `events`, or the `url` or `argv` its type needs, a `coalesce` that is not a duration and a `quiet_hours` that is not two `HH:MM` times are load errors naming the destination, the key and the file that wrote it.
+An unknown key, type, event name or priority, a malformed URL, a destination with no `type`, `events`, or the `url` or `argv` its type needs, a `coalesce` that is not a duration, a `quiet_hours` that is not two `HH:MM` times, a `repeat` under `5m` and a `repeat_max` that is not a positive integer are load errors naming the destination, the key and the file that wrote it.
 
 ### Sending
 
@@ -1007,6 +1009,20 @@ E72 skipped: blocked by F14 (parked gate_refused)
 
 It names why the drive ended (the queue drained, the deadline arrived, `--max-items`, `drive --stop`, an interrupt, or a fault), its exit code, how many items merged, parked, skipped and held, each item that did not merge with its cause, and the weighted tokens of the usage rows its sessions wrote. Items past the limit are listed as `and N more`.
 
+### Reminders
+
+A `needs_operator` the operator misses leaves the queue idle until they look. A destination that sets `repeat` sends it again every `repeat`, up to `repeat_max` times, at the priority it first went out at, with the title suffixed `(reminder N of M)`, until it is answered. Each destination keeps its own count, and a destination without `repeat` sends it once.
+
+Before each reminder the drive reads the ledger, the backlog and its lease, and sends nothing for a `needs_operator` already answered. It counts as answered when:
+
+- the item it names merged (a done row), was run again (a stage row, from `drover drive <id>` or `drive --enqueue`), was accepted (the body row `drover accept` writes, on a body that no longer carries the stop marker), or was shelved;
+- for one a usage hold raised, the drive resumed from that pause, and a resume answers no other stop;
+- the drive exited.
+
+When a reminded `needs_operator` is answered while the drive runs, each destination that sent at least one reminder for it gets one message at `low`: `answered: <action> <id>`, where the action is `merged`, `rerun`, `accepted`, `shelved` or `resumed`. A destination that sent only the first message gets nothing more. The answer is read when the next reminder comes due, so the message trails the answer by up to `repeat`; past `repeat_max` the drive still reads at that interval, sending nothing until the answer.
+
+Reminders live in the drive process and nowhere else. A drive that exits, including one that re-executes onto a new binary, has nothing left to repeat, and the `exit` message is the last word on it. A `triage_finding` stop is raised by a follow-up's coverage, which the ledger does not record, so whether it names its one filing item or none, its filer's rows and a resume answer nothing and it repeats until `repeat_max` or the exit. So does any other `needs_operator` naming no item that no usage hold raised.
+
 ### Tokens and testing
 
 The token appears in no output drover writes: not in an error, the event file, `--events`, or `drover config`, which prints each ntfy destination's `url`, its resolved `token_file` and whether that file exists and reads. A `token_file` that group or others can read draws one warning per destination per drive naming the path and `chmod 600`, and the send still goes out.
@@ -1015,7 +1031,7 @@ The token appears in no output drover writes: not in an error, the event file, `
 
 ### Example
 
-Two destinations: a phone that hears what needs a person and how each drive ended, and a desktop command that hears every merge. Overnight, merges wait for the morning and arrive as one message:
+Two destinations: a phone that hears what needs a person, reminded every 15 minutes until somebody acts, and how each drive ended, and a desktop command that hears every merge. Overnight, merges wait for the morning and arrive as one message:
 
 ```toml
 # ~/.config/drover/config.toml
@@ -1027,6 +1043,7 @@ coalesce    = "2m"
 type       = "ntfy"
 url        = "https://ntfy.example.com/drover"
 token_file = "~/.config/drover/ntfy-token"
+repeat     = "15m"
 events     = { needs_operator = "high", needs_supervisor = "default", parked = "default", exit = "low", exit_undone = "high", usage_warning = "high" }
 
 [notify.destinations.desk]

@@ -100,6 +100,14 @@ quiet_hours = "22:30-07:00"
 coalesce    = "2m"
 ```
 
+A stop you miss still idles the queue until you look. `repeat` on a destination sends an unanswered `needs_operator` again on that interval (at least `5m`), up to `repeat_max` times (default 6), titled `(reminder N of M)`, and stops once the item is accepted, merged, rerun or shelved, or the drive resumes from the pause that raised it. Each destination that reminded you then gets one `answered: <action> <id>` at `low`. Reminders run only while the drive does: once it exits, its `exit` message is the last you hear from it.
+
+```toml
+[notify.destinations.phone]
+repeat     = "15m"
+repeat_max = 4
+```
+
 A config written for an earlier release with `[supervise] notify` or `[supervise.ntfy]` is refused at load; `scripts/migrate-notify.sh <file>` rewrites either into a destination. See [`[notify]`](configuration.md#notify) for every key.
 
 This is the mode to settle into. The queue runs, the waiting costs nothing, and the only thing that reaches you is an event a person has to handle.

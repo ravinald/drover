@@ -56,12 +56,22 @@ func PriorityRank(p string) int { return slices.Index(NtfyPriorities(), p) }
 func NotifyDestinationKeys(kind string) []string {
 	switch kind {
 	case DestNtfy:
-		return []string{"type", "events", "url", "token_file"}
+		return []string{"type", "events", "url", "token_file", "repeat", "repeat_max"}
 	case DestCommand:
-		return []string{"type", "events", "argv"}
+		return []string{"type", "events", "argv", "repeat", "repeat_max"}
 	}
 	return []string{"type", "events"}
 }
+
+// MinRepeat is the shortest repeat a destination takes. A needs_operator
+// resent more often than this is noise an operator learns to swipe away, which
+// is the miss the reminder exists to prevent.
+const MinRepeat = 5 * time.Minute
+
+// DefaultRepeatMax is how many reminders a destination sends for one
+// needs_operator when repeat is set and repeat_max is not: half an hour of
+// reminders at the shortest repeat.
+const DefaultRepeatMax = 6
 
 // Destination is one [notify.destinations.<name>] table as a drive sends to it.
 type Destination struct {
@@ -76,6 +86,10 @@ type Destination struct {
 	TokenFile string
 	// Argv is a command destination's.
 	Argv []string
+	// Repeat is how often an unanswered needs_operator is sent again, 0 for
+	// never, and RepeatMax how many times at most.
+	Repeat    time.Duration
+	RepeatMax int
 }
 
 // Priority is the priority an event is sent to d at, false when d does not
@@ -156,6 +170,15 @@ func (c *Config) Notifications() Routing {
 					d.Argv = append(d.Argv, s)
 				}
 			}
+		}
+		if s, _ := raw["repeat"].(string); s != "" {
+			if rep, err := time.ParseDuration(s); err == nil && rep >= MinRepeat {
+				d.Repeat = rep
+			}
+		}
+		d.RepeatMax = DefaultRepeatMax
+		if m, ok := raw["repeat_max"].(int64); ok && m > 0 {
+			d.RepeatMax = int(m)
 		}
 		r.Destinations = append(r.Destinations, d)
 	}
@@ -260,6 +283,16 @@ func (c *Config) validateDestination(project, name string, t map[string]any) err
 			if !strings.HasPrefix(s, "/") && !strings.HasPrefix(s, "~/") {
 				return fmt.Errorf("%s: %s.token_file is %v: give a path starting with / or ~/, "+
 					"since a token kept inside the project is one commit away from published", at(key), table, val)
+			}
+		case "repeat":
+			s, _ := val.(string)
+			if d, err := time.ParseDuration(s); err != nil || d < MinRepeat {
+				return fmt.Errorf("%s: %s.repeat is %v: give a duration of at least %s, such as \"10m\", or leave it unset for no reminders",
+					at(key), table, val, MinRepeat)
+			}
+		case "repeat_max":
+			if m, ok := val.(int64); !ok || m < 1 {
+				return fmt.Errorf("%s: %s.repeat_max is %v: give a positive whole number of reminders, such as 6", at(key), table, val)
 			}
 		case "argv":
 			raw, ok := val.([]any)

@@ -71,7 +71,11 @@ func postNtfy(d config.Destination, nt notice, click string) (ntfyResult, error)
 	if err != nil {
 		return ntfyResult{}, errors.New(redact(err.Error()))
 	}
-	req.Header.Set("Title", ntfyTitle(nt.event))
+	title := ntfyTitle(nt.event)
+	if nt.reminder != "" {
+		title += " " + nt.reminder
+	}
+	req.Header.Set("Title", title)
 	req.Header.Set("Priority", nt.priority)
 	req.Header.Set("Tags", "robot")
 	if click != "" {
