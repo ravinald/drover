@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1717,6 +1718,101 @@ func TestTheWholeDiffPastesWithoutChangingWhatResolves(t *testing.T) {
 			t.Errorf("%s resolved to %s before the paste and %s after", key, was, after[key])
 		}
 	}
+}
+
+// With no per-user config both key sections print, and each holds top-level
+// keys. A bare key below a [table] header belongs to that table, so the report
+// has to print every one of them before its first header, and the file a
+// reader assembles from it, each line where the report says it goes, has to
+// resolve as before and stop being reported.
+func TestTheDiffPastesTopLevelKeysFromBothSectionsAboveEveryTable(t *testing.T) {
+	const minimal = "schema_version = 2\nproject = \"paste\"\n"
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := projectWith(t, minimal)
+	before := resolvedKeys(t, dir)
+
+	out := diffOf(t, dir)
+	lines, late := diffLines(out)
+	for _, want := range []string{"verify", "runners"} {
+		if !slices.ContainsFunc(lines, func(p pastedLine) bool { return p.table == "" && p.name == want }) {
+			t.Fatalf("--diff does not report the top-level key %s, so this test no longer covers both sections:\n%s", want, out)
+		}
+	}
+	for _, name := range late {
+		t.Errorf("--diff prints the top-level key %s after a [table] header, which pastes it into that table:\n%s", name, out)
+	}
+
+	conf := minimal
+	for _, p := range lines {
+		conf = paste(conf, p.table, p.line)
+	}
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(conf), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(dir); err != nil {
+		t.Fatalf("the config with --diff pasted does not load: %v\n%s", err, conf)
+	}
+	// The first section is what init writes, which moves a key off its default
+	// by design. Each pasted key has to resolve to the literal the report
+	// printed for it, which for the second section is the value it already
+	// resolved to, and every key nobody pasted has to stay where it was.
+	want := maps.Clone(before)
+	for _, p := range lines {
+		key := p.name
+		if p.table != "" {
+			key = p.table + "." + p.name
+		}
+		if _, ok := want[key]; ok {
+			_, want[key], _ = strings.Cut(p.line, " = ")
+		}
+	}
+	after := resolvedKeys(t, dir)
+	for key, was := range want {
+		if after[key] != was {
+			t.Errorf("%s should resolve to %s after the paste, and resolves to %s", key, was, after[key])
+		}
+	}
+	again, _ := diffLines(diffOf(t, dir))
+	for _, p := range lines {
+		if slices.ContainsFunc(again, func(q pastedLine) bool { return q.table == p.table && q.name == p.name }) {
+			t.Errorf("a second --diff reports [%s] %s missing after it was pasted:\n%s", p.table, p.name, conf)
+		}
+	}
+}
+
+// pastedLine is one key line of a --diff report and the table it belongs in:
+// none for a top-level key wherever the report printed it, otherwise the
+// header above it.
+type pastedLine struct{ table, name, line string }
+
+// diffLines parses a --diff report, and names each top-level key it printed
+// below a [table] header.
+func diffLines(out string) (lines []pastedLine, late []string) {
+	top := map[string]bool{}
+	for _, k := range config.Keys() {
+		if k.Table == "" {
+			top[k.Name] = true
+		}
+	}
+	table := ""
+	for _, l := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(l, "["):
+			table = strings.Trim(l, "[]")
+		case l == "" || strings.HasPrefix(l, "#"):
+		default:
+			name, _, _ := strings.Cut(l, " = ")
+			if !top[name] {
+				lines = append(lines, pastedLine{table, name, l})
+				continue
+			}
+			if table != "" {
+				late = append(late, name)
+			}
+			lines = append(lines, pastedLine{"", name, l})
+		}
+	}
+	return lines, late
 }
 
 // resolvedKeys is every key Inspect reports, at the literal its file wrote or
