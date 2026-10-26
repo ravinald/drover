@@ -269,6 +269,10 @@ func writeKeys(w io.Writer, keys []config.Key) {
 				fmt.Fprintf(w, "\n[%s]\n", table)
 			}
 		}
+		if k.Unset != "" {
+			fmt.Fprintf(w, "# %s =   # unset: %s\n", k.Name, k.Unset)
+			continue
+		}
 		fmt.Fprintf(w, "%s = %s\n", k.Name, k.Default)
 	}
 	fmt.Fprintln(w)

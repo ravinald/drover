@@ -1664,3 +1664,90 @@ func TestThePrintNamesASwitchedOffLevelAndTheDiffDoesNotOfferIt(t *testing.T) {
 		}
 	}
 }
+
+// The header over each --diff section says a line appends as it stands, so the
+// whole report, pasted onto the minimal config it was printed for, has to load
+// and resolve every key to what it resolved to before. A key whose unset state
+// has no literal is where that breaks: max_usd = 0 refuses to load, and
+// pause_remaining = 0 is a hold at 100% used that nobody chose.
+func TestTheWholeDiffPastesWithoutChangingWhatResolves(t *testing.T) {
+	const minimal = "schema_version = 2\nproject = \"paste\"\n"
+	// What init writes lives in the per-user file, as it does on a host whose
+	// projects share one layout, so the report is the one section a current
+	// project gets. Written into the project instead, its stanzas would open
+	// the tables the report opens again, and the header already says a stanza
+	// appends only where the file has no such table yet.
+	dir := projectWith(t, minimal)
+	in, err := config.Inspect(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generated, err := undeclared(in.Root, in.Config.Verify["default"], in.Declared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared, store := "", t.TempDir()
+	for _, k := range generated {
+		value := k.Default
+		if k.Table == "paths" { // a per-user path is absolute
+			value = strconv.Quote(filepath.Join(store, k.Name))
+		}
+		shared = paste(shared, k.Table, k.Name+" = "+value)
+	}
+	globalConfig(t, shared)
+	before := resolvedKeys(t, dir)
+
+	out := diffOf(t, dir)
+	pasted := minimal + "\n" + out
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(pasted), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(dir); err != nil {
+		t.Fatalf("the config with --diff appended does not load: %v\n%s", err, out)
+	}
+	after := resolvedKeys(t, dir)
+	for key, was := range before {
+		if after[key] != was {
+			t.Errorf("%s resolved to %s before the paste and %s after", key, was, after[key])
+		}
+	}
+}
+
+// resolvedKeys is every key Inspect reports, at the literal its file wrote or
+// the default drover resolves it to, plus each usage level as the accessor
+// every caller reads it through. The literal alone cannot tell a pasted
+// pause_remaining = 0 from an unset one, and only the accessor says which of
+// the two holds.
+func resolvedKeys(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	in, err := config.Inspect(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, err := os.ReadFile(in.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := config.Rendered(string(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	for _, k := range config.Keys() {
+		out[k.Dotted] = k.Default
+	}
+	for _, k := range written {
+		out[k.Dotted] = k.Default
+	}
+	for _, window := range []string{config.UsageWeekly, config.UsageFiveHour} {
+		for _, step := range []string{"notify", "pause"} {
+			v, ok := in.Config.UsageLevel(window, step)
+			out["UsageLevel("+window+", "+step+")"] = fmt.Sprint(v, ok)
+		}
+	}
+	for _, step := range []string{"max", "notify"} {
+		v, ok := in.Config.OverageUSD(step)
+		out["OverageUSD("+step+")"] = fmt.Sprint(v, ok)
+	}
+	return out
+}
