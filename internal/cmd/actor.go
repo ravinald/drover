@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -56,10 +57,10 @@ func sealed(name string) (string, bool) {
 // the tree and the ledger are untouched. So each launch path calls this at the
 // point it commits, and runner.Run stays the backstop for one added later.
 func noNestedLaunch() error {
-	if !runner.Launched() {
-		return nil
+	if err := runner.NestedLaunch(); err != nil {
+		return Refusal{err}
 	}
-	return Refusal{runner.ErrNested}
+	return nil
 }
 
 // noNestedDrive is noNestedLaunch for drive, the one launch a supervisor may
@@ -78,9 +79,9 @@ func operatorStep(name, because string) error {
 	if !runner.Launched() {
 		return nil
 	}
-	return Refusal{fmt.Errorf(
+	return withSeal(Refusal{fmt.Errorf(
 		"%s is the operator's step, and drover launched this session: %s.\n"+
-			"Report what you would have chosen and let the operator run it", name, because)}
+			"Report what you would have chosen and let the operator run it", name, because)})
 }
 
 // sealedFlag refuses one flag inside a launched session, for a command that is
@@ -95,6 +96,10 @@ func sealedFlag(name, flag, because string) error {
 	if !runner.Launched() {
 		return nil
 	}
+	return withSeal(flagRefusal(name, flag, because))
+}
+
+func flagRefusal(name, flag, because string) error {
 	if a, ok := commandAction(name + " --" + flag); ok && runner.Supervising() {
 		p, err := policyNow(a.key)
 		if err != nil {
@@ -114,6 +119,10 @@ func gate(name string) error {
 	if !runner.Launched() {
 		return nil
 	}
+	return withSeal(gateRefusal(name))
+}
+
+func gateRefusal(name string) error {
 	if runner.Supervising() {
 		return superviseGate(name)
 	}
@@ -128,6 +137,30 @@ func gate(name string) error {
 	return Refusal{fmt.Errorf(
 		"%s is the operator's step, and drover launched this session: %s.\n"+
 			"Report the item's state and let the operator run it", name, because)}
+}
+
+// withSeal adds, to a refusal a marker caused rather than the environment, the
+// line naming that marker and the way out. The environment's refusal is true as
+// written, because only drover sets the variable; a marker also seals a person
+// whose terminal stands in a tree a session holds, or held once and left behind,
+// and "drover launched this session" gives that person nowhere to go.
+func withSeal(err error) error {
+	var r Refusal
+	if !errors.As(err, &r) {
+		return err
+	}
+	path, m, ok := runner.SealedBy()
+	if !ok {
+		return err
+	}
+	if runner.Alive(m.PID) {
+		return Refusal{fmt.Errorf("%w\nThe seal is the session marker %s, not this process's environment: session %s, drover pid %d, running.\n"+
+			"A person steering from inside this tree exports %s=%s first",
+			r.Err, path, blank(m.Session), m.PID, runner.EnvActor, runner.ActorOperator)}
+	}
+	return Refusal{fmt.Errorf("%w\nThe seal is the session marker %s, not this process's environment: session %s, drover pid %d, not running, so nothing holds the tree.\n"+
+		"Remove it with rm %s, or export %s=%s to steer from inside the tree",
+		r.Err, path, blank(m.Session), m.PID, path, runner.EnvActor, runner.ActorOperator)}
 }
 
 // policyOpens are the sealed commands a supervised action's policy may open to

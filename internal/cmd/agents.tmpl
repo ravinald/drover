@@ -96,10 +96,12 @@ reports it. `operator`: drover stops, notifies, and waits for a person. `off`:
 nothing happens and the park stands. An agent session never acts on this table;
 it is here so you know whom a park belongs to.
 
-The check reads an environment variable drover sets when it launches you. It is
-a guardrail against running a command you read in a code block, not a boundary:
-if you find yourself wanting to strip it, that is the signal to stop and report
-instead.
+The check reads an environment variable drover sets when it launches you, or,
+where that is unset, the `.drover/session` marker drover leaves in the tree a
+session works in. It is a guardrail against running a command you read in a code
+block, not a boundary: if you find yourself wanting to strip it, that is the
+signal to stop and report instead. `DROVER_ACTOR=operator` is the opt-out a
+person exports to steer from inside a sealed tree, never one an agent takes.
 
 Exit codes: `0` clean, `1` drover could not answer, `2` findings against the
 project (`check`), `3` a rule drover enforces refused the operation.

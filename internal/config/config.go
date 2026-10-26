@@ -1045,7 +1045,8 @@ func (c *Config) Known(key string) bool {
 }
 
 // Find walks up from dir looking for the config file, and returns the directory
-// holding it. A session drive launched names its project in runner.EnvRoot, and
+// holding it. A session drive launched names its project in runner.EnvRoot, or
+// in the root of the session marker when the environment carries none, and
 // that wins over the walk: the session works in a worktree whose own copy of the
 // config, when it has one, points every record path into a tree that is removed
 // once the item lands.
@@ -1056,6 +1057,15 @@ func Find(dir string) (string, error) {
 				runner.EnvRoot, root, FileName)
 		}
 		return root, nil
+	}
+	// A session drover did not exec carries no EnvRoot, and the marker its tree
+	// holds names the project in its place.
+	if path, m, ok := runner.FindMarker(dir); ok && m.Root != "" {
+		if _, err := os.Stat(filepath.Join(m.Root, FileName)); err != nil {
+			return "", fmt.Errorf("the session marker %s names %s, which holds no %s: remove the marker if no session is running there",
+				path, m.Root, FileName)
+		}
+		return m.Root, nil
 	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {

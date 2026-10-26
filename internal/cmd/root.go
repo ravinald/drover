@@ -75,11 +75,22 @@ func init() {
 // Execute runs the root command.
 func Execute() error {
 	install()
-	// One context for the process, cancelled by an interrupt or a terminate, and
+	// One context for the process, cancelled by an interrupt, a terminate or a
+	// hangup (a closed terminal tab, which ends an interactive run), and
 	// handed to every command through cmd.Context(). The launch paths pass it to
 	// runner.Run, which signals the child's process group: without this the
 	// signal reaches drover and leaves the agent it started running.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	//
+	// The hangup is registered only when drover did not inherit it ignored.
+	// Notify replaces an inherited SIG_IGN with a handler, so registering it
+	// unconditionally makes `nohup drover drive` die on terminal close, the one
+	// thing nohup is there to prevent, and the session it execs loses the
+	// ignore too. Ignored has to be read before any Notify for the signal.
+	sigs := []os.Signal{os.Interrupt, syscall.SIGTERM}
+	if !signal.Ignored(syscall.SIGHUP) {
+		sigs = append(sigs, syscall.SIGHUP)
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), sigs...)
 	defer stop()
 	return root.ExecuteContext(ctx)
 }

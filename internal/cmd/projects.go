@@ -30,7 +30,7 @@ var (
 // that it is scratch belongs. A failure is a lost line in an audit trail and
 // never a reason to refuse the command.
 func enroll(cfg *config.Config) {
-	if os.Getenv(runner.EnvActor) != "" {
+	if runner.Launched() {
 		return
 	}
 	reg := projects.Path(config.GlobalPath())
