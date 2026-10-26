@@ -55,12 +55,16 @@ A `.drover.toml` is written once, against whatever the binary understood that da
 
 ```console
 $ drover config --diff
+# Top-level keys from the sections below: each goes above the file's first [table].
+
+runners = { claude = { interactive = ["claude"], headless = ["claude", "-p", "--output-format", "stream-json", "--verbose"], stdin = false } }
+
 # 1 key `drover init` writes today that this config does not declare.
 # This is what `drover check` reports as STALE CONFIG.
 #
-# Each line goes under the table named above it. TOML refuses a second
-# [table] header, so a whole stanza appends only where the file has no
-# such table yet.
+# Each line goes under the table named above it, and a top-level key goes
+# above the file's first table. TOML refuses a second [table] header, so a
+# whole stanza appends only where the file has no such table yet.
 
 [intake]
 stop_marker = "STOP: requirements not yet written"
@@ -68,12 +72,11 @@ stop_marker = "STOP: requirements not yet written"
 # 33 further keys this build reads, at the value drover resolves each to.
 # Nothing reports these: a default left alone is not a gap. They are here
 # because a key you do not know about is one you cannot go looking for.
+# Its top-level key (runners) prints at the head of this report.
 #
-# Each line goes under the table named above it. TOML refuses a second
-# [table] header, so a whole stanza appends only where the file has no
-# such table yet.
-
-runners = { claude = { interactive = ["claude"], headless = ["claude", "-p", "--output-format", "stream-json", "--verbose"], stdin = false } }
+# Each line goes under the table named above it, and a top-level key goes
+# above the file's first table. TOML refuses a second [table] header, so a
+# whole stanza appends only where the file has no such table yet.
 
 [paths]
 specs = ""
@@ -88,6 +91,8 @@ A third section appears where either file declares a key nothing here reads, eac
 A `[supervise]` section lists every supervised action neither file sets, one pasteable line each at its default policy (`resolve_conflict = "supervisor"`). `[supervise]` is an open table, so the key sections above would see it as one table and never name an action in it. The header names the actions that default to `supervisor`, says each of those parks as `needs_supervisor` unless a `drover supervise` session is running, and points at `drover init supervise`, which writes the table interactively. A project that sets every action, in either file, gets no such section. `drover check` reports the same gap as `SUPERVISOR UNSET` once the ledger records a drive and neither file has a `[supervise]` table.
 
 The headers name where each line goes rather than being part of the paste. A stanza for a table the file does not have yet appends whole; one for a table it already declares does not, because TOML refuses the second header.
+
+Every top-level key, whichever section counts it, prints in one block at the head of the report, before any `[table]` header, and the section that counts it names it there. A bare key belongs to the last header above it and a comment line does not end a table, so `runners = {…}` printed below a section's last stanza would paste back as a key of that table: the file loads, nothing errors, and the next `--diff` reports `runners` missing again. The top-level block goes above the file's first table.
 
 A pasted line never changes what the config resolves to, so a key printed at its zero value would have to mean what leaving it out means. The usage levels do not: `pause_remaining = 0` is a hold at 100% used, and `max_usd = 0` refuses to load. The six usage level keys in `[usage.weekly]`, `[usage.five_hour]` and `[usage.overage]` print as `"off"`, which says no such step the way leaving them out does. A key with no value that means unset, such as `[usage] weekly_budget`, prints commented and names what unset means (`# weekly_budget =   # unset: no budget`), so pasting the stanza leaves it out.
 

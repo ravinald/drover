@@ -197,26 +197,22 @@ func (in *Inspection) Written() map[string]string {
 func (in *Inspection) Policy(action string) (Policy, bool) { return in.own.Policy(action) }
 
 // Missing is every setting this build reads that no layered file declared, in
-// reference order, top-level keys first.
+// reference order.
 //
 // A key the per-user file supplies is not missing: a project repeating it would
 // shadow the global value rather than inherit it. An open table is missing only
-// when both files leave it absent; empty and partial are decisions. Top-level
-// keys lead because a bare key printed after a [table] header belongs to that
-// table, and `runners = {…}` emitted below [run] pastes back as run.runners.
+// when both files leave it absent; empty and partial are decisions. Order is
+// left to the report: a bare key printed after a [table] header belongs to that
+// table, so `drover config --diff` writes every top-level key from every section
+// before its first header.
 func (in *Inspection) Missing() []Key {
-	var top, nested []Key
+	var out []Key
 	for _, k := range Keys() {
-		if in.decided(k) {
-			continue
+		if !in.decided(k) {
+			out = append(out, k)
 		}
-		if k.Table == "" {
-			top = append(top, k)
-			continue
-		}
-		nested = append(nested, k)
 	}
-	return append(top, nested...)
+	return out
 }
 
 func (in *Inspection) decided(k Key) bool {

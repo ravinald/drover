@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/ravinald/drover/internal/config"
 	"github.com/spf13/cobra"
@@ -57,9 +58,11 @@ register backend; ` + "`drover check`" + ` does that.`,
                          # commented notice per key this build no longer reads,
                          # then every supervised action's effective policy
 
-  Paste each reported line under the table named above it. TOML refuses a
-  second [table] header, so piping the whole report onto a config that already
-  declares that table writes a file drover cannot load.
+  Paste each reported line under the table named above it. Top-level keys
+  from every section print together before the first table, and go above the
+  file's first table. TOML refuses a second [table] header, so piping the whole
+  report onto a config that already declares that table writes a file drover
+  cannot load.
 
   --diff exits 0 either way: it reports, and reporting nothing is an answer.
   drover check reports the same gap as STALE CONFIG and exits 2, which is the
@@ -154,12 +157,23 @@ func renderConfigDiff(w io.Writer, in *config.Inspection) {
 		fmt.Fprintf(w, "# this version old, and the retired keys below are what they left behind.\n\n")
 	}
 
+	// A bare key belongs to the last [table] header above it, and a comment
+	// line does not end a table, so every section's top-level keys print here,
+	// ahead of the first header any section opens.
+	generatedTop, generatedNested := splitTopLevel(generated)
+	restTop, restNested := splitTopLevel(rest)
+	if top := append(append([]config.Key{}, generatedTop...), restTop...); len(top) > 0 {
+		fmt.Fprintf(w, "# Top-level keys from the sections below: each goes above the file's first [table].\n")
+		writeKeys(w, top)
+	}
+
 	if len(generated) > 0 {
 		fmt.Fprintf(w, "# %d %s `drover init` writes today that this config does not declare.\n",
 			len(generated), plural(len(generated), "key", "keys"))
 		fmt.Fprintf(w, "# This is what `drover check` reports as STALE CONFIG.\n")
+		hoistedNote(w, generatedTop)
 		pasteNote(w)
-		writeKeys(w, generated)
+		writeKeys(w, generatedNested)
 	}
 
 	if len(rest) > 0 {
@@ -167,8 +181,9 @@ func renderConfigDiff(w io.Writer, in *config.Inspection) {
 			len(rest), plural(len(rest), "key", "keys"))
 		fmt.Fprintf(w, "# Nothing reports these: a default left alone is not a gap. They are here\n")
 		fmt.Fprintf(w, "# because a key you do not know about is one you cannot go looking for.\n")
+		hoistedNote(w, restTop)
 		pasteNote(w)
-		writeKeys(w, rest)
+		writeKeys(w, restNested)
 	}
 
 	if len(unset) > 0 {
@@ -285,17 +300,46 @@ func usageOffNote(cfg *config.Config) string {
 // [paths] gets a file that will not parse.
 func pasteNote(w io.Writer) {
 	fmt.Fprintf(w, "#\n")
-	fmt.Fprintf(w, "# Each line goes under the table named above it. TOML refuses a second\n")
-	fmt.Fprintf(w, "# [table] header, so a whole stanza appends only where the file has no\n")
-	fmt.Fprintf(w, "# such table yet.\n")
+	fmt.Fprintf(w, "# Each line goes under the table named above it, and a top-level key goes\n")
+	fmt.Fprintf(w, "# above the file's first table. TOML refuses a second [table] header, so a\n")
+	fmt.Fprintf(w, "# whole stanza appends only where the file has no such table yet.\n")
 }
 
-// writeKeys groups one section by table. Top-level keys arrive first from
-// Missing and undeclared alike, because a bare key written after a [table]
-// header belongs to that header.
-func writeKeys(w io.Writer, keys []config.Key) {
-	table := "\x00" // No table can be named this, so the first key always writes a header.
+// hoistedNote names the section's top-level keys, which print at the head of
+// the report rather than under the section that counts them.
+func hoistedNote(w io.Writer, top []config.Key) {
+	if len(top) == 0 {
+		return
+	}
+	names := make([]string, len(top))
+	for i, k := range top {
+		names[i] = k.Name
+	}
+	fmt.Fprintf(w, "# Its top-level %s (%s) %s at the head of this report.\n",
+		plural(len(top), "key", "keys"), strings.Join(names, ", "), plural(len(top), "prints", "print"))
+}
+
+// splitTopLevel separates the keys that sit outside every table from the rest,
+// each in the order it arrived.
+func splitTopLevel(keys []config.Key) (top, nested []config.Key) {
 	for _, k := range keys {
+		if k.Table == "" {
+			top = append(top, k)
+		} else {
+			nested = append(nested, k)
+		}
+	}
+	return top, nested
+}
+
+// writeKeys groups keys by table, top-level keys first whatever order they
+// arrive in, because a bare key written after a [table] header belongs to that
+// header. Across several calls the same holds only if the caller writes every
+// top-level key before any table, which renderConfigDiff does.
+func writeKeys(w io.Writer, keys []config.Key) {
+	top, nested := splitTopLevel(keys)
+	table := "\x00" // No table can be named this, so the first key always writes a header.
+	for _, k := range append(top, nested...) {
 		if k.Table != table {
 			table = k.Table
 			if table == "" {
