@@ -71,15 +71,16 @@ func (s *ExitSummary) undone() bool {
 	return s != nil && s.Parked+s.Skipped+s.Held > 0
 }
 
-// exitSummary counts what the drive's items came to. done is what this process
-// finished; the outcomes the drive noted before a re-exec carried it here are
-// added for the ids done does not hold, with the outcome alone, since that is
-// all the handoff kept.
+// exitSummary counts what the drive's items came to, one outcome per item, its
+// latest: an item parked and then taken again from --enqueue is done twice. done
+// is what this process finished; the outcomes the drive noted before a re-exec
+// carried it here are added for the ids done does not hold, with the outcome
+// alone, since that is all the handoff kept.
 func (s *session) exitSummary(done []DriveItem, ended string) *ExitSummary {
-	all := slices.Clone(done)
+	all := ledger.Latest(done, func(d DriveItem) string { return d.ID })
 	if d := activeDrive.Load(); d != nil {
 		d.mu.Lock()
-		for _, o := range d.outcomes {
+		for _, o := range ledger.Latest(d.outcomes, func(o ledger.Outcome) string { return o.ID }) {
 			if !slices.ContainsFunc(all, func(x DriveItem) bool { return x.ID == o.ID }) {
 				all = append(all, DriveItem{ID: o.ID, Outcome: o.Outcome})
 			}
