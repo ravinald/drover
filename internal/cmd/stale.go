@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ignoreStale is -I: run the command over files older than the binary.
+// ignoreStale is -I: run the command over files the stale check refuses.
 var ignoreStale bool
 
 // staleExempt are the top-level commands that never refuse on staleness: the
@@ -63,8 +63,10 @@ func (r releaseVer) olderMinor(than releaseVer) bool {
 	return r.major < than.major || (r.major == than.major && r.minor < than.minor)
 }
 
-// checkStale refuses a command whose project carries a config or agent
-// instructions older than this binary, before the command does anything.
+// checkStale refuses a command whose project carries a config older than this
+// binary, or agent instructions other than it renders, before the command does
+// anything. The header names no direction: a block a newer binary wrote (a
+// branch's build run in the checkout) differs exactly as an old one does.
 //
 // The two have different failure modes, and both are silent. A config written
 // against an older release runs with a zero value for every key added since,
@@ -93,7 +95,7 @@ func checkStale(c *cobra.Command) error {
 		return nil
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "this project's files are older than this binary (%s):\n", versionLine())
+	fmt.Fprintf(&b, "this project's files differ from what this binary renders (%s):\n", versionLine())
 	for _, f := range found {
 		why := f.Why
 		if f.Kind != "" {
@@ -147,7 +149,8 @@ func staleFiles(cfg *config.Config) []staleFile {
 		switch {
 		case renderErr == nil && h.Block != want:
 			out = append(out, staleFile{Name: h.Name, Why: s.staleWhy(h.Block),
-				Fix: "drover agents --write " + h.Name})
+				Fix: "drover agents --write " + h.Name + " when this binary is the newer one; " +
+					"rebuild or reinstall drover when a newer one wrote the file"})
 		}
 	}
 	return out

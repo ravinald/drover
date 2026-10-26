@@ -95,7 +95,7 @@ The flags whose names carry drover vocabulary. Each command's `--help` lists the
 | `--sev`, `--by-sev`             | On `status` and `new`: filter or order by severity rank.                                                      |
 | `--no-tracker`                  | On `status` and `finish`: asks or writes nothing at the forge.                                                |
 | `--json`                        | On every read command that has it: one stable object per row, the form scripts parse.                         |
-| `-I`, `--ignore-stale`          | Runs although `.drover.toml` or the generated instructions are older than the binary.                         |
+| `-I`, `--ignore-stale`          | Runs although `.drover.toml` or the generated instructions do not match the binary.                           |
 
 ## Audit levels
 

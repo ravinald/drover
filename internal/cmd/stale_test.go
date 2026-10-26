@@ -191,6 +191,12 @@ func TestStaleAgentInstructionsStopTheCommand(t *testing.T) {
 	if strings.Contains(err.Error(), config.FileName) {
 		t.Errorf("a dev build named the config as stale: %v", err)
 	}
+	// A block a branch's newer build wrote differs the same way an old one does,
+	// so the refusal claims no direction and names the remedy for each.
+	if strings.Contains(err.Error(), "older than") || !strings.Contains(err.Error(), "differ from what this binary renders") ||
+		!strings.Contains(err.Error(), "rebuild or reinstall drover") {
+		t.Errorf("the stale refusal asserts a direction or names one remedy: %v", err)
+	}
 }
 
 // The commands that repair staleness, or answer without a project, run over a

@@ -9,6 +9,7 @@ import (
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/ledger"
+	"github.com/ravinald/drover/internal/runner"
 )
 
 func fixture(t *testing.T, extra string) *session {
@@ -611,5 +612,66 @@ func TestAgentsLeavesTheFullGateToAMergeGate(t *testing.T) {
 	}
 	if !strings.Contains(plain, "6. **Re-run the verify command yourself.**") {
 		t.Error("a project with no merge gate lost the full re-run")
+	}
+}
+
+// A [drive] worktree_links entry is a link into the operator's checkout, and a
+// session's --write through it would hand every command there a branch's
+// unmerged block. Inside a session the link gives way to a file of the tree's
+// own; outside one, the link is the operator's and the write follows it.
+func TestAgentsWriteInASessionLeavesTheLinkedCheckoutCopy(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		actor   string
+		linkSet bool
+	}{
+		{"in a session", runner.ActorAgent, false},
+		{"outside a session", "", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := fixture(t, "")
+			target := filepath.Join(s.cfg.Root, "AGENTS.md")
+			write(t, target, "# House rules\n")
+			tree := newRepo(t)
+			link := filepath.Join(tree, "AGENTS.md")
+			if err := os.Symlink(target, link); err != nil {
+				t.Fatal(err)
+			}
+			t.Chdir(tree)
+			t.Setenv(runner.EnvActor, c.actor)
+
+			block, err := s.renderAgents()
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := captureErr(t, func() {
+				if err := s.writeAgents("AGENTS.md", block); err != nil {
+					t.Fatal(err)
+				}
+			})
+			fi, err := os.Lstat(link)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if isLink := fi.Mode()&os.ModeSymlink != 0; isLink != c.linkSet {
+				t.Errorf("AGENTS.md in the tree is a link: %v, want %v", isLink, c.linkSet)
+			}
+			got := read(t, target)
+			if c.linkSet {
+				if !strings.Contains(got, agentsBegin) {
+					t.Errorf("outside a session the write did not reach the link's target:\n%s", got)
+				}
+				return
+			}
+			if got != "# House rules\n" {
+				t.Errorf("a session's write changed the checkout's copy:\n%s", got)
+			}
+			if local := read(t, link); !strings.Contains(local, "# House rules") || !strings.Contains(local, agentsBegin) {
+				t.Errorf("the tree's own copy lacks the preamble or the block:\n%s", local)
+			}
+			if !strings.Contains(out, "the link to ") || !strings.Contains(out, "so the checkout's copy is unchanged") {
+				t.Errorf("the write did not say it replaced the link: %q", out)
+			}
+		})
 	}
 }

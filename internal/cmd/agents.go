@@ -4,12 +4,14 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/template"
 
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/prompts"
+	"github.com/ravinald/drover/internal/runner"
 	"github.com/spf13/cobra"
 )
 
@@ -383,14 +385,30 @@ func tableCell(s string) string {
 // that explains the project to a reader before drover explains itself.
 func (s *session) writeAgents(path, block string) error {
 	abs := s.cfg.Abs(path)
+	link, target, unlink := sessionLink(path)
+	if unlink {
+		abs = link
+	}
+	put := func(out, did string) error {
+		if unlink {
+			if err := os.Remove(link); err != nil {
+				return err
+			}
+		}
+		if err := os.WriteFile(abs, []byte(out), 0o644); err != nil { // #nosec G306
+			return err
+		}
+		if unlink {
+			fmt.Fprintf(errOut, "wrote %s in this worktree; the link to %s is replaced, so the checkout's copy is unchanged\n", path, target)
+			return nil
+		}
+		fmt.Fprintln(errOut, did)
+		return nil
+	}
 	existing, err := os.ReadFile(abs) // #nosec G304 -- operator-named path
 	switch {
 	case os.IsNotExist(err):
-		if err := os.WriteFile(abs, []byte(block), 0o644); err != nil { // #nosec G306
-			return err
-		}
-		fmt.Fprintf(errOut, "wrote %s\n", path)
-		return nil
+		return put(block, "wrote "+path)
 	case err != nil:
 		return err
 	}
@@ -398,12 +416,7 @@ func (s *session) writeAgents(path, block string) error {
 	text := string(existing)
 	span := findBlock(text)
 	if !span.Found {
-		out := strings.TrimRight(text, "\n") + "\n\n" + block
-		if err := os.WriteFile(abs, []byte(out), 0o644); err != nil { // #nosec G306
-			return err
-		}
-		fmt.Fprintf(errOut, "appended the drover block to %s\n", path)
-		return nil
+		return put(strings.TrimRight(text, "\n")+"\n\n"+block, "appended the drover block to "+path)
 	}
 	// An opening marker with no closing one after it means the file was edited
 	// into a shape this cannot repair without guessing which half to keep.
@@ -421,11 +434,43 @@ func (s *session) writeAgents(path, block string) error {
 	if tail := lines[span.End+1:]; len(tail) > 0 {
 		out += "\n" + strings.Join(tail, "\n")
 	}
-	if err := os.WriteFile(abs, []byte(out), 0o644); err != nil { // #nosec G306
-		return err
+	return put(out, "regenerated the drover block in "+path)
+}
+
+// sessionLink reports when a session drover launched names, from its worktree,
+// a link that leaves that worktree: a [drive] worktree_links entry pointing at
+// the operator's checkout. Writing through it would put a branch's unmerged
+// rendering in front of every command and agent in the checkout, so the write
+// replaces the link with a file of the worktree's own instead. The path is
+// taken from the working directory rather than the project root, because a
+// launched session's project root is the checkout itself.
+func sessionLink(path string) (link, target string, ok bool) {
+	if !runner.Launched() || path == "~" || strings.HasPrefix(path, "~/") {
+		return "", "", false
 	}
-	fmt.Fprintf(errOut, "regenerated the drover block in %s\n", path)
-	return nil
+	link, err := filepath.Abs(path)
+	if err != nil {
+		return "", "", false
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		return "", "", false
+	}
+	dest, err := os.Readlink(link)
+	if err != nil {
+		return "", "", false
+	}
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(filepath.Dir(link), dest)
+	}
+	target = resolved(dest)
+	top, err := showToplevel(filepath.Dir(link))
+	if err != nil {
+		return "", "", false
+	}
+	if rel, err := filepath.Rel(resolved(top), target); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
+		return "", "", false
+	}
+	return link, target, true
 }
 
 func init() {

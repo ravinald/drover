@@ -42,5 +42,5 @@ and lease, and needs no project.
 
 [1mGlobal Flags:[0m
       --color mode     color terminal output: auto, always or never; --json, --events and files are never colored (default auto)
-  -I, --ignore-stale   run even though .drover.toml or the generated agent instructions are older than this binary
+  -I, --ignore-stale   run even though .drover.toml or the generated agent instructions do not match this binary
       --no-color       the same as --color=never
