@@ -787,11 +787,11 @@ For a `code` check, `drive` also reads what failed out of the same job log: up t
 | `^--- FAIL`                     | A failed Go test                                      |
 | `^FAIL\b`                       | A failed Go test package                              |
 | `^\S+:\d+:\d+: .*\(\w[\w-]*\)$` | A golangci-lint finding, its linter named last        |
-| `^\S+\.\w+:\d+:\d+:`           | A compiler or `go vet` error                          |
+| `^\S+\.\w+:\d+:\d+: `           | A compiler or `go vet` error                          |
 | `^Vulnerability #\d+`           | A govulncheck finding                                 |
-| `^\s*Found in:`                | The module or package version govulncheck found it in |
-| `^\s*Fixed in:`                | The version that fixes it                             |
-| `^panic:`                      | A Go panic                                            |
+| `^\s*Found in: `                | The module or package version govulncheck found it in |
+| `^\s*Fixed in: `                | The version that fixes it                             |
+| `^panic: `                      | A Go panic                                            |
 
 A log matching none of them falls back to the last 5 non-blank lines before its first `make: ***` or `Error:` line. `failure_patterns` adds to the list, so a project whose test runner prints `ERROR <name>` adds `'^ERROR '`; a pattern that does not compile is refused at load. Those lines are what the [`gate_refused`](automation.md#drive---json) park carries when the merge gate then blames the diff: its reason names the check and the first line, its `detail` is `code`, its `evidence` is the lines, and the body sent back to the item adds them and the check's URL under the merge gate's output.
 

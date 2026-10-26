@@ -290,15 +290,7 @@ A drive that exits before it holds the lease (a refusal, a preflight that fails)
 Under `--json --session` each activity is one object keyed `activity`, never `event`, so a reader filtering on `event` sees the drive's stream unchanged. `activity` is `tool` or `text`, `tool` is the tool's name on a `tool` entry alone, and `text` is the summary above. `ts` is the time `attach` read the line, not the time the session wrote it: codex and agy stamp none of their lines, and one clock across runners keeps the entries of items running at once in the order they were read.
 
 ```json
-{
-  "activity": "tool",
-  "ts": "2026-10-24T22:41:02Z",
-  "drive": "D8",
-  "id": "F14",
-  "stage": "implement",
-  "tool": "Bash",
-  "text": "Bash make build && make check"
-}
+{ "activity": "tool", "ts": "2026-10-24T22:41:02Z", "drive": "D8", "id": "F14", "stage": "implement", "tool": "Bash", "text": "Bash make build && make check" }
 ```
 
 `--item <id>` limits `attach`, with or without `--session`, to one item's events and the `exit`. An id the drive has not dispatched or queued is not an error, since it may be enqueued later: `attach` prints nothing for it until it appears.
@@ -1133,25 +1125,13 @@ account: weekly 21% left, five-hour 91% left, not on purchased credit, week rese
 `skipped`: an item left the queue without being attempted, at any `--jobs`. `state` is the work state the drive read it in (`blocked`, `merged`, `scaffold` and so on), and `reason` says why where there is more to say: `blocked by E34` for an unmerged dep, and `blocked by E34, which parked protected_paths for the operator` for a dep the drive held it for until nothing else was left to run. `slot` appears at `--jobs` above 1 for an item skipped in one; an item skipped while it waited for a dep's merge had none.
 
 ```json
-{
-  "event": "skipped",
-  "ts": "2026-10-16T22:40:00Z",
-  "id": "E37",
-  "state": "blocked",
-  "reason": "blocked by E34, which parked protected_paths for the operator"
-}
+{ "event": "skipped", "ts": "2026-10-16T22:40:00Z", "id": "E37", "state": "blocked", "reason": "blocked by E34, which parked protected_paths for the operator" }
 ```
 
 `stage`: an item reached a step. `stage` is one of `implement`, `review`, `update_branch`, `gate`, `pr`, `merge` or `finish`. The trunk steps (`update_branch` through `finish`) can repeat for one item, because the merge fallback updates the branch and runs the merge gate again at the head it merges.
 
 ```json
-{
-  "event": "stage",
-  "ts": "2026-10-16T22:00:01Z",
-  "id": "E36",
-  "stage": "implement",
-  "log": "~/.cache/drover/webapp/E36-retry.20261016-150001.123456789.jsonl"
-}
+{ "event": "stage", "ts": "2026-10-16T22:00:01Z", "id": "E36", "stage": "implement", "log": "~/.cache/drover/webapp/E36-retry.20261016-150001.123456789.jsonl" }
 ```
 
 An `implement` or `review` stage launches a session and carries `log`: the session log's path as the launch banner prints it, relative to the project root or under `~/`, chosen before the event and the file the runner writes. A relaunch after a transient fault (an overloaded service, an exhausted account) writes a log of its own and emits a `stage` of its own. The trunk steps launch no session and carry no `log`. [`attach --session`](#detaching-from-a-drive) follows it.
@@ -1856,13 +1836,7 @@ Every row drover writes carries `ts` beside `date`: the instant it was written, 
 A `changes` row is one `drover request-changes`: `changes` is a digest of the evidence, and `reqs` the requirement numbers its findings name, sorted, absent when none does. A finding is a heading outside a code fence, or the whole evidence when it has none, and a number counts only when the body's list holds it. `drive` reads two consecutive rows with the same `changes`, or with equal `reqs`, as a review repeating itself and parks the item `repeating`.
 
 ```json
-{
-  "id": "16",
-  "changes": "9c41e07b2d3a",
-  "reqs": [4, 7],
-  "date": "2026-10-26",
-  "ts": "2026-10-26T10:02:11-07:00"
-}
+{"id":"16","changes":"9c41e07b2d3a","reqs":[4,7],"date":"2026-10-26","ts":"2026-10-26T10:02:11-07:00"}
 ```
 
 The stage row is what `run` and `review` write themselves, and writing it is what lets `mark-merged` and `finish` attribute the work without being told. An agent recording a run by hand should write one too; omitting it costs the attribution, not the completion.
@@ -1927,15 +1901,7 @@ A row from a session whose log carried a `rate_limit_event` adds `rate_limit`, t
 A `usage_warning` drive sent leaves one row under `"id":"usage"`, an id no namespace can mint, naming the window and the reset it was about, with `note` the sentence. Any row naming the pair stops a second notice, in this project or another registered one; `check` and every item reader skip it.
 
 ```json
-{
-  "id": "usage",
-  "usage_warning": "weekly",
-  "resets_at": 1792983600,
-  "note": "the weekly window has 18% left, at or below [usage.weekly] notify_remaining 20; it resets Sun Oct 25 20:00 PDT",
-  "drive": "D9",
-  "date": "2026-10-23",
-  "ts": "2026-10-23T11:40:02-07:00"
-}
+{"id":"usage","usage_warning":"weekly","resets_at":1792983600,"note":"the weekly window has 18% left, at or below [usage.weekly] notify_remaining 20; it resets Sun Oct 25 20:00 PDT","drive":"D9","date":"2026-10-23","ts":"2026-10-23T11:40:02-07:00"}
 ```
 
 The counts are tokens as the API reported them, not the subscription's quota accounting, and `cost_usd` is list price, not what a subscription charged. drover's other readers ignore usage rows: no stage, pass or run count changes because one is there, and `check` reads one with an empty `id` as a usage row rather than a malformed line.
