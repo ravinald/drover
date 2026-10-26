@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ravinald/drover/internal/runner"
 )
 
 // newProject is a project with no tracker at all, which is the case `new`
@@ -406,5 +409,32 @@ func TestDraftCarriesTheAuditNotesOfTheItemAFindingCameFrom(t *testing.T) {
 	}
 	if strings.Contains(quiet, "--- audit note") {
 		t.Errorf("a note from another item reached the prompt:\n%s", quiet)
+	}
+}
+
+// A review that initialized a scratch project to probe `new` wrote E75-scratch.md
+// and E76-probe.md into the live backlog, because DROVER_ROOT outranked the
+// project the session was standing in.
+func TestNewInsideAnotherProjectWritesThereDespiteDroverRoot(t *testing.T) {
+	live := newProject(t)
+	scratch := newProject(t)
+	if out, err := exec.Command("git", "-C", scratch, "init", "-q").CombinedOutput(); err != nil {
+		t.Skipf("git init: %v: %s", err, out)
+	}
+	t.Setenv(runner.EnvRoot, live)
+	capture(t, func() {
+		if err := execute(t, "new", "feature", "probe"); err != nil {
+			t.Fatalf("new: %v", err)
+		}
+	})
+	if _, err := os.Stat(filepath.Join(scratch, "work", "F01-probe.md")); err != nil {
+		t.Errorf("new under %s=%s wrote nothing into the project it ran in: %v", runner.EnvRoot, live, err)
+	}
+	entries, err := os.ReadDir(filepath.Join(live, "work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("new run inside %s wrote into %s's backlog: %v", scratch, runner.EnvRoot, entries)
 	}
 }

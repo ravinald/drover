@@ -3,11 +3,13 @@ package config
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/ravinald/drover/internal/gitcmd"
 	"github.com/ravinald/drover/internal/runner"
 )
 
@@ -76,23 +78,66 @@ func TestFindWalksUp(t *testing.T) {
 	}
 }
 
+// git runs one git command in dir for a fixture, failing the test on error.
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	args = append([]string{"-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)
+	if out, err := gitcmd.Command(dir, args...).CombinedOutput(); err != nil {
+		t.Fatalf("git %s in %s: %v: %s", strings.Join(args, " "), dir, err, out)
+	}
+}
+
 // A session drive launched works in a worktree that can carry its own tracked
 // copy of the config. Walking up from there finds that copy, and every record
-// path it names lands in a tree removed once the item is done.
-func TestFindAnswersFromDroverRootBeforeWalking(t *testing.T) {
-	project := write(t, map[string]string{FileName: minimal, "go.mod": "module x\n"})
-	tree := write(t, map[string]string{FileName: minimal, "go.mod": "module x\n", "sub/x.txt": ""})
-	t.Setenv(runner.EnvRoot, project)
-	got, err := Find(filepath.Join(tree, "sub"))
-	if err != nil {
+// path it names lands in a tree removed once the item is done, so DROVER_ROOT
+// wins over any config inside its own repository. A config in another
+// repository, or in none, is a different project the session moved into, and
+// the walk wins: a scratch project a review initialized to probe `drover new`
+// wrote its scaffold into the live backlog while DROVER_ROOT won everywhere.
+func TestFindWeighsDroverRootAgainstTheRepositoryTheWalkFinds(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git on PATH")
+	}
+	project := write(t, map[string]string{"go.mod": "module x\n", "sub/x.txt": ""})
+	git(t, project, "init", "-q")
+	git(t, project, "commit", "-q", "--allow-empty", "-m", "empty")
+	bare := filepath.Join(t.TempDir(), "bare")
+	git(t, project, "worktree", "add", "-q", "--detach", bare)
+	if err := os.WriteFile(filepath.Join(project, FileName), []byte(minimal), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got != project {
-		t.Errorf("Find with %s set = %q, want %q", runner.EnvRoot, got, project)
+	git(t, project, "add", FileName)
+	git(t, project, "commit", "-q", "-m", "config")
+	tracked := filepath.Join(t.TempDir(), "tracked")
+	git(t, project, "worktree", "add", "-q", "--detach", tracked)
+
+	scratch := write(t, map[string]string{FileName: minimal, "go.mod": "module x\n", "sub/x.txt": ""})
+	git(t, scratch, "init", "-q")
+	unversioned := write(t, map[string]string{FileName: minimal, "go.mod": "module x\n"})
+
+	t.Setenv(runner.EnvRoot, project)
+	for _, c := range []struct {
+		name, dir, want string
+	}{
+		{"a separately initialized repository with its own config", filepath.Join(scratch, "sub"), scratch},
+		{"a config in no repository at all", unversioned, unversioned},
+		{"a worktree of the project carrying its own config", tracked, project},
+		{"a worktree of the project with no config", bare, project},
+		{"a subdirectory of the project itself", filepath.Join(project, "sub"), project},
+		{"a plain directory with no config above it", t.TempDir(), project},
+	} {
+		got, err := Find(c.dir)
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("%s: Find with %s=%s = %q, want %q", c.name, runner.EnvRoot, project, got, c.want)
+		}
 	}
 
 	t.Setenv(runner.EnvRoot, t.TempDir())
-	if _, err := Find(tree); err == nil || !strings.Contains(err.Error(), runner.EnvRoot) {
+	if _, err := Find(t.TempDir()); err == nil || !strings.Contains(err.Error(), runner.EnvRoot) {
 		t.Errorf("a %s holding no config returned %v, want an error naming the variable", runner.EnvRoot, err)
 	}
 }
@@ -132,6 +177,32 @@ func TestFindAnswersFromASessionMarkerWhenTheRootIsUnset(t *testing.T) {
 	path := marker(t.TempDir())
 	if _, err := Find(tree); err == nil || !strings.Contains(err.Error(), path) {
 		t.Errorf("a marker naming a root with no config returned %v, want an error naming %s", err, path)
+	}
+}
+
+// The marker stops at the nearest config, so a project initialized beneath a
+// marked tree is its own project and not the one the marker names.
+func TestFindUnderAMarkerAnswersFromANearerProject(t *testing.T) {
+	project := write(t, map[string]string{FileName: minimal, "go.mod": "module x\n"})
+	tree := write(t, map[string]string{"b/" + FileName: minimal, "b/go.mod": "module x\n", "b/sub/x.txt": ""})
+	path := runner.MarkerPath(tree)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"actor":"agent","session":"s","root":%q,"pid":1}`, project)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inner := filepath.Join(tree, "b")
+	if exec.Command("git", "-C", inner, "init", "-q").Run() != nil {
+		t.Skip("no git to initialize the inner project")
+	}
+	got, err := Find(filepath.Join(inner, "sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != inner {
+		t.Errorf("Find inside a project beneath a marker naming %s = %q, want %q", project, got, inner)
 	}
 }
 

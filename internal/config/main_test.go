@@ -13,11 +13,11 @@ import (
 // at an empty directory for the whole package makes the absence of a global
 // config the default, and a test that wants one writes it there deliberately.
 //
-// runner.SessionEnv is cleared because Find answers from DROVER_ROOT before
-// walking, so a suite run inside a session drive launched would resolve every
-// fixture to the project that launched it. Find reads a session marker's root
-// the same way, so the suite also runs from a temporary directory no marker
-// sits above.
+// runner.SessionEnv is cleared because Find answers from DROVER_ROOT whenever
+// the walk finds no config outside that root's repository, so a suite run inside
+// a session drive launched would resolve a fixture holding no config to the
+// project that launched it. Find reads a session marker's root the same way, so
+// the suite also runs from a temporary directory no marker sits above.
 func TestMain(m *testing.M) {
 	for _, name := range runner.SessionEnv {
 		if err := os.Unsetenv(name); err != nil {
