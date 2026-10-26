@@ -181,6 +181,9 @@ func (s *session) reviewFollowUp(it backlog.Item, name string, before ledger.Cou
 		events: oc.Events, known: oc.Known, cap: s.cfg.Review.MaxReviewRounds}
 	p.readBody(it.Path)
 	token := passResult(p)
+	if token == passRepeating {
+		p.sentBack = s.sentBack(it)
+	}
 	return token, passFollowUp(token, p, id, rel(s.cfg.Root, it.Path), name,
 		displayPath(s.cfg.Root, oc.LogPath), again)
 }

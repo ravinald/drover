@@ -7367,3 +7367,50 @@ func TestACatchUpAtDispatchLeavesAMergeInProgress(t *testing.T) {
 		})
 	}
 }
+
+// F148's loop: two send-backs worded differently, each a new digest, both
+// naming R4. The second parks the item rather than spending a third round, and
+// the summary sends the operator to both kept rounds.
+func TestADriveParksOnTheSameRequirementSentBackTwiceInOtherWords(t *testing.T) {
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, _ := forge(t, ghLog)
+	rev, err := exec.LookPath("rev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviews := t.TempDir()
+	t.Setenv("DROVER_TEST_REVIEWS", reviews)
+	stub(t, rev, `#!/bin/sh
+echo '{"type":"result","subtype":"success","is_error":false}'
+n=$(cat "$DROVER_TEST_REVIEWS/1" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "$DROVER_TEST_REVIEWS/1"
+mkdir -p "$DROVER_ROOT/reports"
+printf '# 1 changes %s\n\n### R4 is unmet, wording %s\n' $n $n > "$DROVER_ROOT/reports/01-first.changes-$n.md"
+printf '{"id":"1","changes":"wording-%s","reqs":[4],"date":"2026-10-26"}\n' $n >> "$DROVER_ROOT/ledger.jsonl"
+`)
+
+	var derr error
+	stderr := captureErr(t, func() { derr = execute(t, "drive", "1") })
+	if n := reviewCount(t, reviews, "1"); n != 2 {
+		t.Errorf("%d reviews ran, want 2: the second names R4 again and parks\n%s", n, stderr)
+	}
+	if n := len(implementRows(t, dir, "1")); n != 2 {
+		t.Errorf("%d implement sessions launched, want 2 and no third round\n%s", n, stderr)
+	}
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _, _ := l.Pass("1"); got != passRepeating {
+		t.Errorf("the last pass row reads %q, want %q (drive: %v)\n%s", got, passRepeating, derr, stderr)
+	}
+	for _, want := range []string{
+		"the review sent back R4 unmet twice in a row; the contract may need narrowing, splitting or an override",
+		"drover show 1",
+		filepath.Join("reports", "01-first.changes-1.md") + " and " + filepath.Join("reports", "01-first.changes-2.md"),
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("the drive's output lacks %q:\n%s", want, stderr)
+		}
+	}
+}
