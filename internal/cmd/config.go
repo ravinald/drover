@@ -100,7 +100,7 @@ register backend; ` + "`drover check`" + ` does that.`,
 			return err
 		}
 		body := renderConfig(forReport, in.Root, global, in.Config.Verify["default"], written(in.Written()), in.Bare)
-		fmt.Print(body + notices(body, in) + addendumNote(in.Config) + notifyNote(in.Config) + configPolicies(in.Config))
+		fmt.Print(body + notices(body, in) + addendumNote(in.Config) + notifyNote(in.Config) + usageOffNote(in.Config) + configPolicies(in.Config))
 		return nil
 	},
 }
@@ -221,6 +221,27 @@ func notifyNote(cfg *config.Config) string {
 		out += fmt.Sprintf("%s token_file = %s, %s\n", where, d.TokenFile, state)
 	}
 	return out
+}
+
+// usageOffNote names each usage level switched off with "off" and the file
+// that wrote it. A project's "off" is a live line in the body above, but the
+// body cannot show the per-user value it replaces, nor a per-user "off" at all,
+// and a level missing from both reads as one nobody set. Commented, so the
+// report still pastes.
+func usageOffNote(cfg *config.Config) string {
+	out := ""
+	for _, l := range cfg.SwitchedOff() {
+		table, name := config.Table(l.Key)
+		out += fmt.Sprintf("# [%s] %s = %q in %s", table, name, config.Off, rel(cfg.Root, l.Path))
+		if l.Inherited != "" {
+			out += fmt.Sprintf(" (the per-user file sets %s)", l.Inherited)
+		}
+		out += "\n"
+	}
+	if out == "" {
+		return ""
+	}
+	return "\n" + out
 }
 
 // pasteNote says how a line gets into the file. TOML refuses a second [table]

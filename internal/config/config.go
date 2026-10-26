@@ -95,6 +95,11 @@ type Config struct {
 	// the two decodes and applyDefaults fills in the rest. Read it through
 	// Declared, ProjectDeclared, OpenTable and InheritedTable.
 	layers []layer
+
+	// inheritedUsage is [usage] as the per-user file alone left it, before the
+	// project's decode wrote over it, so a level the project switched off can
+	// still name the value it replaced. Read it through SwitchedOff.
+	inheritedUsage Usage
 }
 
 // Paths are project-relative except Logs, which is absolute or empty.
@@ -696,10 +701,11 @@ type Usage struct {
 
 // UsageWindow is [usage.weekly] or [usage.five_hour]: the percent of the window
 // left, as the service reports it, at which drive notifies and at which it
-// holds dispatch. Unset is no such step; 0 is a step at nothing left.
+// holds dispatch. Unset is no such step; 0 is a step at nothing left; "off"
+// is no such step, written over a level another file set.
 type UsageWindow struct {
-	NotifyRemaining int `toml:"notify_remaining"`
-	PauseRemaining  int `toml:"pause_remaining"`
+	NotifyRemaining OrOff[int] `toml:"notify_remaining"`
+	PauseRemaining  OrOff[int] `toml:"pause_remaining"`
 }
 
 // UsageOverage is [usage.overage]: what drive does once the weekly allotment is
@@ -707,9 +713,9 @@ type UsageWindow struct {
 // on. MaxUSD and NotifyUSD are list-price cost_usd summed, not what the
 // account was charged.
 type UsageOverage struct {
-	Mode      string  `toml:"mode"`
-	MaxUSD    float64 `toml:"max_usd"`
-	NotifyUSD float64 `toml:"notify_usd"`
+	Mode      string         `toml:"mode"`
+	MaxUSD    OrOff[float64] `toml:"max_usd"`
+	NotifyUSD OrOff[float64] `toml:"notify_usd"`
 }
 
 // The [usage.overage] modes.
@@ -725,20 +731,26 @@ const (
 )
 
 // UsageLevel is [usage.<window>] notify_remaining or pause_remaining, and false
-// when no layer set it. step is "notify" or "pause".
+// when no layer set it or the file that won switched it off. step is "notify"
+// or "pause".
 func (c *Config) UsageLevel(window, step string) (int, bool) {
 	key := "usage." + window + "." + step + "_remaining"
 	if !c.Declared(key) {
 		return 0, false
 	}
-	w := c.Usage.Weekly
+	l := usageLevel(c.Usage, window, step)
+	return l.Value, !l.Off
+}
+
+func usageLevel(u Usage, window, step string) OrOff[int] {
+	w := u.Weekly
 	if window == UsageFiveHour {
-		w = c.Usage.FiveHour
+		w = u.FiveHour
 	}
 	if step == "pause" {
-		return w.PauseRemaining, true
+		return w.PauseRemaining
 	}
-	return w.NotifyRemaining, true
+	return w.NotifyRemaining
 }
 
 // OverageMode is [usage.overage] mode, or pause when unset.
@@ -749,16 +761,21 @@ func (c *Config) OverageMode() string {
 	return c.Usage.Overage.Mode
 }
 
-// OverageUSD is [usage.overage] max_usd or notify_usd, and false when unset.
-// step is "max" or "notify".
+// OverageUSD is [usage.overage] max_usd or notify_usd, and false when unset or
+// switched off. step is "max" or "notify".
 func (c *Config) OverageUSD(step string) (float64, bool) {
 	if !c.Declared("usage.overage." + step + "_usd") {
 		return 0, false
 	}
+	d := overageUSD(c.Usage, step)
+	return d.Value, !d.Off
+}
+
+func overageUSD(u Usage, step string) OrOff[float64] {
 	if step == "max" {
-		return c.Usage.Overage.MaxUSD, true
+		return u.Overage.MaxUSD
 	}
-	return c.Usage.Overage.NotifyUSD, true
+	return u.Overage.NotifyUSD
 }
 
 // The [usage] defaults, applied where the key is read.
@@ -820,10 +837,8 @@ func (c *Config) validateUsage(path string) error {
 				path, window, pause, notify)
 		}
 	}
-	switch m := c.Usage.Overage.Mode; m {
-	case "", OveragePause, OverageContinue:
-	default:
-		return fmt.Errorf("%s: usage.overage.mode is %q: give %q or %q", path, m, OveragePause, OverageContinue)
+	if err := c.validOverageMode(path); err != nil {
+		return err
 	}
 	maxUSD, mok := c.OverageUSD("max")
 	notifyUSD, nok := c.OverageUSD("notify")
@@ -838,6 +853,15 @@ func (c *Config) validateUsage(path string) error {
 			path, notifyUSD, maxUSD)
 	}
 	return nil
+}
+
+func (c *Config) validOverageMode(path string) error {
+	switch m := c.Usage.Overage.Mode; m {
+	case "", OveragePause, OverageContinue:
+		return nil
+	default:
+		return fmt.Errorf("%s: usage.overage.mode is %q: give %q or %q", path, m, OveragePause, OverageContinue)
+	}
 }
 
 // Reset is a weekly instant: a weekday and a wall-clock time in a zone.

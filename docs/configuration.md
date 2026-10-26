@@ -794,12 +794,14 @@ The limit is per account, so `budget_used` sums every project in the [project re
 
 `weekly_budget` is an estimate in drover's own weighting. These two tables act on the figure the service itself reports. Claude Code writes a `rate_limit_event` into every headless log, and drover keeps the last one of each session on its usage row as [`rate_limit`](automation.md#writing-to-the-ledger-without-the-binary). Each window's level is the **percent of the window left**, `100 - utilization * 100`, as the service reports it in steps of 1%. It is not tokens and not dollars.
 
-| Key                | Type    | Range   | Default | Meaning                                                                                                                                                                                                                                                                         |
-| ------------------ | ------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `notify_remaining` | integer | 0 to 99 | unset   | The notify level. At or below it, `drive` emits one [`usage_warning`](automation.md#drive---events) per window per reset and sends it to each [`[notify]`](#notify) destination routing `usage_warning`. It does not pause or slow the drive. Unset sends none for this window. |
-| `pause_remaining`  | integer | 0 to 99 | unset   | The fail-safe level. At or below it, [`usage_admission`](#supervise) holds the drive: running sessions finish their stage, nothing new starts, and the drive pauses until the window resets or `drover drive --resume`. Unset holds nothing on this window.                     |
+| Key                | Type               | Range   | Default | Meaning                                                                                                                                                                                                                                                                                    |
+| ------------------ | ------------------ | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `notify_remaining` | integer or `"off"` | 0 to 99 | unset   | The notify level. At or below it, `drive` emits one [`usage_warning`](automation.md#drive---events) per window per reset and sends it to each [`[notify]`](#notify) destination routing `usage_warning`. It does not pause or slow the drive. Unset or `"off"` sends none for this window. |
+| `pause_remaining`  | integer or `"off"` | 0 to 99 | unset   | The fail-safe level. At or below it, [`usage_admission`](#supervise) holds the drive: running sessions finish their stage, nothing new starts, and the drive pauses until the window resets or `drover drive --resume`. Unset or `"off"` holds nothing on this window.                     |
 
 `[usage.weekly]` is the seven-day window and `[usage.five_hour]` the five-hour one. When both keys of a table are set, `pause_remaining` must be below `notify_remaining`, so the notice comes before the hold; load refuses the pair otherwise, naming both values. `0` is a level, not unset: `pause_remaining = 0` holds once the window reads 100% used.
+
+`"off"` is unset, written down. Every file is decoded over the one before it and the last file to write a key wins, so a project cannot leave unset a level the per-user file sets: any number it writes is a level of its own, `0` included. `"off"` is how a project removes the inherited level for itself alone. It reads exactly as a key nobody wrote: no warning, no hold, and no pair check, so `pause_remaining = "off"` beside `notify_remaining = 20` loads. A project's number written over a per-user `"off"` is a level again. Any other string in one of these keys is refused at load naming the file, the key and the two accepted forms; `"off"` in a key that does not take it is refused as any wrong value there is, and `[usage.overage] mode = "off"` names `pause` and `continue`. `drover config` prints each level switched off with the file that wrote it and, where that file is the project's, the per-user value it replaced, and `drover drive --dry-run` names the same on its `usage_admission` line, as `weekly pause_remaining off in .drover.toml (the per-user file sets 5)`. [Running one project on credit](#running-one-project-on-credit) is the case it exists for.
 
 Each warning is recorded as a ledger row naming the window and its reset, and drover reads every registered project's ledger for one before sending, so a restarted drive, a drive in another project on the same account, and a reading that dips and rises again send nothing twice. The newest reading among every registered project's usage rows is the one judged, because the limit is the account's. A reading taken before its window's reset counts as 100% left once the reset passes. A runner that writes no such event (codex, agy) leaves no reading, and nothing here acts for it.
 
@@ -807,13 +809,13 @@ Each warning is recorded as a ledger row naming the window and its reset, and dr
 
 An account runs out twice, in sequence: first the weekly allotment, then any extra-usage credit bought to work past it. The credit has no remaining figure. Once the weekly window reads 100%, the reading says only whether overage is in use (`is_using_overage`) and, at the end, `out_of_credits`. drover sees the percent of each window and never a credit balance.
 
-| Key          | Type   | Range                    | Default   | Meaning                                                                                                                                                                                                                       |
-| ------------ | ------ | ------------------------ | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`       | string | `pause`, `continue`      | `"pause"` | `pause` holds the drive as soon as a reading shows the weekly window rejected with overage in use, as `pause_remaining` would. `continue` keeps dispatching on purchased credit, bounded by `max_usd` when set.               |
-| `max_usd`    | number | above 0                  | unset     | Under `continue`, the summed `cost_usd` of usage rows whose reading was on overage since the weekly window began, across every project in the per-user registry, at which `usage_admission` holds the drive. Unset is no cap. |
-| `notify_usd` | number | above 0, below `max_usd` | unset     | Under `continue`, the same sum at which `drive` emits one `usage_warning` on the way to `max_usd`.                                                                                                                            |
+| Key          | Type              | Range                    | Default   | Meaning                                                                                                                                                                                                                                  |
+| ------------ | ----------------- | ------------------------ | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`       | string            | `pause`, `continue`      | `"pause"` | `pause` holds the drive as soon as a reading shows the weekly window rejected with overage in use, as `pause_remaining` would. `continue` keeps dispatching on purchased credit, bounded by `max_usd` when set.                          |
+| `max_usd`    | number or `"off"` | above 0                  | unset     | Under `continue`, the summed `cost_usd` of usage rows whose reading was on overage since the weekly window began, across every project in the per-user registry, at which `usage_admission` holds the drive. Unset or `"off"` is no cap. |
+| `notify_usd` | number or `"off"` | above 0, below `max_usd` | unset     | Under `continue`, the same sum at which `drive` emits one `usage_warning` on the way to `max_usd`. Unset or `"off"` sends none.                                                                                                          |
 
-Entering overage emits a `usage_warning` with window `overage` once per weekly reset whenever `[usage.weekly] notify_remaining` is set, under either mode. Both dollar sums are the runners' **list price**, the `cost_usd` each session reported, not the credit the account was charged: treat `max_usd` as an approximate bound, set below what you bought. Under `continue`, a weekly `pause_remaining` still holds the drive before the allotment runs out; leave it unset to run straight onto purchased credit, or `drover drive --resume` past the hold.
+Entering overage emits a `usage_warning` with window `overage` once per weekly reset whenever `[usage.weekly] notify_remaining` is set, under either mode. Both dollar sums are the runners' **list price**, the `cost_usd` each session reported, not the credit the account was charged: treat `max_usd` as an approximate bound, set below what you bought. Under `continue`, a weekly `pause_remaining` still holds the drive before the allotment runs out; leave it unset to run straight onto purchased credit, or `drover drive --resume` past the hold. A project inheriting the level from the per-user file leaves it unset by writing `pause_remaining = "off"` under its own `[usage.weekly]`. `"off"` on `max_usd` or `notify_usd` does the same for a per-user dollar cap or notice, and the check that `notify_usd` sits below `max_usd` reads it as unset too. `mode` takes no `"off"`: unset is already `pause`, so write the mode you want.
 
 One reading can cross several holds: under `mode = "pause"`, a week at 0% left with overage in use crosses the weekly `pause_remaining` and the overage hold together. Each `drover drive --resume` releases one, in the order `usage_admission` takes them (weekly, five-hour, overage or `max_usd`, then a refusal), so resuming past the weekly percent never consents to purchased credit. The pause line on stderr names every hold standing behind the one taken, the `paused` and `needs_operator` events carry them all in `holds`, the resume prints which hold it released and which still stand, and `drover drives` lists the standing ones beside `paused`.
 
@@ -835,6 +837,26 @@ mode = "pause"          # the default: never spend purchased credit unattended
 ```
 
 With this file, a drive whose newest reading says the week has 18% left sends one `usage_warning` and keeps going. At 5% it pauses with `needs_operator`; under `drive --for 48h`, a reset 30 hours away lifts the hold on its own at the reset, and under an unbounded drive it waits for `drover drive --resume`.
+
+### Running one project on credit
+
+The per-user file above pauses every project at 5% of the week left. One project is meant to keep running on purchased credit, so it switches the pause off for itself and sets the mode:
+
+```toml
+# .drover.toml of the project that runs on credit
+[usage.weekly]
+pause_remaining = "off"   # the per-user 5 holds every other project, not this one
+
+[usage.overage]
+mode    = "continue"
+max_usd = 40.0            # the bound on purchased credit
+```
+
+At 0% of the week left this project's drive dispatches, with only the inherited five-hour pause left to hold it, and every other registered project holds at 5% as before. Without the `"off"` line the project inherits `pause_remaining = 5` and holds every week until `drover drive --resume`, whatever `mode` says, and removing the line from the per-user file instead removes it from every project. The per-user `notify_remaining = 20` still reaches this project, so it still sends the 20% warning and the warning on entering overage. Its `drover drive --dry-run` ends the `usage_admission` line with:
+
+```text
+weekly pause_remaining off in .drover.toml (the per-user file sets 5)
+```
 
 ## `[register]`
 

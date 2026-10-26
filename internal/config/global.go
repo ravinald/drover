@@ -115,7 +115,15 @@ func (c *Config) layerGlobal(path string) error {
 		return fmt.Errorf("%s: backlog.mirror publishes one project's item text, so it is per-project: "+
 			"set it in that project's %s, not here", path, FileName)
 	}
+	// Checked against this file alone, because validate runs once over the
+	// layered value and names the project's file for whatever it finds there.
+	// The rest of [usage] stays with validate: its pairs may be completed by the
+	// project, and a mode is whole on its own.
+	if err := c.validOverageMode(path); err != nil {
+		return err
+	}
 	c.absorbDeclared(md, path, false)
+	c.inheritedUsage = c.Usage
 	return c.checkGlobalPaths(md, path)
 }
 

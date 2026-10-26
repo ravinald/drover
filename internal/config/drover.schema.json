@@ -491,16 +491,18 @@
           "description": "The two levels drive acts on for Claude's seven-day window, each the percent of the window left as the service reports it (100 - utilization * 100), not tokens and not dollars. Unset means that step does not happen for this window. When both are set, pause_remaining must be below notify_remaining.",
           "properties": {
             "notify_remaining": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 99,
-              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and sends it to each [notify] destination routing usage_warning. It does not pause or slow the drive. Unset sends none."
+              "oneOf": [
+                { "type": "integer", "minimum": 0, "maximum": 99 },
+                { "const": "off" }
+              ],
+              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and sends it to each [notify] destination routing usage_warning. It does not pause or slow the drive. Unset sends none. \"off\" switches off a level the per-user file set, which then reads as unset; a number there does not, since 0 is a level too."
             },
             "pause_remaining": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 99,
-              "description": "The fail-safe level: at or below this percent left, usage_admission holds dispatch and every stage that would launch a session, and the drive pauses until the window resets or drive --resume. Unset holds nothing on this window."
+              "oneOf": [
+                { "type": "integer", "minimum": 0, "maximum": 99 },
+                { "const": "off" }
+              ],
+              "description": "The fail-safe level: at or below this percent left, usage_admission holds dispatch and every stage that would launch a session, and the drive pauses until the window resets or drive --resume. Unset holds nothing on this window. \"off\" switches off a level the per-user file set, which then reads as unset; a number there does not, since 0 is a level too."
             }
           }
         },
@@ -510,16 +512,18 @@
           "description": "The two levels drive acts on for Claude's five-hour window, each the percent of the window left as the service reports it (100 - utilization * 100), not tokens and not dollars. Unset means that step does not happen for this window. When both are set, pause_remaining must be below notify_remaining.",
           "properties": {
             "notify_remaining": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 99,
-              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and sends it to each [notify] destination routing usage_warning. It does not pause or slow the drive. Unset sends none."
+              "oneOf": [
+                { "type": "integer", "minimum": 0, "maximum": 99 },
+                { "const": "off" }
+              ],
+              "description": "The notify level: at or below this percent left, drive emits one usage_warning per window per reset and sends it to each [notify] destination routing usage_warning. It does not pause or slow the drive. Unset sends none. \"off\" switches off a level the per-user file set, which then reads as unset; a number there does not, since 0 is a level too."
             },
             "pause_remaining": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 99,
-              "description": "The fail-safe level: at or below this percent left, usage_admission holds dispatch and every stage that would launch a session, and the drive pauses until the window resets or drive --resume. Unset holds nothing on this window."
+              "oneOf": [
+                { "type": "integer", "minimum": 0, "maximum": 99 },
+                { "const": "off" }
+              ],
+              "description": "The fail-safe level: at or below this percent left, usage_admission holds dispatch and every stage that would launch a session, and the drive pauses until the window resets or drive --resume. Unset holds nothing on this window. \"off\" switches off a level the per-user file set, which then reads as unset; a number there does not, since 0 is a level too."
             }
           }
         },
@@ -535,14 +539,18 @@
               "description": "pause holds the drive as soon as a reading shows the weekly window rejected with overage in use. continue keeps dispatching on purchased credit, bounded by max_usd when set."
             },
             "max_usd": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "description": "Under mode = continue, the list-price cost_usd of usage rows on overage since the weekly window began, summed across every project in the per-user registry, at which usage_admission holds the drive. Unset is no cap."
+              "oneOf": [
+                { "type": "number", "exclusiveMinimum": 0 },
+                { "const": "off" }
+              ],
+              "description": "Under mode = continue, the list-price cost_usd of usage rows on overage since the weekly window began, summed across every project in the per-user registry, at which usage_admission holds the drive. Unset is no cap. \"off\" switches off a level the per-user file set, which then reads as unset; a number there does not, since 0 is a level too."
             },
             "notify_usd": {
-              "type": "number",
-              "exclusiveMinimum": 0,
-              "description": "Under mode = continue, the same sum at which drive emits one usage_warning on the way to max_usd. Must be below max_usd when both are set."
+              "oneOf": [
+                { "type": "number", "exclusiveMinimum": 0 },
+                { "const": "off" }
+              ],
+              "description": "Under mode = continue, the same sum at which drive emits one usage_warning on the way to max_usd. Must be below max_usd when both are set. \"off\" switches off a level the per-user file set, which then reads as unset; a number there does not, since 0 is a level too."
             }
           }
         }

@@ -507,6 +507,14 @@ func (s *session) requeueAt(it backlog.Item, stage string) *lease.Hold {
 // usagePlan is --dry-run's usage_admission row: whether it would hold now, and
 // why.
 func (s *session) usagePlan() string {
+	plan := s.usageVerdictLine()
+	for _, off := range switchedOff(s.cfg) {
+		plan += "; " + off
+	}
+	return plan
+}
+
+func (s *session) usageVerdictLine() string {
 	p, _ := s.cfg.Policy("usage_admission")
 	a := s.readAccount()
 	if a.Reading == nil {
@@ -522,6 +530,22 @@ func (s *session) usagePlan() string {
 		return left + "; the run would hold now: " + holds[0].Reason + behind(holds[1:])
 	}
 	return left + " (" + a.Project + ", " + a.At.Local().Format("Jan 2 15:04") + "); the run dispatches"
+}
+
+// switchedOff names each usage level a file switched off with "off", and the
+// per-user value a project's "off" replaced. Without it a level the per-user
+// file sets and the project removed reads as one nobody ever set.
+func switchedOff(cfg *config.Config) []string {
+	var out []string
+	for _, l := range cfg.SwitchedOff() {
+		table, name := config.Table(l.Key)
+		line := fmt.Sprintf("%s %s off in %s", strings.TrimPrefix(table, "usage."), name, rel(cfg.Root, l.Path))
+		if l.Inherited != "" {
+			line += fmt.Sprintf(" (the per-user file sets %s)", l.Inherited)
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 // readingLine is a reading as one line: each window's percent left, overage,
