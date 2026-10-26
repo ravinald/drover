@@ -784,6 +784,8 @@ An account runs out twice, in sequence: first the weekly allotment, then any ext
 
 Entering overage emits a `usage_warning` with window `overage` once per weekly reset whenever `[usage.weekly] notify_remaining` is set, under either mode. Both dollar sums are the runners' **list price**, the `cost_usd` each session reported, not the credit the account was charged: treat `max_usd` as an approximate bound, set below what you bought. Under `continue`, a weekly `pause_remaining` still holds the drive before the allotment runs out; leave it unset to run straight onto purchased credit, or `drover drive --resume` past the hold.
 
+One reading can cross several holds: under `mode = "pause"`, a week at 0% left with overage in use crosses the weekly `pause_remaining` and the overage hold together. Each `drover drive --resume` releases one, in the order `usage_admission` takes them (weekly, five-hour, overage or `max_usd`, then a refusal), so resuming past the weekly percent never consents to purchased credit. The pause line on stderr names every hold standing behind the one taken, the `paused` and `needs_operator` events carry them all in `holds`, the resume prints which hold it released and which still stand, and `drover drives` lists the standing ones beside `paused`.
+
 A session the service refused (the weekly window rejected with no overage, or `out_of_credits`) holds the drive the same way at any of these settings, rather than parking the item `runner_fault`: the item goes back to the head of the queue at the stage that was refused. [Running past the weekly allotment](operating.md#running-past-the-weekly-allotment) covers choosing the levels.
 
 ### Worked example
@@ -993,7 +995,7 @@ An ntfy message carries `Title: drover: <project> <id>` (`drover: <project>` for
 | `started`                            | The drive id, the queue in order, `--jobs` above 1, and the deadline or `no deadline`.                                                                 |
 | `merged`                             | The pull request's number and title.                                                                                                                   |
 | `parked`                             | The park, its detail and reason, then up to 5 lines of the park's evidence, which for a `gate_refused` park are the lines its check's log says failed. |
-| `needs_operator`, `needs_supervisor` | `<action>: <run>`, the action and the command to run.                                                                                                  |
+| `needs_operator`, `needs_supervisor` | `<action>: <run>`, the action and the command to run. A `usage_admission` `needs_operator` carries `holds`, each usage hold the reading crosses with its `window`, `reason` and `resets_at`, the one taken first; with two or more, `run` says what each resume releases. |
 | `usage_warning`                      | The window, the percent of it left and its reset in local time.                                                                                        |
 | `exit`                               | The summary below.                                                                                                                                     |
 | any other                            | A line naming what happened: the stage, the check, the finding, the position.                                                                          |

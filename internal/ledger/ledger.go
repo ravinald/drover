@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ravinald/drover/internal/lease"
 	"github.com/ravinald/drover/internal/runlog"
 )
 
@@ -329,6 +330,9 @@ type Drive struct {
 	Running       bool `json:"running,omitempty"`
 	Paused        bool `json:"paused,omitempty"`
 	ConfigChanged bool `json:"config_changed,omitempty"`
+	// UsageHolds is each usage hold a paused drive's lease names as standing,
+	// which a resume releases one at a time.
+	UsageHolds []lease.UsageHold `json:"usage_holds,omitempty"`
 }
 
 // Drives folds the start and end rows into one Drive each, newest first.

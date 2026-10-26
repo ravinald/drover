@@ -1259,7 +1259,7 @@ The branch update drive makes before an item's own implement session, or its `--
 }
 ```
 
-`paused`: `drive --pause` reached the drive, or [`usage_admission`](configuration.md#supervise) held it. It dispatches nothing more, and each running item holds at its next stage boundary. A usage hold carries `action` `usage_admission`, `policy`, and `window`, `remaining` and `resets_at` as `usage_warning` does, with `reason` naming the level crossed: `the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT`, a window entered on purchased credit under `[usage.overage] mode = "pause"`, a list-price sum at `max_usd`, or a refusal, `impl's review session was refused: the weekly window is spent and so is the purchased credit (out_of_credits), so the service refuses sessions; it resets …`. A `needs_operator` with the same fields and `run` `drover drive --resume` follows it at every policy, so a destination routing `needs_operator` reaches the operator.
+`paused`: `drive --pause` reached the drive, or [`usage_admission`](configuration.md#supervise) held it. It dispatches nothing more, and each running item holds at its next stage boundary. A usage hold carries `action` `usage_admission`, `policy`, and `window`, `remaining` and `resets_at` as `usage_warning` does, with `reason` naming the level crossed: `the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT`, a window entered on purchased credit under `[usage.overage] mode = "pause"`, a list-price sum at `max_usd`, or a refusal, `impl's review session was refused: the weekly window is spent and so is the purchased credit (out_of_credits), so the service refuses sessions; it resets …`. It also carries `holds`, every usage hold the same reading crosses that no resume released, each with `window`, `reason` and `resets_at`, the one taken first: `window` and `reason` stay those of that hold, and each `drover drive --resume` releases one entry. A `needs_operator` with the same fields follows it at every policy, so a destination routing `needs_operator` reaches the operator. Its `run` is `drover drive --resume` for one hold, and with more says what each resume releases: `drover drive --resume (releases weekly; overage still holds and takes a second --resume)`.
 
 ```json
 { "event": "paused", "ts": "2026-10-16T22:50:00Z" }
@@ -1271,7 +1271,14 @@ The branch update drive makes before an item's own implement session, or its `--
   "reason": "the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT",
   "window": "weekly",
   "remaining": 4,
-  "resets_at": "2026-10-25T20:00:00-07:00"
+  "resets_at": "2026-10-25T20:00:00-07:00",
+  "holds": [
+    {
+      "window": "weekly",
+      "reason": "the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT",
+      "resets_at": "2026-10-25T20:00:00-07:00"
+    }
+  ]
 }
 ```
 
