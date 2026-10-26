@@ -50,7 +50,7 @@ func Code(err error) int {
 	// A nested-launch refusal is raised by internal/runner, which cannot import
 	// Refusal without a cycle. Mapped here rather than wrapped at each launch
 	// site, so a stage added later exits 3 without remembering to.
-	if errors.Is(err, runner.ErrNested) {
+	if errors.Is(err, runner.ErrNested) || errors.Is(err, runner.ErrOccupied) {
 		return ExitRefused
 	}
 	return ExitError

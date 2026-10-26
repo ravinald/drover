@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/ravinald/drover/internal/runner"
+	"github.com/ravinald/drover/internal/testenv"
 )
 
 // TestAFindingReachesTheSurfaceThatMustActOnIt runs the drover binary in
@@ -19,11 +20,22 @@ import (
 //
 // COLUMNS is cleared for the reason internal/cmd clears it: the table the
 // binary prints sizes itself to it.
+//
+// The session marker is a file rather than a variable, so the suite runs from
+// a temporary directory with none above it instead.
 func TestMain(m *testing.M) {
 	for _, name := range append(slices.Clone(runner.SessionEnv), "COLUMNS") {
 		if err := os.Unsetenv(name); err != nil {
 			panic(err)
 		}
 	}
-	os.Exit(m.Run())
+	wd, err := testenv.Isolate()
+	if err != nil {
+		panic(err)
+	}
+	code := m.Run()
+	if err := wd.Close(); err != nil {
+		panic(err)
+	}
+	os.Exit(code)
 }

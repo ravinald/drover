@@ -24,3 +24,14 @@ func killGroup(cmd *exec.Cmd, sig syscall.Signal) error {
 func exitSignal(*os.ProcessState) int { return 0 }
 
 func leftRunning(int) []string { return nil }
+
+// processAlive is FindProcess, which opens a handle on this platform and fails
+// for a pid that is gone.
+func processAlive(pid int) bool {
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	_ = p.Release()
+	return true
+}

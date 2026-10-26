@@ -29,8 +29,10 @@ import (
 // EnvActor is exported into every session drover launches, so a command run
 // inside one can tell that it is not being typed by a person. Only drover sets
 // it: to ActorAgent for every session a run, review, draft or drive launches,
-// and to ActorSupervisor for the one `drover supervise` starts. Any value at
-// all means "launched".
+// and to ActorSupervisor for the one `drover supervise` starts. Any value but
+// ActorOperator means "launched", and an unset one defers to the session marker
+// (see marker.go), which carries the same three values for a session drover did
+// not exec itself.
 //
 // It is a guardrail, not a boundary. `env -u DROVER_ACTOR` defeats it, and that
 // is fine — the failure it exists to stop is an agent that reads a fenced
@@ -60,8 +62,11 @@ const EnvRoot = "DROVER_ROOT"
 const EnvSession = "DROVER_SESSION"
 
 // Session is the id this process was launched under, empty outside a session
-// drover started.
-func Session() string { return os.Getenv(EnvSession) }
+// drover started and under ActorOperator.
+func Session() string {
+	_, session := ambient()
+	return session
+}
 
 // NewSession mints a launch id. It names one launch and nothing else, so a
 // random value serves and a counter would need a store to survive restarts.
@@ -76,7 +81,9 @@ func NewSession() string {
 // command somewhere no test chose: EnvRoot at the operator's live project,
 // EnvActor at the seal. So every package whose tests run drover clears this list
 // in its TestMain, and TestSessionEnvNamesEveryVariableALaunchSets fails when
-// Run grows a variable the list does not carry.
+// Run grows a variable the list does not carry. The marker Run writes is not a
+// variable and is not listed: those TestMains also run their tests from a
+// temporary directory with no marker above it.
 var SessionEnv = []string{EnvActor, EnvRoot, EnvSession}
 
 // Where is the directory a session runs in and the project it reports to. The
@@ -94,12 +101,19 @@ type Where struct {
 }
 
 // Launched reports whether this process is running inside a session drover
-// started. Commands that belong to the operator read it to refuse.
-func Launched() bool { return os.Getenv(EnvActor) != "" }
+// started, by its environment or by the marker in the tree it works in.
+// Commands that belong to the operator read it to refuse.
+func Launched() bool {
+	actor, _ := ambient()
+	return actor != "" && actor != ActorOperator
+}
 
 // Supervising reports whether this process runs inside the session `drover
 // supervise` started.
-func Supervising() bool { return os.Getenv(EnvActor) == ActorSupervisor }
+func Supervising() bool {
+	actor, _ := ambient()
+	return actor == ActorSupervisor
+}
 
 // Mode is how a run is executed.
 type Mode string
@@ -425,6 +439,17 @@ func Run(ctx context.Context, at Where, spec Spec, mode Mode, prompt, logPath st
 		cmd.Env = append(cmd.Env, EnvRoot+"="+at.Root)
 	}
 	cmd.Dir = at.Dir
+	// The same three values, on disk, for whatever else opens a session in this
+	// tree. Removed by the defer on every return below: a cancelled context and
+	// the SIGINT or SIGTERM root turns into one both come back through Wait. A
+	// SIGKILL to drover leaves it, and the next launch or check names it stale.
+	release, err := claim(at.Dir, Marker{
+		Actor: actor, Session: session, Root: at.Root, PID: os.Getpid(), Started: time.Now().UTC().Truncate(time.Second),
+	})
+	if err != nil {
+		return oc, err
+	}
+	defer release()
 	cmd.Stderr = os.Stderr
 	switch {
 	case spec.Stdin:
