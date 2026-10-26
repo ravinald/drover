@@ -756,14 +756,9 @@ func markerLine(text, marker string) int {
 	if marker == "" {
 		return -1
 	}
-	fenced := false
+	var f fence
 	for i, line := range strings.Split(text, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			fenced = !fenced
-			continue
-		}
-		if !fenced && trimmed == marker {
+		if !f.skip(line) && strings.TrimSpace(line) == marker {
 			return i
 		}
 	}

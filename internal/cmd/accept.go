@@ -265,14 +265,9 @@ type bodyHold struct {
 // edit (`internal/<provider>/client.go`), and is read like prose.
 func bodyHolds(lines []string, markers []string) []bodyHold {
 	var out []bodyHold
-	fenced := false
+	var f fence
 	for i := bodyStart(lines); i < len(lines); i++ {
-		trimmed := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			fenced = !fenced
-			continue
-		}
-		if fenced {
+		if f.skip(lines[i]) {
 			continue
 		}
 		text := withoutCommandSpans(lines[i])
