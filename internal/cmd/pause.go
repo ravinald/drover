@@ -77,8 +77,7 @@ type driveInputs struct {
 // snapshotInputs records what this drive runs under now, validating nothing:
 // a template that will not read is reported by the launch that needs it.
 func (s *session) snapshotInputs(reviewer string) *driveInputs {
-	in := &driveInputs{cfg: s.cfg, reviewer: reviewer}
-	in.toml, _ = os.ReadFile(filepath.Join(s.cfg.Root, config.FileName)) // #nosec G304 -- the project's own config
+	in := &driveInputs{cfg: s.cfg, reviewer: reviewer, toml: s.cfg.Raw()}
 	_, in.prompt, _ = prompts.Load(s.cfg.Abs(s.cfg.Prompts.Implement), "default", prompts.DefaultTemplate())
 	_, in.review, _ = prompts.Load(s.cfg.Abs(s.cfg.Prompts.Review), "review", prompts.ReviewTemplate())
 	return in
@@ -344,7 +343,7 @@ func (s *session) answerControl(sched *driveSched) {
 		in.resumed = true
 		changed := s.inputs.changed(in, nil)
 		s.cfg, s.inputs = in.cfg, in
-		publishConfig(in)
+		publishConfig(in.toml, in.resumed)
 		s.backlog, s.ledger, s.shelf = next.backlog, next.ledger, next.shelf
 		events.reconfigure(in.cfg)
 		released, standing = s.releaseUsage(sched)
@@ -768,12 +767,13 @@ func changedTables(was, now []byte) []string {
 }
 
 // publishConfig writes the digest of the config this drive runs under into its
-// lease, so status in another process can tell when the file moved on.
-func publishConfig(in *driveInputs) {
-	if held == nil || in == nil {
+// lease, so status in another process can tell when the file moved on. raw is
+// the bytes the config was decoded from, never a later read of the file.
+func publishConfig(raw []byte, resumed bool) {
+	if held == nil {
 		return
 	}
-	_ = held.Update(func(l *lease.Lease) { l.ConfigSHA256, l.ConfigResumed = configDigest(in.toml), in.resumed })
+	_ = held.Update(func(l *lease.Lease) { l.ConfigSHA256, l.ConfigResumed = configDigest(raw), resumed })
 }
 
 // configDrift reports whether the .drover.toml on disk differs from the one

@@ -86,6 +86,9 @@ type Config struct {
 	// sources are the files this config was layered from, global first.
 	sources []string
 
+	// raw is the project file's bytes as decoded. Read through Raw.
+	raw []byte
+
 	// shapes are Frontmatter.Shape parsed, filled at load so no caller can meet
 	// a spec validate already refused. Read it through Shapes.
 	shapes map[string]backlog.Shape
@@ -1205,10 +1208,15 @@ func loadRoot(root string) (*Config, error) {
 	c.sources = append(c.sources, path)
 
 	globalDests := maps.Clone(c.Notify.Destinations)
-	md, err := toml.DecodeFile(path, c)
+	raw, err := os.ReadFile(path) // #nosec G304 -- the project's own config
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
+	md, err := toml.Decode(string(raw), c)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	c.raw = raw
 	c.layerNotify(globalDests)
 	c.absorbDeclared(md, path, true)
 	// Checked before unknown keys, because the keys a stale config carries are
