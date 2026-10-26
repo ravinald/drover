@@ -290,7 +290,7 @@ That separation is what lets a night survive one bad item. Whatever a session le
 
 Two consequences to set up for before the first night:
 
-- **Sessions find the project through `DROVER_ROOT`.** `drive` sets it to your checkout's root, so an agent's `drover audit` or `drover request-changes` writes the ledger and backlog you read, not a copy inside the worktree.
+- **Sessions find the project through `DROVER_ROOT`.** `drive` sets it to your checkout's root, so an agent's `drover audit` or `drover request-changes` writes the ledger and backlog you read, not a copy inside the worktree. A session standing in a different repository's project, such as a scratch one it initialized to try a command, gets that project instead: a worktree shares your checkout's common git dir and a separate repository does not, which is how drover tells the two apart.
 - **A worktree holds only what git tracks.** Anything a session or your merge gate reads from outside version control has to be linked in with [`[drive] worktree_links`](configuration.md#drive), and dependencies a fresh checkout lacks (`node_modules`, say) come from `[drive] worktree_setup`. A branch you have checked out yourself cannot be checked out a second time, so its item parks as `worktree_failed` and the rest of the queue runs.
 
 Your checkout matters to a drive in one place: reconciliation, which finishes what merged since the last drive by writing the ledger and saved reports there. A checkout holding uncommitted work skips reconciliation for that night, says so, and the queue runs anyway.

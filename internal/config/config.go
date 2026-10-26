@@ -19,6 +19,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/dashboard"
+	"github.com/ravinald/drover/internal/gitcmd"
 	"github.com/ravinald/drover/internal/runner"
 	"github.com/ravinald/drover/internal/sev"
 )
@@ -1070,12 +1071,21 @@ func (c *Config) Known(key string) bool {
 
 // Find walks up from dir looking for the config file, and returns the directory
 // holding it. A session drive launched names its project in runner.EnvRoot, or
-// in the root of the session marker when the environment carries none, and
-// that wins over the walk: the session works in a worktree whose own copy of the
-// config, when it has one, points every record path into a tree that is removed
-// once the item lands.
+// in the root of the session marker when the environment carries none. That
+// root wins over a config the walk finds inside the same git repository: the
+// session works in a worktree whose own copy of the config, when it has one,
+// points every record path into a tree that is removed once the item lands. A
+// config the walk finds in another repository, or in none, wins over the
+// environment, because a session that initialized a scratch project to probe a
+// command is standing in that project and not in the one that launched it. The
+// common git dir is the test because a linked worktree shares it with its
+// checkout and nothing else does.
 func Find(dir string) (string, error) {
+	found, walkErr := walkUp(dir)
 	if root := os.Getenv(runner.EnvRoot); root != "" {
+		if walkErr == nil && found != root && !sameRepository(found, root) {
+			return found, nil
+		}
 		if _, err := os.Stat(filepath.Join(root, FileName)); err != nil {
 			return "", fmt.Errorf("%s names %s, which holds no %s: unset it to find the project from the working directory",
 				runner.EnvRoot, root, FileName)
@@ -1091,6 +1101,10 @@ func Find(dir string) (string, error) {
 		}
 		return m.Root, nil
 	}
+	return found, walkErr
+}
+
+func walkUp(dir string) (string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return "", err
@@ -1110,6 +1124,37 @@ func Find(dir string) (string, error) {
 		}
 		abs = parent
 	}
+}
+
+// sameRepository reports whether a and b resolve to one common git dir. A
+// directory git cannot place in a repository matches nothing.
+func sameRepository(a, b string) bool {
+	ca, ok := commonGitDir(a)
+	if !ok {
+		return false
+	}
+	cb, ok := commonGitDir(b)
+	return ok && ca == cb
+}
+
+func commonGitDir(dir string) (string, bool) {
+	// Resolved here rather than with --path-format=absolute, which git before
+	// 2.31 rejects: git answers relative to the directory it ran in.
+	out, err := gitcmd.Command(dir, "rev-parse", "--git-common-dir").Output()
+	if err != nil {
+		return "", false
+	}
+	common := strings.TrimSpace(string(out))
+	if common == "" {
+		return "", false
+	}
+	if !filepath.IsAbs(common) {
+		common = filepath.Join(dir, common)
+	}
+	if resolved, err := filepath.EvalSymlinks(common); err == nil {
+		common = resolved
+	}
+	return common, true
 }
 
 // Load finds and reads the config for the tree containing dir, layering the

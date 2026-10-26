@@ -141,11 +141,13 @@ A launch into a directory whose marker names a running `pid` refuses with exit `
 
 ## `DROVER_ROOT`
 
-drover exports `DROVER_ROOT=<project root>` into every session it launches and into `[drive] merge_gate` and `[drive] worktree_setup`. When it is set, drover finds the project there instead of walking up from the working directory.
+drover exports `DROVER_ROOT=<project root>` into every session it launches and into `[drive] merge_gate` and `[drive] worktree_setup`. When it is set, drover still walks up from the working directory, and the variable decides only what the walk would otherwise get wrong.
 
 The reason is `drive`, which runs each item in a worktree of its own. Walking up from a worktree finds the worktree's tracked copy of `.drover.toml` when the project tracks one, and nothing at all when the config lives outside version control. Either way an agent's `drover audit` or `drover request-changes` would write somewhere nobody reads. With the variable set, both write the ledger and the backlog in the checkout the operator launched from.
 
-A variable naming a directory with no `.drover.toml` is an error, never a fallback to the walk: a session reporting to the wrong project is worse than one that reports nothing.
+A session can also leave the project entirely: a review that runs `git init` and `drover init` in a temporary directory to probe a command is standing in a project of its own. When the walk finds a `.drover.toml` in a different git repository from the variable's, or in no repository at all, drover uses the walk's project, so `drover new` there writes into the scratch backlog and not the operator's. The test is `git rev-parse --git-common-dir`: a linked worktree shares its checkout's common git dir and nothing else does, so the comparison separates a worktree's tracked copy of the config from another project's config without drover keeping a list of the worktrees it made.
+
+When the walk finds no `.drover.toml`, or finds one in the variable's repository, a variable naming a directory with no `.drover.toml` is an error, never a fallback to the walk: a session reporting to the wrong project is worse than one that reports nothing.
 
 ## The checkout lease
 
