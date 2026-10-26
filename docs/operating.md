@@ -174,7 +174,7 @@ Without `--defaults` it needs a terminal to ask on, and inside a session drover 
 - **Some actions stop short of `auto` by design.** `merge_drive_pr`, `merge_protected_paths`, `write_scaffold_requirements`, `triage_finding` and `close_changes` cap at `supervisor`, and `accept`, `signoff`, `override_review_limit`, `auth_expired` and `push_refused_by_hook` cap at `operator`. Asking for more is a load error that names the ceiling.
 - **Don't leave anything at `supervisor` unless you run `drover supervise`.** Without one, set it to `operator` so a `[notify]` destination routing `needs_operator` reaches you, or to `auto` where the ceiling allows.
 
-`drover config` prints every action's effective policy, marked `default` where the file sets nothing. Read it after any drover upgrade. A project whose config predates `[supervise]` has no table, and `drover config --diff` doesn't list the table, so the defaults apply without anything pointing at them.
+`drover config` prints every action's effective policy, marked `default` where the file sets nothing. Read it after any drover upgrade. A project whose config predates `[supervise]` has no table, so the defaults apply without the file saying so. `drover config --diff` lists each action no file sets at its default and names the ones at `supervisor`, and once the ledger records a drive `drover check` reports `SUPERVISOR UNSET` for them. Both point at `drover init supervise`.
 
 ## Operator sessions
 

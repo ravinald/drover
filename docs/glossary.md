@@ -304,6 +304,7 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `MIRROR SHELVED`      | A shelved body's issue is still open or lacks `drover:deferred`.                      |
 | `NO DISPOSITION`      | A merged item's `closes` issue has no disposition.                                    |
 | `STALE CONFIG`        | `.drover.toml` lacks a key `drover init` would write today.                           |
+| `SUPERVISOR UNSET`    | A project that has driven leaves `supervisor` defaults with no `[supervise]` table.   |
 | `BAD TEMPLATE`        | A `[prompts]` template will not read or render.                                       |
 | `STALE BLOCK`         | A generated agent-instruction block differs from what this binary and config produce. |
 | `STALE POLICY`        | A generated block records a `[supervise]` policy the config does not hold.            |

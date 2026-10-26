@@ -773,6 +773,29 @@ func configPolicies(cfg *config.Config) string {
 	return b.String()
 }
 
+// unsetActions is every catalog action no layered file sets, in catalog order:
+// the ones running on a default nobody chose.
+func unsetActions(cfg *config.Config) []supervised {
+	var out []supervised
+	for _, a := range catalog {
+		if _, declared := cfg.Policy(a.key); !declared {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// atSupervisor is the keys of the actions whose default is supervisor.
+func atSupervisor(actions []supervised) []string {
+	var out []string
+	for _, a := range actions {
+		if a.def == polSupervisor {
+			out = append(out, a.key)
+		}
+	}
+	return out
+}
+
 func init() {
 	superviseCmd.Flags().StringVar(&superviseRunner, "runner", "", "launch this runner instead of [run] default_runner")
 	superviseCmd.Flags().BoolVar(&superviseDry, "dry-run", false, "print the prompt and launch nothing")

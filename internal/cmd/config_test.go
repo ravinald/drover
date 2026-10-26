@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/ravinald/drover/internal/config"
+	"github.com/ravinald/drover/internal/ledger"
 )
 
 // A schema_version 1 config, in that schema's own spelling: [paths] bodies
@@ -213,8 +214,13 @@ func TestDiffIsOneLineOnAConfigThatDeclaresEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, k := range append(generated, except(in.Missing(), generated)...) {
+		// An empty [supervise] decides no action; the table below decides each.
+		if k.Dotted == "supervise" {
+			continue
+		}
 		full = paste(full, k.Table, k.Name+" = "+k.Default)
 	}
+	full += "\n[supervise]\n" + strings.Join(catalogLines(), "\n") + "\n"
 
 	got := diffOf(t, projectWith(t, full))
 	if !strings.HasPrefix(got, "ok — ") {
@@ -1739,6 +1745,14 @@ func resolvedKeys(t *testing.T, dir string) map[string]string {
 	for _, k := range written {
 		out[k.Dotted] = k.Default
 	}
+	// [supervise] resolves per action, and pasting its defaults turns a table
+	// nobody wrote into one naming every action: the literal moves, and what a
+	// drive does about each action must not.
+	delete(out, "supervise")
+	for _, a := range catalog {
+		p, _ := in.Config.Policy(a.key)
+		out["Policy("+a.key+")"] = string(p)
+	}
 	for _, window := range []string{config.UsageWeekly, config.UsageFiveHour} {
 		for _, step := range []string{"notify", "pause"} {
 			v, ok := in.Config.UsageLevel(window, step)
@@ -1750,4 +1764,146 @@ func resolvedKeys(t *testing.T, dir string) map[string]string {
 		out["OverageUSD("+step+")"] = fmt.Sprint(v, ok)
 	}
 	return out
+}
+
+const minimalConfig = "schema_version = 2\nproject = \"supervise\"\n"
+
+// superviseSection is the action lines --diff prints under its [supervise]
+// header, or nil where it prints none.
+func superviseSection(t *testing.T, diff string) []string {
+	t.Helper()
+	_, after, found := strings.Cut(diff, "\n[supervise]\n")
+	if !found {
+		return nil
+	}
+	body, _, _ := strings.Cut(after, "\n\n")
+	return strings.Split(body, "\n")
+}
+
+func catalogLines(skip ...string) []string {
+	var out []string
+	for _, a := range catalog {
+		if !slices.Contains(skip, a.key) {
+			out = append(out, a.key+` = "`+string(a.def)+`"`)
+		}
+	}
+	return out
+}
+
+// A config written before [supervise] existed reaches Missing as one open
+// table, so the key sections never name an action, and six of them wait on a
+// session the project may never have heard of.
+func TestDiffListsEverySupervisedActionNoFileSets(t *testing.T) {
+	globalConfig(t, "")
+	diff := diffOf(t, projectWith(t, minimalConfig))
+
+	if got, want := superviseSection(t, diff), catalogLines(); !slices.Equal(got, want) {
+		t.Errorf("the [supervise] section lists\n%s\nwant\n%s\nfull report:\n%s",
+			strings.Join(got, "\n"), strings.Join(want, "\n"), diff)
+	}
+	header := diff[:strings.Index(diff, "\n[supervise]\n")]
+	header = header[strings.LastIndex(header, "supervised action"):]
+	for _, want := range append(atSupervisor(catalog), "needs_supervisor", "`drover supervise`", "`drover init supervise`") {
+		if !strings.Contains(header, want) {
+			t.Errorf("the [supervise] header never names %q:\n%s", want, header)
+		}
+	}
+	// The one-line form of the same gap would open the table a second time.
+	if strings.Contains(diff, "supervise = {}") {
+		t.Errorf("--diff still prints supervise = {} beside the action section:\n%s", diff)
+	}
+}
+
+// Either file deciding an action is a decision, and the per-user one is not
+// the project's to repeat.
+func TestDiffListsOnlyTheActionsNeitherFileSets(t *testing.T) {
+	globalConfig(t, "[supervise]\nmerge_drive_pr = \"operator\"\n")
+	dir := projectWith(t, minimalConfig+"\n[supervise]\nresolve_conflict = \"auto\"\nenqueue = \"operator\"\n")
+	diff := diffOf(t, dir)
+	want := catalogLines("merge_drive_pr", "resolve_conflict", "enqueue")
+	if got := superviseSection(t, diff); !slices.Equal(got, want) {
+		t.Errorf("the [supervise] section lists\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestDiffListsNoActionWhenEveryOneIsSet(t *testing.T) {
+	globalConfig(t, "")
+	table := "\n[supervise]\n" + strings.Join(catalogLines(), "\n") + "\n"
+	diff := diffOf(t, projectWith(t, minimalConfig+table))
+	if got := superviseSection(t, diff); got != nil {
+		t.Errorf("a config setting every action still gets a [supervise] section:\n%s", diff)
+	}
+	if strings.Contains(diff, "supervised action") {
+		t.Errorf("a config setting every action still gets the section's header:\n%s", diff)
+	}
+}
+
+// The section prints defaults, so pasting it is a decision that changes
+// nothing about how a drive behaves.
+func TestPastingTheSuperviseSectionKeepsEveryPolicy(t *testing.T) {
+	globalConfig(t, "")
+	dir := projectWith(t, minimalConfig)
+	before, err := config.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	section := superviseSection(t, diffOf(t, dir))
+	if section == nil {
+		t.Fatal("--diff printed no [supervise] section for a config with no table")
+	}
+	pasted := minimalConfig + "\n[supervise]\n" + strings.Join(section, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, config.FileName), []byte(pasted), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	after, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("the config with the section appended does not load: %v", err)
+	}
+	for _, a := range catalog {
+		was, _ := before.Policy(a.key)
+		now, declared := after.Policy(a.key)
+		if was != now || !declared {
+			t.Errorf("%s resolved to %s before the paste and %s (declared %v) after", a.key, was, now, declared)
+		}
+	}
+}
+
+// A project that has never driven parks nothing, so its defaults are not yet
+// anyone's problem; one that has, with no table in either file, is.
+func TestCheckReportsSupervisorUnsetOnlyOnceTheProjectHasDriven(t *testing.T) {
+	s := fixture(t, "")
+	if got := findings(openIn(t, s.cfg.Root).checkReport(), "SUPERVISOR UNSET"); len(got) != 0 {
+		t.Errorf("a project with no drive row reported %+v", got)
+	}
+
+	if err := s.record(ledger.Row{ID: ledger.DriveRowID, Queued: []string{"1"}}); err != nil {
+		t.Fatal(err)
+	}
+	rep := openIn(t, s.cfg.Root).checkReport()
+	got := findings(rep, "SUPERVISOR UNSET")
+	if len(got) != 1 {
+		t.Fatalf("check reported %d SUPERVISOR UNSET findings, want 1: %+v", len(got), rep.Findings)
+	}
+	if rep.OK {
+		t.Error("a SUPERVISOR UNSET finding left the report ok, so check would exit 0")
+	}
+	for _, key := range atSupervisor(catalog) {
+		if !strings.Contains(got[0].Message, key) {
+			t.Errorf("the finding never names %s: %s", key, got[0].Message)
+		}
+	}
+	if !strings.Contains(got[0].Detail, "drover init supervise") {
+		t.Errorf("the finding never names the fix: %s", got[0].Detail)
+	}
+}
+
+// Writing the table is the decision, empty or not.
+func TestCheckIsSilentOnSupervisorUnsetOnceATableExists(t *testing.T) {
+	s := fixture(t, "\n[supervise]\n")
+	if err := s.record(ledger.Row{ID: ledger.DriveRowID, Queued: []string{"1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := findings(openIn(t, s.cfg.Root).checkReport(), "SUPERVISOR UNSET"); len(got) != 0 {
+		t.Errorf("a project with a [supervise] table reported %+v", got)
+	}
 }

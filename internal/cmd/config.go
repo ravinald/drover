@@ -125,9 +125,14 @@ func renderConfigDiff(w io.Writer, in *config.Inspection) {
 	// reads as two gaps and the reader pastes the line twice.
 	version := []config.Key{{Dotted: "schema_version"}}
 	generated = except(generated, version)
-	rest := except(except(in.Missing(), generated), version)
+	// An absent [supervise] reaches Missing as one `supervise = {}` line, which
+	// names no action and, pasted, reads as a project that decided every one.
+	// The action section below replaces it, and printing both would open the
+	// table twice.
+	rest := except(except(in.Missing(), generated), append(version, config.Key{Dotted: "supervise"}))
+	unset := unsetActions(in.Config)
 
-	if !in.Stale() && len(generated) == 0 && len(rest) == 0 && len(in.Retired) == 0 {
+	if !in.Stale() && len(generated) == 0 && len(rest) == 0 && len(unset) == 0 && len(in.Retired) == 0 {
 		fmt.Fprintf(w, "ok — %s declares every key this build reads, and nothing it does not\n",
 			rel(in.Root, in.Path))
 		return
@@ -166,6 +171,10 @@ func renderConfigDiff(w io.Writer, in *config.Inspection) {
 		writeKeys(w, rest)
 	}
 
+	if len(unset) > 0 {
+		writeUnsetActions(w, unset)
+	}
+
 	if len(in.Retired) > 0 {
 		fmt.Fprintf(w, "# %d %s nothing in this build reads. Whoever wrote the file named beside\n",
 			len(in.Retired), plural(len(in.Retired), "key", "keys"))
@@ -175,6 +184,32 @@ func renderConfigDiff(w io.Writer, in *config.Inspection) {
 			fmt.Fprintf(w, "# %s   (%s)\n", r.Key, rel(in.Root, r.Path))
 		}
 	}
+}
+
+// writeUnsetActions is the supervised actions no file sets, each at its
+// default. [supervise] is an open table, so Missing sees one table rather than
+// its actions, and a project written before the table existed would otherwise
+// never learn that some of its defaults wait on a session it does not run.
+func writeUnsetActions(w io.Writer, unset []supervised) {
+	fmt.Fprintf(w, "# %d supervised %s no config sets, each at its default policy.\n",
+		len(unset), plural(len(unset), "action", "actions"))
+	if sup := atSupervisor(unset); len(sup) > 0 {
+		fmt.Fprintf(w, "# %d %s to supervisor:\n", len(sup), plural(len(sup), "defaults", "default"))
+		for _, key := range sup {
+			fmt.Fprintf(w, "#   %s\n", key)
+		}
+		fmt.Fprintf(w, "# A supervisor action parks as needs_supervisor unless a `drover supervise`\n")
+		fmt.Fprintf(w, "# session is running.\n")
+	} else {
+		fmt.Fprintf(w, "# None of them defaults to supervisor.\n")
+	}
+	fmt.Fprintf(w, "# `drover init supervise` writes the table interactively, one action at a time.\n")
+	pasteNote(w)
+	fmt.Fprintf(w, "\n[supervise]\n")
+	for _, a := range unset {
+		fmt.Fprintf(w, "%s = %q\n", a.key, a.def)
+	}
+	fmt.Fprintln(w)
 }
 
 // addendumNote says where [agents] addendum resolves and whether it reads,
