@@ -273,7 +273,7 @@ A drive that exits before it holds the lease (a refusal, a preflight that fails)
 ```text
 2026-10-18T09:12:02Z  started        queue=4 jobs=1 seq=1
 2026-10-18T09:12:03Z  dispatched     4 seq=2
-2026-10-18T09:12:03Z  stage          4 stage=implement seq=3
+2026-10-18T09:12:03Z  stage          4 stage=implement log=~/.cache/drover/webapp/4-retry.20261018-021203.123456789.jsonl seq=3
 2026-10-18T09:40:51Z  parked         4 park=no_record detail=unknown seq=4 reason="the review recorded nothing"
 2026-10-18T09:40:52Z  exit           code=0 ended=drained merged=0 parked=1 skipped=0 held=0 seq=5
 ```

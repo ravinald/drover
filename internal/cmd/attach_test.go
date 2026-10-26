@@ -753,3 +753,18 @@ func TestAttachSessionJSONKeysEachLineOnce(t *testing.T) {
 		t.Errorf("activities %+v, want %+v", acts, want)
 	}
 }
+
+// A stage line names the session log its event carries, between stage= and
+// seq=, so a person following without --session can find it; a stage with no
+// session log prints no log=.
+func TestEventLineNamesTheStagesSessionLog(t *testing.T) {
+	const log = "~/.cache/drover/webapp/F14-ntfy.20261024-154011.123456789.jsonl"
+	e := DriveEvent{TS: "2026-10-24T22:40:11Z", Event: evStage, ID: "F14", Stage: "implement", Log: log, Seq: 7}
+	if got, want := eventLineTo(e, false), "2026-10-24T22:40:11Z  stage          F14 stage=implement log="+log+" seq=7"; got != want {
+		t.Errorf("stage line with a log:\n got %q\nwant %q", got, want)
+	}
+	e.Log = ""
+	if got := eventLineTo(e, false); strings.Contains(got, "log=") || !strings.HasSuffix(got, "stage=implement seq=7") {
+		t.Errorf("stage line without a log printed %q", got)
+	}
+}

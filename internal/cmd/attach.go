@@ -239,6 +239,7 @@ func eventLineTo(e DriveEvent, tint bool) string {
 	add("jobs", num(e.Jobs))
 	add("deadline", e.Deadline)
 	add("stage", e.Stage)
+	add("log", e.Log)
 	add("park", e.Park)
 	add("detail", e.Detail)
 	add("action", e.Action)
@@ -501,12 +502,12 @@ activity rather than event, its ts the time attach read it.`,
   drover attach D8 --session --item F14   # what F14's session is doing
 
   2026-10-18T09:12:03Z  dispatched     4
-  2026-10-18T09:12:03Z  stage          4 stage=implement
+  2026-10-18T09:12:03Z  stage          4 stage=implement log=~/.cache/drover/webapp/4-retry.20261018-021203.123456789.jsonl
   2026-10-18T09:40:51Z  parked         4 park=silent detail=unknown reason="the review recorded nothing"
   2026-10-18T09:40:52Z  exit           code=0
 
   under --session, the session's activity beneath its stage line:
-  2026-10-24T22:40:11Z  stage          F14 stage=implement
+  2026-10-24T22:40:11Z  stage          F14 stage=implement log=~/.cache/drover/webapp/F14-ntfy.20261024-154011.123456789.jsonl seq=7
                                        F14 > Read internal/cmd/events.go
                                        F14 > Bash make build && make check
                                        F14 · The verify command passes; committing.
