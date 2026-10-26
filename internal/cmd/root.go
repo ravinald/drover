@@ -76,7 +76,7 @@ projects, skills and report. Each of those carries a sample object under Example
 
 func init() {
 	root.PersistentFlags().BoolVarP(&ignoreStale, "ignore-stale", "I", false,
-		"run even though .drover.toml or the generated agent instructions are older than this binary")
+		"run even though .drover.toml or the generated agent instructions do not match this binary")
 	root.PersistentFlags().Var(colorValue{}, "color",
 		"color terminal output: auto, always or never; --json, --events and files are never colored")
 	noColor := root.PersistentFlags().VarPF(noColorValue{}, "no-color", "", "the same as --color=never")

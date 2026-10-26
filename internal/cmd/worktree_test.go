@@ -195,6 +195,61 @@ func TestALinkedFileTheTrunkStopsTrackingReachesTheNextSession(t *testing.T) {
 	}
 }
 
+// A session's agents --write replaces a linked AGENTS.md with a file of the
+// tree's own, so its rendering stays off the operator's copy. The session after
+// it reads the operator's copy again, and the file in between never reaches
+// the branch.
+func TestALinkASessionReplacedIsRestoredBeforeTheNextSession(t *testing.T) {
+	s, _ := treeProject(t)
+	dir := s.cfg.Root
+	b, err := os.ReadFile(filepath.Join(dir, ".gitignore")) // #nosec G304 -- the fixture's own file
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, ".gitignore"), string(b)+"AGENTS.md\n")
+	git(t, dir, "add", ".gitignore")
+	git(t, dir, "commit", "-q", "-m", "ignore AGENTS.md")
+	write(t, filepath.Join(dir, "AGENTS.md"), "operator's copy\n")
+	s.cfg.Loop.TreeLinks = []string{"AGENTS.md"}
+	it, err := s.item("1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := s.openItemTree(it, "first", "main")
+	defer tree.close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	local := filepath.Join(tree.Path, "AGENTS.md")
+	if err := os.Remove(local); err != nil {
+		t.Fatal(err)
+	}
+	write(t, local, "a branch's rendering\n")
+	if st := git(t, tree.Path, "status", "--porcelain"); st != "" {
+		t.Errorf("the file replacing the link is not ignored: %q", st)
+	}
+
+	s.tree = tree.Path
+	defer func() { s.tree = "" }()
+	if _, err := s.launch(context.Background(), it, ledger.StageImplement, "impl", "relink", "body", launchInfo{}); err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	fi, err := os.Lstat(local)
+	if err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("AGENTS.md in the tree is not a link again (err %v)", err)
+	}
+	if got := read(t, local); got != "operator's copy\n" {
+		t.Errorf("the next session reads %q, want the operator's copy", got)
+	}
+	if got := read(t, filepath.Join(dir, "AGENTS.md")); got != "operator's copy\n" {
+		t.Errorf("restoring the link changed the operator's copy to %q", got)
+	}
+	if st := git(t, tree.Path, "status", "--porcelain"); st != "" {
+		t.Errorf("the restored link dirtied the worktree: %q", st)
+	}
+}
+
 // finish removes the item's worktree before deleting its branch, which git
 // refuses while any worktree has the branch checked out.
 func TestFinishRemovesTheItemsWorktree(t *testing.T) {

@@ -284,8 +284,18 @@ func (s *session) linkPaths(tree string, links []contextLink) error {
 			continue
 		}
 		dst := filepath.Join(tree, l.Rel)
-		if _, err := os.Lstat(dst); err == nil {
-			continue
+		if fi, err := os.Lstat(dst); err == nil {
+			if !fi.Mode().IsRegular() || gitcmd.Command(tree, "ls-files", "--error-unmatch", "--", l.Rel).Run() == nil {
+				continue
+			}
+			// An untracked file where a link belongs is what agents --write
+			// leaves when a session writes through the link, so that the
+			// checkout's copy stays out of an unmerged branch's reach. The next
+			// session reads the checkout's copy again, not the last one's.
+			if err := os.Remove(dst); err != nil {
+				return fmt.Errorf("restore the link %s in the worktree: %w", l.Rel, err)
+			}
+			fmt.Fprintf(errOut, "  · %s relinked to the checkout's copy, replacing the file a session left in the worktree\n", l.Rel)
 		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 			return err
