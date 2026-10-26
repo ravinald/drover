@@ -226,14 +226,9 @@ func operatorOnlyFindings(it backlog.Item, text string) (ops []backlog.Requireme
 		reqs[r.Num] = r
 	}
 	var findings []string
-	fenced := false
+	var f fence
 	for _, l := range strings.Split(text, "\n") {
-		t := strings.TrimSpace(l)
-		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
-			fenced = !fenced
-			continue
-		}
-		if !fenced && strings.HasPrefix(t, "#") {
+		if t := strings.TrimSpace(l); !f.skip(l) && strings.HasPrefix(t, "#") {
 			findings = append(findings, t)
 		}
 	}
@@ -343,14 +338,9 @@ func (s *session) amendedSinceRound(id string) int {
 // unfenced is text with every fenced block dropped.
 func unfenced(text string) string {
 	var out []string
-	fenced := false
+	var f fence
 	for _, l := range strings.Split(text, "\n") {
-		t := strings.TrimSpace(l)
-		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
-			fenced = !fenced
-			continue
-		}
-		if !fenced {
+		if !f.skip(l) {
 			out = append(out, l)
 		}
 	}
