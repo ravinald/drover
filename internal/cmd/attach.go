@@ -214,13 +214,15 @@ func parseSince(s string) (time.Time, error) {
 	return at, nil
 }
 
-// eventLine is one event as attach prints it without --json: the stamp, the
-// event, the item, then whichever fields it carries.
-func eventLine(e DriveEvent) string {
+// eventLineTo is one event as attach prints it without --json: the stamp, the
+// event, the item, then whichever fields it carries. tint colors it in the
+// palette a foreground drive's stream uses, padded before it is colored so the
+// columns hold.
+func eventLineTo(e DriveEvent, tint bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s  %-14s", e.TS, e.Event)
+	fmt.Fprintf(&b, "%s  %s", sgr(e.TS, pal.Muted, tint), sgr(fmt.Sprintf("%-14s", e.Event), pal.event(e.Event), tint))
 	if e.ID != "" {
-		b.WriteString(" " + e.ID)
+		b.WriteString(" " + sgr(e.ID, pal.ID, tint))
 	}
 	add := func(k, v string) {
 		if v != "" {
@@ -376,7 +378,7 @@ func (a *attacher) event(line []byte, end int64, e DriveEvent) {
 	if a.json {
 		fmt.Fprintf(a.out, "%s\n", line)
 	} else {
-		fmt.Fprintln(a.out, eventLine(e))
+		fmt.Fprintln(a.out, eventLineTo(e, colorTo(a.out)))
 	}
 	if a.session && e.Event == evStage && e.Log != "" && e.ID != "" {
 		t := &sessionTail{id: e.ID, stage: e.Stage, path: sessionLog(a.f.root, e.Log)}
@@ -452,11 +454,12 @@ func (a *attacher) activity(t *sessionTail, act runlog.Activity) {
 	if act.Kind == runlog.ActivityTool {
 		mark = ">"
 	}
-	fmt.Fprintf(a.out, "%s%s %s %s\n", activityIndent, t.id, mark, act.Summary)
+	tint := colorTo(a.out)
+	fmt.Fprintf(a.out, "%s%s %s %s\n", activityIndent, sgr(t.id, pal.ID, tint), sgr(mark, pal.Detail, tint), act.Summary)
 }
 
 // activityIndent puts a session's activity under the item column of
-// eventLine: a 20-rune stamp, two spaces, a 14-rune event name and a space.
+// eventLineTo: a 20-rune stamp, two spaces, a 14-rune event name and a space.
 var activityIndent = strings.Repeat(" ", 37)
 
 var attachCmd = &cobra.Command{
@@ -522,7 +525,7 @@ activity rather than event, its ts the time attach read it.`,
 		if err != nil {
 			return err
 		}
-		a := newAttacher(f, os.Stdout, os.Stderr)
+		a := newAttacher(f, os.Stdout, errOut)
 		a.since = since
 		f.tick = a.tick
 		err = f.follow(c.Context(), func(line []byte, _ int, end int64, e DriveEvent) bool {
@@ -530,7 +533,7 @@ activity rather than event, its ts the time attach read it.`,
 			return false
 		})
 		if errors.Is(err, context.Canceled) {
-			fmt.Fprintf(os.Stderr, "· stopped following drive %s; it is still running\n", f.id)
+			fmt.Fprintf(errOut, "· stopped following drive %s; it is still running\n", f.id)
 			return nil
 		}
 		return err

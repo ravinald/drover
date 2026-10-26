@@ -139,12 +139,12 @@ func (s *session) syncTrunk(trunk string) {
 	defer s.holdTrunk()()
 	release, err := s.trunkLock("drive")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  · %s not brought up to date from origin: %v\n", trunk, err)
+		fmt.Fprintf(errOut, "  · %s not brought up to date from origin: %v\n", trunk, err)
 		return
 	}
 	defer release()
 	if err := gitAt(s.cfg.Root, "fetch", "origin", trunk); err != nil {
-		fmt.Fprintf(os.Stderr, "  · %s not brought up to date from origin: %v\n", trunk, err)
+		fmt.Fprintf(errOut, "  · %s not brought up to date from origin: %v\n", trunk, err)
 		return
 	}
 	// Already holding everything origin has, including a trunk ahead of it.
@@ -156,7 +156,7 @@ func (s *session) syncTrunk(trunk string) {
 		args = []string{"merge", "--ff-only", "origin/" + trunk}
 	}
 	if err := gitAt(s.cfg.Root, args...); err != nil {
-		fmt.Fprintf(os.Stderr, "  · %s not brought up to date from origin: %v\n", trunk, err)
+		fmt.Fprintf(errOut, "  · %s not brought up to date from origin: %v\n", trunk, err)
 	}
 }
 
@@ -298,7 +298,7 @@ func (s *session) linkPaths(tree string, links []contextLink) error {
 		}
 		_ = os.Remove(dst)
 		if !l.Asked {
-			fmt.Fprintf(os.Stderr, "  · %s not linked into the worktree: git would not ignore a link there "+
+			fmt.Fprintf(errOut, "  · %s not linked into the worktree: git would not ignore a link there "+
 				"(ignore it as %s, without the trailing slash, to give sessions a copy)\n", l.Rel, l.Rel)
 			continue
 		}

@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
+	"io"
 
 	"github.com/ravinald/drover/internal/runner"
 )
@@ -50,8 +52,15 @@ func Code(err error) int {
 	// A nested-launch refusal is raised by internal/runner, which cannot import
 	// Refusal without a cycle. Mapped here rather than wrapped at each launch
 	// site, so a stage added later exits 3 without remembering to.
-	if errors.Is(err, runner.ErrNested) {
+	if errors.Is(err, runner.ErrNested) || errors.Is(err, runner.ErrOccupied) {
 		return ExitRefused
 	}
 	return ExitError
+}
+
+// PrintError writes the error Execute returned as drover reports every one:
+// the program's name, in the failure color when the stream takes it, and the
+// message in the reader's own foreground, which is the part they act on.
+func PrintError(w io.Writer, err error) {
+	fmt.Fprintln(w, sgr("drover:", pal.Fail, colorTo(w)), err)
 }

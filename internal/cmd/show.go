@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/prompts"
 	"github.com/ravinald/drover/internal/runlog"
+	"github.com/ravinald/drover/internal/runner"
 	"github.com/spf13/cobra"
 )
 
@@ -172,6 +174,10 @@ type Show struct {
 	// Parked is the drive park standing on the item, as status reads it:
 	// absent once anything launched the item again.
 	Parked *ShowPark `json:"parked,omitempty"`
+	// Marker is the session marker in the item's drive worktree, absent when
+	// the tree holds none. It names which launch holds the tree, which a park
+	// alone cannot say.
+	Marker *ShowMarker `json:"marker,omitempty"`
 	// Recent is how big the last commits on the branch were, and RecentUnknown
 	// is why there are none. Same pair as Created above, for the same reason: a
 	// branch that merged and was deleted has no sizes to give, and a zero would
@@ -227,6 +233,56 @@ type ShowPark struct {
 	Date     string `json:"date"`
 }
 
+// ShowMarker is a session marker as show reads it: the launch it names, whether
+// the drover that wrote it is still running, and the stage row recording that
+// launch, when the ledger holds one.
+type ShowMarker struct {
+	Path    string `json:"path"`
+	Session string `json:"session"`
+	Actor   string `json:"actor"`
+	PID     int    `json:"pid"`
+	Alive   bool   `json:"alive"`
+	Started string `json:"started,omitempty"`
+	Stage   string `json:"stage,omitempty"`
+	Date    string `json:"stage_date,omitempty"`
+}
+
+// marker reads the session marker in the item's drive worktree.
+func (s *session) marker(it backlog.Item) *ShowMarker {
+	tree, err := s.treePath(it)
+	if err != nil {
+		return nil
+	}
+	path := runner.MarkerPath(tree)
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	m, _ := runner.ReadMarker(path)
+	sm := &ShowMarker{Path: path, Session: m.Session, Actor: m.Actor, PID: m.PID, Alive: runner.Alive(m.PID)}
+	if !m.Started.IsZero() {
+		sm.Started = m.Started.Format(time.RFC3339)
+	}
+	for _, r := range s.ledger.Rows {
+		if r.ID == it.ID.Bare() && r.Stage != "" && m.Session != "" && r.Session == m.Session {
+			sm.Stage, sm.Date = r.Stage, r.Date
+		}
+	}
+	return sm
+}
+
+// line is the marker on one row of show's output.
+func (m ShowMarker) line() string {
+	state := "running"
+	if !m.Alive {
+		state = "not running, so the marker is stale"
+	}
+	row := "no stage row names it"
+	if m.Stage != "" {
+		row = fmt.Sprintf("the %s stage row of %s", m.Stage, m.Date)
+	}
+	return fmt.Sprintf("session %s (%s, drover pid %d %s), %s", blankSession(m.Session), m.Actor, m.PID, state, row)
+}
+
 // ShowDep is a dependency and how well it is known.
 type ShowDep struct {
 	ID string `json:"id"`
@@ -278,6 +334,11 @@ the same text as body.`,
   review. reviewer, on an audit row, is the person or session that looked.
   Either is absent when no run of that stage was recorded, which is not the
   same answer as the project default.
+
+  marker is the session marker in the item's drive worktree, present only
+  while the tree holds one: the session id, actor and drover pid it names,
+  alive for whether that pid is running, and the stage row recording that
+  session. A park on an item whose marker is alive is a launch still in flight.
 
   modified is the body's mtime and is always there. created is the commit that
   added it, so it is absent for a body git does not track, and created_unknown
@@ -335,6 +396,7 @@ the same text as body.`,
 		if pk, ok := s.ledger.Parked(id); ok {
 			sh.Parked = &ShowPark{Park: pk.Park, Detail: pk.Detail, Evidence: pk.Evidence, Log: pk.Log, Date: pk.Date}
 		}
+		sh.Marker = s.marker(it)
 		sh.Recent, sh.RecentUnknown = s.recentCommits(sh.Branch)
 		for _, dep := range it.Deps() {
 			// The ledger and the tree answer different questions. Grading a dep
@@ -396,10 +458,15 @@ the same text as body.`,
 // metadata line gets a colour is the project's decision, not the renderer's.
 func (sh Show) print(cfg *config.Config) {
 	s := sh.s
-	fmt.Printf("%s  %s\n", sh.ID, sh.Title)
-	fmt.Printf("  state      %s\n", sh.State)
+	tint := colorFor(os.Stdout)
+	fmt.Printf("%s  %s\n", sgr(sh.ID, pal.ID, tint), sh.Title)
+	stateRole := pal.state(sh.State)
+	if sh.Parked != nil {
+		stateRole = pal.Fail
+	}
+	fmt.Printf("  state      %s\n", sgr(sh.State, stateRole, tint))
 	if p := sh.Parked; p != nil {
-		fmt.Printf("  parked     %s (%s) on %s\n", p.Park, blankDetail(p.Detail), p.Date)
+		fmt.Printf("  parked     %s on %s\n", sgr(p.Park+" ("+blankDetail(p.Detail)+")", pal.Fail, tint), p.Date)
 		for _, line := range strings.Split(p.Evidence, "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				fmt.Printf("             %s\n", trunc(line, 160))
@@ -408,6 +475,9 @@ func (sh Show) print(cfg *config.Config) {
 		if p.Log != "" {
 			fmt.Printf("  park log   %s\n", displayPath(cfg.Root, p.Log))
 		}
+	}
+	if m := sh.Marker; m != nil {
+		fmt.Printf("  held by    %s\n", m.line())
 	}
 	fmt.Printf("  body       %s  (%d numbered %s)\n", sh.Path, sh.Reqs, plural(sh.Reqs, "requirement", "requirements"))
 	for i, o := range sh.Operator {
@@ -436,7 +506,6 @@ func (sh Show) print(cfg *config.Config) {
 	case sh.CreatedUnknown != "":
 		fmt.Printf("  created    unknown (%s)\n", sh.CreatedUnknown)
 	}
-	tint := colour()
 	for _, k := range sortedKeys(sh.Meta) {
 		if v := sh.Meta[k]; v != "" && k != "title" {
 			if k == cfg.Severity.Key {
@@ -513,7 +582,8 @@ func (sh Show) print(cfg *config.Config) {
 			if a.Reviewer != "" {
 				by += ", reviewed by " + a.Reviewer
 			}
-			fmt.Printf("    %s  %-12s %s\n", a.Date, a.Level, by)
+			level := sgr(fmt.Sprintf("%-12s", a.Level), pal.state(a.Level), tint)
+			fmt.Printf("    %s  %s %s\n", sgr(a.Date, pal.Muted, tint), level, by)
 			if a.Note != "" {
 				fmt.Printf("      %s\n", trunc(a.Note, 96))
 			}

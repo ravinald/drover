@@ -166,7 +166,7 @@ func (s *session) checkRefDrift(it backlog.Item) (hold string) {
 		return ""
 	}
 	for _, d := range drift {
-		fmt.Fprintf(os.Stderr, "  ! %s: stale_citations: %s\n", it.ID.Bare(), d)
+		fmt.Fprintf(errOut, "  ! %s: stale_citations: %s\n", it.ID.Bare(), d)
 		events.preflight(it.ID.Bare(), "stale_citations", d)
 	}
 	if p != polOperator {
@@ -381,7 +381,7 @@ func (s *session) tracedReads(gate string) ([]string, error) {
 	}
 	_ = log.Close()
 	defer func() { _ = os.Remove(log.Name()) }()
-	fmt.Fprintf(os.Stderr, "· worktree_links_gap: running the verify command once under strace to see what it reads: %s\n", gate)
+	fmt.Fprintf(errOut, "· worktree_links_gap: running the verify command once under strace to see what it reads: %s\n", gate)
 	cmd := exec.CommandContext(context.Background(), "strace", "-f", "-qq", "-y", "-e", "trace=file", "-o", log.Name(), "sh", "-c", gate) // #nosec G204 -- the gate is project config
 	cmd.Dir = s.cfg.Root
 	cmd.Env = append(os.Environ(), runner.EnvRoot+"="+s.cfg.Root)
@@ -579,7 +579,7 @@ func (a *admission) hold(cfg *config.Config) bool {
 		if !a.failed {
 			a.failed = true
 			why := fmt.Sprintf("%v; dispatching without it", err)
-			fmt.Fprintf(os.Stderr, "· host_load_admission: %s\n", why)
+			fmt.Fprintf(errOut, "· host_load_admission: %s\n", why)
 			events.preflight("", "host_load_admission", why)
 		}
 		return false
@@ -597,7 +597,7 @@ func (a *admission) hold(cfg *config.Config) bool {
 	if !a.holding {
 		a.holding, a.admitted = true, false
 		why := fmt.Sprintf("the 1-minute load average is %.2f, above [drive] max_load %g; holding dispatch until it falls", load, ceiling)
-		fmt.Fprintf(os.Stderr, "· host_load_admission: %s\n", why)
+		fmt.Fprintf(errOut, "· host_load_admission: %s\n", why)
 		events.preflight("", "host_load_admission", why)
 	}
 	return true

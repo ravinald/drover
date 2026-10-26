@@ -3,7 +3,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/ravinald/drover/internal/cmd"
@@ -11,7 +10,7 @@ import (
 
 func main() {
 	if err := cmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "drover:", err)
+		cmd.PrintError(os.Stderr, err)
 		os.Exit(cmd.Code(err))
 	}
 }

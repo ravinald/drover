@@ -290,6 +290,7 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `MISSING REPORT`      | A ledger row names a saved report that does not exist.                                |
 | `PROTECTED UNMATCHED` | A `[drive] protected_paths` glob matches no tracked file.                             |
 | `SEQUENCE CLASH`      | Two tracked files share a number in a `[numbered_files]` glob.                        |
+| `SESSION MARKER`      | A `.drover/session` is tracked, or names a drover pid that is not running.            |
 | `BAD REGISTER`        | The follow-up list file exists and will not read.                                     |
 | `NO LABEL`            | `[github] follow_up_label` names a label the repository does not define.              |
 | `NO REGISTER`         | `[paths] register` names no file drover can ever have read.                           |
@@ -481,6 +482,8 @@ The nouns the docs and the help use throughout.
 | drive                         | One unattended pass over a queue of items.                                                     |
 | supervisor                    | The session `drover supervise` launches.                                                       |
 | operator                      | The person running drover.                                                                     |
+| session marker                | `.drover/session`: the actor, session id and root a launch leaves in its tree.                 |
+| `DROVER_ACTOR=operator`       | A person steering from inside a sealed tree; seals nothing, overrides a marker.                |
 | worktree                      | The separate checkout drive gives each item.                                                   |
 | lease                         | The record of which drover command holds a checkout; it expires.                               |
 | hold                          | A paused item waiting at a stage boundary, or a merge withheld.                                |

@@ -15,6 +15,7 @@ import (
 
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/gh"
+	"github.com/ravinald/drover/internal/lease"
 )
 
 // The event types `drive --events` writes. Documented with a sample each in
@@ -146,6 +147,10 @@ type DriveEvent struct {
 	Window    string `json:"window,omitempty"`
 	Remaining *int   `json:"remaining,omitempty"`
 	ResetsAt  string `json:"resets_at,omitempty"`
+	// Holds is every usage hold the reading crosses that no resume released,
+	// the one taken first, on the paused and needs_operator usage_admission
+	// emits: each resume releases one.
+	Holds []lease.UsageHold `json:"holds,omitempty"`
 	// Kind, Ref, FiledBy, Owners, Coverage, BlockedOn and Ambiguous are one
 	// finding a session filed, on filed and on the triage_finding stop, as the
 	// filing item's report carries it.
@@ -347,7 +352,7 @@ func (es *eventSink) toFile(line []byte) {
 func (es *eventSink) fileFailed(err error) {
 	es.broken = true
 	es.closeFile()
-	fmt.Fprintf(os.Stderr, "· the drive's event file would not write (%v); the drive goes on, attach and watch see nothing more from it, and later failures are not reported\n", err)
+	fmt.Fprintf(errOut, "· the drive's event file would not write (%v); the drive goes on, attach and watch see nothing more from it, and later failures are not reported\n", err)
 }
 
 func (es *eventSink) closeFile() {

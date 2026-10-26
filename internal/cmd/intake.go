@@ -127,7 +127,7 @@ business and appears neither there nor in ` + "`drover follow-ups`" + `.`,
 			return err
 		}
 		if issue.State != "OPEN" {
-			fmt.Fprintf(os.Stderr, "note: issue %s is %s — scaffolding anyway\n", s.issueRefTo(os.Stderr, number), issue.State)
+			fmt.Fprintf(errOut, "note: issue %s is %s — scaffolding anyway\n", s.issueRefTo(os.Stderr, number), issue.State)
 		}
 		promoting := s.isFollowUp(issue)
 		if promoting {
@@ -152,7 +152,7 @@ business and appears neither there nor in ` + "`drover follow-ups`" + `.`,
 		fmt.Printf("\nscaffolded %s -> %s  (issue %s, %s)\n\n", id.Bare(), rel(s.cfg.Root, path), s.issueRefTo(os.Stdout, number), kind)
 		if promoting {
 			if err := s.dropFollowUpLabel(number); err != nil {
-				fmt.Fprintf(os.Stderr,
+				fmt.Fprintf(errOut,
 					"warn: %v — the body is still valid, but issue %s still carries %q and drover follow-ups still lists it.\n"+
 						"Run intake again to re-attempt the removal\n",
 					err, s.issueRefTo(os.Stderr, number), s.cfg.GitHub.FollowUpLabel)
@@ -194,7 +194,7 @@ func (s *session) repairPromotion(number int) {
 	}
 	issue, err := gh.View(s.labels(), number)
 	if err != nil {
-		fmt.Fprintf(os.Stderr,
+		fmt.Fprintf(errOut,
 			"warn: %v — drover could not check whether issue %s is still a follow-up\n", err, s.issueRefTo(os.Stderr, number))
 		return
 	}
@@ -203,7 +203,7 @@ func (s *session) repairPromotion(number int) {
 	}
 	if err := s.dropFollowUpLabel(number); err != nil {
 		label := s.cfg.GitHub.FollowUpLabel
-		fmt.Fprintf(os.Stderr,
+		fmt.Fprintf(errOut,
 			"warn: %v — issue %s is a follow-up and a backlog item at once.\n"+
 				"Drop it by hand: gh issue edit %d --remove-label %q\n",
 			err, s.issueRefTo(os.Stderr, number), number, label)

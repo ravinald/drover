@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -254,7 +253,7 @@ func waitQuiet(ctx context.Context, w io.Writer, targets []driveTarget) error {
 		}
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(os.Stderr, "· interrupted; every drive --pause paused stays paused")
+			fmt.Fprintln(errOut, "· interrupted; every drive --pause paused stays paused")
 			return ctx.Err()
 		case <-time.After(quietPoll):
 		}

@@ -84,20 +84,22 @@ func Letters() []string {
 	return out
 }
 
-// palette is 256-colour rather than the 4-bit set: orange has no 4-bit code at
-// all, and 4-bit blue is close to unreadable on the dark background most
-// terminals ship with.
+// palette draws only on the 16 base colors, so the terminal's theme picks the
+// shade. The base set has no orange, so orange lands on bright red, the
+// nearest hue that still reads apart from red. Blue is bright blue because the
+// base blue, 34, is close to unreadable on the dark background most terminals
+// ship with.
 //
 // White is deliberately empty. Emitting \x1b[37m would paint text white on a
 // light-background terminal, so "no colour" means no escape sequence, which
 // leaves whatever foreground the reader chose.
 var palette = map[string]string{
-	"red":    "38;5;196",
-	"orange": "38;5;208",
-	"yellow": "38;5;220",
-	"blue":   "38;5;39",
-	"green":  "38;5;76",
-	"grey":   "38;5;245",
+	"red":    "31",
+	"orange": "91",
+	"yellow": "33",
+	"blue":   "94",
+	"green":  "32",
+	"grey":   "90",
 	"white":  "",
 }
 

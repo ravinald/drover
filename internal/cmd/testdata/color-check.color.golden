@@ -1,0 +1,4 @@
+[31mSTALE CONFIG       [0m .drover.toml does not declare 1 key `drover init` would write today
+                    run `drover config --diff`, which names each one at the value drover resolves it to
+[31mNO LABEL           [0m [github] follow_up_label = "hazard" is not a label owner/example defines, and the read returned nothing
+                    create the label or correct the key; every row filed under another name answers no query drover makes

@@ -51,7 +51,7 @@ func (s *session) recordUsage(id, stage, session string, oc runner.Outcome) {
 	}
 	row.Session = session
 	if err := s.record(row); err != nil {
-		fmt.Fprintf(os.Stderr, "  ! %s: the usage row would not write: %v\n", id, err)
+		fmt.Fprintf(errOut, "  ! %s: the usage row would not write: %v\n", id, err)
 	}
 }
 
@@ -605,14 +605,14 @@ func (st *usageSync) row(day *sessionDay) ledger.Row {
 func (s *session) driveSync(when string) {
 	b, t, err := s.syncUsage(false, time.Now())
 	if b.Wrote > 0 {
-		b.write(os.Stderr, "· usage backfill "+when, false)
+		b.write(errOut, "· usage backfill "+when, false)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "· usage sync %s: %v; the drive continues\n", when, err)
+		fmt.Fprintf(errOut, "· usage sync %s: %v; the drive continues\n", when, err)
 		return
 	}
 	if t.Wrote > 0 || t.Unparsed > 0 {
-		t.write(os.Stderr, "· usage sync "+when, false)
+		t.write(errOut, "· usage sync "+when, false)
 	}
 }
 

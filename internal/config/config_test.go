@@ -97,6 +97,44 @@ func TestFindAnswersFromDroverRootBeforeWalking(t *testing.T) {
 	}
 }
 
+// A session drover did not exec has no DROVER_ROOT, and the marker in its tree
+// stands in for it, under the same check.
+func TestFindAnswersFromASessionMarkerWhenTheRootIsUnset(t *testing.T) {
+	project := write(t, map[string]string{FileName: minimal, "go.mod": "module x\n"})
+	tree := write(t, map[string]string{"sub/x.txt": ""})
+	marker := func(root string) string {
+		path := runner.MarkerPath(tree)
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		body := fmt.Sprintf(`{"actor":"agent","session":"s","root":%q,"pid":1}`, root)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	marker(project)
+	got, err := Find(filepath.Join(tree, "sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != project {
+		t.Errorf("Find under a marker = %q, want its root %q", got, project)
+	}
+
+	other := write(t, map[string]string{FileName: minimal, "go.mod": "module x\n"})
+	t.Setenv(runner.EnvRoot, other)
+	if got, _ := Find(tree); got != other {
+		t.Errorf("Find with %s set = %q, want the variable's %q over the marker", runner.EnvRoot, got, other)
+	}
+	t.Setenv(runner.EnvRoot, "")
+
+	path := marker(t.TempDir())
+	if _, err := Find(tree); err == nil || !strings.Contains(err.Error(), path) {
+		t.Errorf("a marker naming a root with no config returned %v, want an error naming %s", err, path)
+	}
+}
+
 func TestFindReportsAbsence(t *testing.T) {
 	if _, err := Find(t.TempDir()); err == nil {
 		t.Error("expected an error when no config exists in any parent")

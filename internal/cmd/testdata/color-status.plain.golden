@@ -1,0 +1,9 @@
+example status  (ledger: ledger.jsonl)
+
+[>]   1           unknown (--no-tracker) First                    READY
+[~]   2           unknown (--no-tracker) Second                   parked: no_record (unknown) · pass 2
+
+0 of 2 planned complete
+1 awaiting PR
+
+▸ here: branch main  (no item owns it)

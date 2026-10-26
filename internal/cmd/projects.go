@@ -30,7 +30,7 @@ var (
 // that it is scratch belongs. A failure is a lost line in an audit trail and
 // never a reason to refuse the command.
 func enroll(cfg *config.Config) {
-	if os.Getenv(runner.EnvActor) != "" {
+	if runner.Launched() {
 		return
 	}
 	reg := projects.Path(config.GlobalPath())
@@ -46,7 +46,7 @@ func enroll(cfg *config.Config) {
 		err = projects.Append(reg, row)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warn: could not record this project in %s: %v\n", reg, err)
+		fmt.Fprintf(errOut, "warn: could not record this project in %s: %v\n", reg, err)
 	}
 }
 

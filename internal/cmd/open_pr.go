@@ -96,7 +96,7 @@ func (s *session) recordPR(id, branch string, n int) {
 	})
 	switch {
 	case err != nil:
-		fmt.Fprintf(os.Stderr, "warn: pull request %s for %s is open, but the ledger row naming it failed: %v\n", s.prRefTo(os.Stderr, n, ""), id, err)
+		fmt.Fprintf(errOut, "warn: pull request %s for %s is open, but the ledger row naming it failed: %v\n", s.prRefTo(os.Stderr, n, ""), id, err)
 	case wrote:
 		s.ledger.Rows = append(s.ledger.Rows, row)
 		appended()
@@ -362,7 +362,7 @@ history of one contract across two places.`,
 func (s *session) reviewPassed(it backlog.Item) error {
 	id := it.ID.Bare()
 	if openPRForce {
-		fmt.Fprintln(os.Stderr, "--force: opening on your judgement, with neither the review_result row nor the merge gate consulted")
+		fmt.Fprintln(errOut, "--force: opening on your judgement, with neither the review_result row nor the merge gate consulted")
 		return nil
 	}
 	// lead names the authority in the fallback's own sentences. aside is empty
@@ -377,7 +377,7 @@ func (s *session) reviewPassed(it backlog.Item) error {
 	// as anything short of passed refuses the branch close-changes just told
 	// the operator open-pr would open.
 	if ok && !stale && token == passStanding && s.ledger.ClearedSincePass(id) {
-		fmt.Fprintf(os.Stderr, "%s: the drive pass read %q on %s, and drover close-changes has discharged the block since; reading it as %q\n",
+		fmt.Fprintf(errOut, "%s: the drive pass read %q on %s, and drover close-changes has discharged the block since; reading it as %q\n",
 			id, token, date, passPassed)
 		token = passPassed
 	}
@@ -394,7 +394,7 @@ func (s *session) reviewPassed(it backlog.Item) error {
 	case ok:
 		defer func() {
 			if !stale && token == passPassed {
-				fmt.Fprintf(os.Stderr, "%s: a recorded drive pass answered: %s on %s\n", id, token, date)
+				fmt.Fprintf(errOut, "%s: a recorded drive pass answered: %s on %s\n", id, token, date)
 			}
 		}()
 		switch {
@@ -490,7 +490,7 @@ func (s *session) reviewPassed(it backlog.Item) error {
 				"Send them back with `drover request-changes %s -f <file>`, or --force if the change was not a finding",
 			lead, c.LastBody, passEdited, id)
 	}
-	fmt.Fprintf(os.Stderr,
+	fmt.Fprintf(errOut,
 		"%s%s; the ledger answered: audit %s --code-by %s, %d changes requested.\n"+
 			"That reading cannot see a review session that died, only what it wrote down.\n",
 		aside, lead, st.Level, st.CodeBy, c.ChangesRequested)

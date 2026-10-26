@@ -70,7 +70,7 @@ func detachDrive(ctx context.Context, w io.Writer) error {
 	}
 	defer func() { _ = null.Close() }()
 
-	c := exec.Command(bin.path, withoutDetach(os.Args[1:])...) // #nosec G204 -- this binary, over its own arguments
+	c := exec.Command(bin.path, detachArgs(os.Args[1:])...) // #nosec G204 -- this binary, over its own arguments
 	c.Args[0] = os.Args[0]
 	c.Stdin, c.Stdout, c.Stderr = null, logf, logf
 	if err := newSession(c); err != nil {
@@ -116,6 +116,13 @@ func withoutDetach(args []string) []string {
 		out = append(out, a)
 	}
 	return out
+}
+
+// detachArgs is the drive's arguments less --detach, with --color=never last
+// so it outranks whatever the operator passed and whatever CLICOLOR_FORCE the
+// shell exports: the drive's stderr is a log file, never a terminal.
+func detachArgs(args []string) []string {
+	return append(withoutDetach(args), "--color=never")
 }
 
 // detached reports a drive that took the lease, its log renamed to its id.

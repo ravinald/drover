@@ -100,7 +100,7 @@ vendoring into something reproducible rather than a one-time copy.`,
 					return err
 				}
 			}
-			fmt.Fprintf(os.Stderr, "pruned %d vendored but unreferenced: %s\n",
+			fmt.Fprintf(errOut, "pruned %d vendored but unreferenced: %s\n",
 				len(unreferenced), strings.Join(unreferenced, " "))
 		}
 
@@ -208,13 +208,13 @@ func syncSkills(uses []SkillUse, src, dst string) error {
 	}
 	// stderr, not stdout: --json promises the stream is an array, and an
 	// operator wants to know what was vendored in both moods.
-	fmt.Fprintf(os.Stderr, "vendored %d %s from %s\n", len(copied), plural(len(copied), "guide", "guides"), src)
+	fmt.Fprintf(errOut, "vendored %d %s from %s\n", len(copied), plural(len(copied), "guide", "guides"), src)
 	if len(absent) > 0 {
 		// Named rather than counted: a guide the source does not have is the one
 		// a run will silently do without.
-		fmt.Fprintf(os.Stderr, "not found in the source: %s\n", strings.Join(absent, " "))
+		fmt.Fprintf(errOut, "not found in the source: %s\n", strings.Join(absent, " "))
 	}
-	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(errOut)
 	return nil
 }
 

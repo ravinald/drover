@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"io"
-	"os"
 	"strings"
 
 	"github.com/ravinald/drover/internal/ledger"
@@ -104,7 +103,7 @@ found, not that you looked.`,
 		}
 		prev := s.ledger.State(id)
 		if entry == "" {
-			warnSameRunner(os.Stderr, id, reviewer, prev)
+			warnSameRunner(errOut, id, reviewer, prev)
 		}
 		row := ledger.Row{ID: id, Level: level, Reviewer: reviewer, CodeBy: strings.Join(codeBy, ","),
 			Independent: entry == "", Date: ledger.Today(), Note: note}

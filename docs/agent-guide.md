@@ -41,6 +41,8 @@ Bare in every command: `1`, `2b`, `B1`. [Item ids](concepts.md#item-ids) explain
 
 drover exports `DROVER_ACTOR=agent` into every session it launches, so these refuse where you are and exit 3. You will not have to remember the list; the refusal names the command and the reason.
 
+The variable reaches only a session drover started itself. So drover also writes `.drover/session` into the tree each session works in, a JSON object naming the same actor, session id and project root, and every command reads it, walking up from the working directory, whenever `DROVER_ACTOR` is unset. A session another program opened in that tree (a sandbox thread, an agent a person started by hand in a drive's worktree) is sealed the same way, and `audit --code-by agent` reads its session id from the marker. The walk stops at the first `.drover/session` or `.drover.toml`, so a marker in a parent repository does not seal a project checked out below it. A refusal the marker caused says so, naming the file, its session and whether the drover that wrote it is still running, with the way out for each. A launch is refused only while that drover runs, and then with the text of the occupied-tree refusal rather than the nested-launch one, because the process reading the marker may be a person; a marker whose drover is gone still seals the operator commands until someone removes it, but the next launch into that tree replaces it.
+
 | Refuses inside a session        | Why it is not yours                                                                                                                           |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `accept` / `unaccept`           | A run cannot accept its own requirements. A person reads the drafted list and accepts it, which is the one boundary drover does not automate. |
@@ -61,7 +63,7 @@ Separately, **a launched session cannot launch another.** `run`, `draft --runner
 
 ### What the check is not
 
-A boundary. `env -u DROVER_ACTOR` defeats it, and drover does not pretend otherwise. It exists to stop a command being run because it appeared in a code block, not to stop one being run on purpose. If you find yourself reaching for the bypass, that is the signal to stop and report instead: the operator is cheaper to ask than a false ledger row is to unwind.
+A boundary. The seal has two signals, the variable and the marker, and one opt-out: `DROVER_ACTOR=operator`, which a person exports to steer from inside a sealed tree and which reads as nobody launched, whatever the marker says. `env -u DROVER_ACTOR` defeats the variable and deleting the marker defeats the file, and drover does not pretend otherwise. It exists to stop a command being run because it appeared in a code block, not to stop one being run on purpose. If you find yourself reaching for the bypass, that is the signal to stop and report instead: the operator is cheaper to ask than a false ledger row is to unwind.
 
 ## Exit codes
 

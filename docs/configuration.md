@@ -409,6 +409,37 @@ drover: unknown severity "P0" (known: C, H, M, L)
 
 Refusing rather than matching nothing is deliberate on the `status` side: an empty table would read as "no items at that rank", which is a wrong answer, not a degraded one.
 
+## Color
+
+Color is not a config key. drover decides it per stream at each invocation, so `drover drive > drive.log` still colors the stderr a terminal reads. Every colored state already has a word or a glyph beside it, so a plain run reads the same and loses nothing.
+
+The decision, highest precedence first:
+
+1. `--color=auto|always|never` on any command. `--no-color` is `--color=never`, and the later of the two wins.
+2. `NO_COLOR`: any non-empty value turns color off.
+3. `CLICOLOR_FORCE`: non-empty and not `0` turns color on, a pipe included.
+4. `TERM=dumb` turns color off.
+5. Otherwise a stream is colored when it is a terminal.
+
+OSC 8 links on issue and pull request numbers follow the same decision for the stream they are written to.
+
+Never colored, whatever the flag says: `--json` and `--events` output, every file drover writes (the detached drive's `<drive id>.log`, reports, `status -o` and `--render` outputs, the ledger), notification bodies and the generated `AGENTS.md`. `--color=always` reaches terminal-facing text only. A detached drive runs with `--color=never`, since its stderr is a log file.
+
+The palette names roles rather than colors. It uses the 16 base ANSI colors plus bold and dim, so the terminal's theme picks the shade and the text stays legible on a light background and a dark one.
+
+| Role      | Code    | Used for                                                                       |
+| --------- | ------- | ------------------------------------------------------------------------------ |
+| `ok`      | green   | merged, passed, done, a clean `check`                                          |
+| `warn`    | yellow  | paused, held, waiting, skipped, blocked, `needs_operator`, a `usage_warning`   |
+| `fail`    | red     | parked, refused, a red check, a `check` finding, the `drover:` before an error |
+| `heading` | bold    | the `==>` lines of a drive, help's section headings and `Safety:` label        |
+| `detail`  | dim     | the `·` lines of a drive that report no state                                  |
+| `id`      | cyan    | an item or drive id                                                            |
+| `command` | magenta | a command the operator is told to run, such as `drover drive --resume`         |
+| `muted`   | dim     | timestamps and the comments beside help's examples                             |
+
+The `[severity]` colors are applied through the same mechanism and draw on the same 16 base colors: `red` is red (31), `orange` is bright red (91, since the base set has no orange), `yellow` is yellow (33), `blue` is bright blue (94, because base blue is hard to read on a dark background), `green` is green (32), `grey` is bright black (90), and `white` emits no escape, leaving the terminal's own foreground.
+
 ## `[run]`
 
 | Key              | Default   | Meaning                                                                                                                                                                                                                                                           |
@@ -786,6 +817,8 @@ An account runs out twice, in sequence: first the weekly allotment, then any ext
 
 Entering overage emits a `usage_warning` with window `overage` once per weekly reset whenever `[usage.weekly] notify_remaining` is set, under either mode. Both dollar sums are the runners' **list price**, the `cost_usd` each session reported, not the credit the account was charged: treat `max_usd` as an approximate bound, set below what you bought. Under `continue`, a weekly `pause_remaining` still holds the drive before the allotment runs out; leave it unset to run straight onto purchased credit, or `drover drive --resume` past the hold. A project inheriting the level from the per-user file leaves it unset by writing `pause_remaining = "off"` under its own `[usage.weekly]`. `"off"` on `max_usd` or `notify_usd` does the same for a per-user dollar cap or notice, and the check that `notify_usd` sits below `max_usd` reads it as unset too. `mode` takes no `"off"`: unset is already `pause`, so write the mode you want.
 
+One reading can cross several holds: under `mode = "pause"`, a week at 0% left with overage in use crosses the weekly `pause_remaining` and the overage hold together. Each `drover drive --resume` releases one, in the order `usage_admission` takes them (weekly, five-hour, overage or `max_usd`, then a refusal), so resuming past the weekly percent never consents to purchased credit. The pause line on stderr names every hold standing behind the one taken, the `paused` and `needs_operator` events carry them all in `holds`, the resume prints which hold it released and which still stand, and `drover drives` lists the standing ones beside `paused`.
+
 A session the service refused (the weekly window rejected with no overage, or `out_of_credits`) holds the drive the same way at any of these settings, rather than parking the item `runner_fault`: the item goes back to the head of the queue at the stage that was refused. [Running past the weekly allotment](operating.md#running-past-the-weekly-allotment) covers choosing the levels.
 
 ### Worked example
@@ -1015,7 +1048,7 @@ An ntfy message carries `Title: drover: <project> <id>` (`drover: <project>` for
 | `started`                            | The drive id, the queue in order, `--jobs` above 1, and the deadline or `no deadline`.                                                                 |
 | `merged`                             | The pull request's number and title.                                                                                                                   |
 | `parked`                             | The park, its detail and reason, then up to 5 lines of the park's evidence, which for a `gate_refused` park are the lines its check's log says failed. |
-| `needs_operator`, `needs_supervisor` | `<action>: <run>`, the action and the command to run.                                                                                                  |
+| `needs_operator`, `needs_supervisor` | `<action>: <run>`, the action and the command to run. A `usage_admission` `needs_operator` carries `holds`, each usage hold the reading crosses with its `window`, `reason` and `resets_at`, the one taken first; with two or more, `run` says what each resume releases. |
 | `usage_warning`                      | The window, the percent of it left and its reset in local time.                                                                                        |
 | `exit`                               | The summary below.                                                                                                                                     |
 | any other                            | A line naming what happened: the stage, the check, the finding, the position.                                                                          |

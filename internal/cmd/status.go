@@ -930,7 +930,7 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
 	intakeSeen := false
 	shown, hidden, offRank := 0, 0, 0
 	var here Row
-	tint := colour()
+	tint := colorTo(w)
 	// The cell only carries severity when the project pointed it there. Tinting
 	// a wave or a phase by an axis it is not showing would be a lie in colour.
 	sevColumn := s.cfg.Status.Column != "" && s.cfg.Status.Column == s.cfg.Severity.Key
@@ -974,8 +974,14 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
 		if prWidth > 0 {
 			cell += " " + r.PR.cell(s, prWidth)
 		}
-		line := fmt.Sprintf("%s %s %-5s %s %-*s %s",
-			glyph(r.State), mark, r.ID, cell, width, trunc(r.Title, width), r.note())
+		// The note is the last cell, so coloring it pads nothing after it.
+		note := r.note()
+		if !r.Current {
+			note = sgr(note, pal.row(r), tint)
+		}
+		id := sgr(fmt.Sprintf("%-5s", r.ID), pal.ID, tint && !r.Current)
+		line := fmt.Sprintf("%s %s %s %s %-*s %s",
+			glyph(r.State), mark, id, cell, width, trunc(r.Title, width), note)
 		fmt.Fprintln(w, paint(line, tint && r.Current))
 	}
 	// An empty table is an answer, and two blank lines is not a way to give it.

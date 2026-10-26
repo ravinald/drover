@@ -136,7 +136,7 @@ authority that a branch may merge.`,
 			ID: it.ID.Bare(), Stage: ledger.StageReview, Branch: data.Branch,
 			Item: data.Path, Prompt: s.promptPath(s.cfg.Prompts.Review, "review"),
 			Log: displayPath(s.cfg.Root, logPath),
-		}.from(name, spec, mode).write(os.Stderr)
+		}.from(name, spec, mode).write(errOut)
 
 		before := s.ledger.Counts(it.ID.Bare())
 		at, err := s.launched(it, ledger.StageReview, name)
@@ -154,9 +154,9 @@ authority that a branch may merge.`,
 		}
 		token, f := s.reviewFollowUp(it, name, before, oc)
 		if token != "" {
-			fmt.Fprintf(os.Stderr, "Pass:       %s\n", token)
+			fmt.Fprintf(errOut, "Pass:       %s\n", token)
 		}
-		f.write(os.Stderr, "")
+		f.write(errOut, "")
 		return runErr
 	},
 }

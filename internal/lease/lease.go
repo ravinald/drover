@@ -108,6 +108,12 @@ type Lease struct {
 	// once every running item holds, empty when it resumes where it is.
 	Holds  []Hold `json:"holds,omitempty"`
 	Reexec string `json:"reexec,omitempty"`
+	// UsageHolds is every usage hold a drive's newest reading crosses that no
+	// resume released, the one it pauses on first, written when it takes one
+	// and by each resume that releases one. UsageReleased is the hold the
+	// request in Answered released, absent when it released none.
+	UsageHolds    []UsageHold `json:"usage_holds,omitempty"`
+	UsageReleased *UsageHold  `json:"usage_released,omitempty"`
 	// ReexecWaiting is the line a drive writes when its re-exec has waited past
 	// a minute on running items that do not hold, naming each and its stage,
 	// and empty otherwise.
@@ -134,6 +140,14 @@ type Wait struct {
 type Skip struct {
 	ID     string `json:"id"`
 	Reason string `json:"reason,omitempty"`
+}
+
+// UsageHold is one usage hold a reading crosses: the window, why it holds,
+// and the window's reset in local time, RFC 3339.
+type UsageHold struct {
+	Window   string `json:"window"`
+	Reason   string `json:"reason,omitempty"`
+	ResetsAt string `json:"resets_at,omitempty"`
 }
 
 // Hold is one item a paused drive holds: the stage it goes on to, and the

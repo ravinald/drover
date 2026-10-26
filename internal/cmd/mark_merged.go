@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/ravinald/drover/internal/ledger"
 	"github.com/spf13/cobra"
@@ -49,7 +48,7 @@ var doneCmd = &cobra.Command{
 			fmt.Printf("already done: %s\n", id)
 			return nil
 		}
-		warnUndeclaredRunner(os.Stderr, runner, s.cfg.Runners)
+		warnUndeclaredRunner(errOut, runner, s.cfg.Runners)
 		yes := true
 		agent := s.attribution(runner, id)
 		row := ledger.Row{ID: id, Merged: &yes, MergedRunner: agent, Date: ledger.Today()}
