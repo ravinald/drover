@@ -203,6 +203,10 @@ wording, so never match on it.
                       it declares a schema_version this build does not read. drover
                       config --diff names what differs. A key a rename left behind
                       is an error at load, and that error names the renames
+  SUPERVISOR UNSET    the ledger records a drive, no config has a [supervise] table,
+                      and an action defaults to supervisor, so it parks as
+                      needs_supervisor unless a drover supervise session runs.
+                      drover init supervise writes the table
   BAD TEMPLATE        a template [prompts] implement, [prompts] draft or
                       [prompts] review names cannot be read, or will not render
                       against a sample prompt with every field set: it names a field
@@ -606,6 +610,7 @@ func (s *session) checkReport() CheckReport {
 	}
 
 	s.addConfig(add)
+	s.addSupervisor(add)
 	s.addTemplates(add)
 
 	// A runner drover can launch and cannot use. [runners] is project-supplied
@@ -1174,6 +1179,39 @@ func (s *session) addConfig(add func(Finding)) {
 			config.FileName, len(missing), plural(len(missing), "key", "keys")),
 		Detail: "run `drover config --diff`, which names each one at the value drover resolves it to",
 		Path:   config.FileName,
+	})
+}
+
+// addSupervisor reports a project that drives with actions waiting on a
+// supervising session nobody decided to run.
+//
+// A default left alone is not a gap anywhere else in check, and it is not one
+// here for a project that has never driven: no drive, no park. Nor for one
+// with a [supervise] table in either file, empty included, because writing the
+// table is the decision. What is left is a project whose config predates the
+// table, where resolve_conflict and its siblings park as needs_supervisor with
+// no session to take them and nothing pointing at the policy that sent them
+// there.
+func (s *session) addSupervisor(add func(Finding)) {
+	own, _ := s.cfg.OpenTable("supervise")
+	inherited, _ := s.cfg.InheritedTable("supervise")
+	if own.State != config.TableAbsent || inherited.State != config.TableAbsent {
+		return
+	}
+	if !slices.ContainsFunc(s.ledger.Rows, func(r ledger.Row) bool { return r.ID == ledger.DriveRowID }) {
+		return
+	}
+	sup := atSupervisor(unsetActions(s.cfg))
+	if len(sup) == 0 {
+		return
+	}
+	add(Finding{
+		Kind: "SUPERVISOR UNSET",
+		Message: fmt.Sprintf("no config has a [supervise] table, so %d %s at supervisor by default: %s",
+			len(sup), plural(len(sup), "action stays", "actions stay"), strings.Join(sup, ", ")),
+		Detail: "each parks as needs_supervisor unless a `drover supervise` session is running; " +
+			"run `drover init supervise` to decide them, or `drover config --diff` to see every default",
+		Path: config.FileName,
 	})
 }
 

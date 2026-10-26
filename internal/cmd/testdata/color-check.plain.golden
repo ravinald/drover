@@ -1,4 +1,6 @@
 STALE CONFIG        .drover.toml does not declare 1 key `drover init` would write today
                     run `drover config --diff`, which names each one at the value drover resolves it to
+SUPERVISOR UNSET    no config has a [supervise] table, so 6 actions stay at supervisor by default: resolve_conflict, relaunch_after_runner_death, write_scaffold_requirements, close_changes, enqueue, cleanup_interrupted_drive
+                    each parks as needs_supervisor unless a `drover supervise` session is running; run `drover init supervise` to decide them, or `drover config --diff` to see every default
 NO LABEL            [github] follow_up_label = "hazard" is not a label owner/example defines, and the read returned nothing
                     create the label or correct the key; every row filed under another name answers no query drover makes
