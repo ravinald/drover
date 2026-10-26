@@ -353,3 +353,68 @@ func TestAHangupRemovesTheMarker(t *testing.T) {
 		t.Errorf("SIGHUP left %s behind: %v\n%s", path, err, stderr.String())
 	}
 }
+
+// A run started with the hangup ignored (nohup) keeps ignoring it: the
+// terminal closing leaves the run and its marker in place, and an interrupt
+// still ends the run and removes the marker.
+func TestAnIgnoredHangupLeavesTheRunAndItsMarker(t *testing.T) {
+	s, _ := treeProject(t)
+	dir := s.cfg.Root
+	bin := t.TempDir()
+	stub(t, filepath.Join(bin, "stub-impl"), "#!/bin/sh\nexec sleep 30\n")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command("sh", "-c", `trap "" HUP; exec "$0" "$@"`, self, "run", "1", "--headless")
+	c.Dir = dir
+	c.Env = append(os.Environ(), envAsDrover+"=1")
+	var stderr strings.Builder
+	c.Stderr = &stderr
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- c.Wait() }()
+	t.Cleanup(func() {
+		_ = c.Process.Kill()
+		select {
+		case <-exited:
+		default:
+		}
+	})
+
+	path := runner.MarkerPath(dir)
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(path); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the run never wrote its marker\n%s", stderr.String())
+		}
+	}
+	if err := c.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-exited:
+		t.Fatalf("the run exited on a hangup it inherited ignored: %v\n%s", err, stderr.String())
+	case <-time.After(2 * time.Second):
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("an ignored hangup removed %s: %v\n%s", path, err, stderr.String())
+	}
+	if err := c.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the run did not exit on SIGINT")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("SIGINT left %s behind: %v\n%s", path, err, stderr.String())
+	}
+}
