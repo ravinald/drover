@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"os"
@@ -417,6 +419,79 @@ func configChanges(evs []DriveEvent) []int {
 		}
 	}
 	return out
+}
+
+// leaseTaken runs fn once the drive has taken its lease, before reconciliation.
+func leaseTaken(t *testing.T, fn func()) {
+	t.Helper()
+	driveLeaseTaken = fn
+	t.Cleanup(func() { driveLeaseTaken = nil })
+}
+
+// An edit landing between the lease take and the queue read, as a reconcile
+// fast-forwarding a trunk that tracks .drover.toml would make, is reported at
+// the first dispatch: the drive runs the config open() decoded, so that is
+// what it compares the disk against, not a read made after reconciliation.
+func TestADriveReportsAConfigEditMadeBeforeItsQueueRead(t *testing.T) {
+	enqueueFixture(t)
+	raw, err := os.ReadFile(config.FileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(raw), "[drive]\n", "[drive]\nprotected_paths = [\"migrations/*\"]\n", 1)
+	if edited == string(raw) {
+		t.Fatal("the fixture config holds no [drive] table")
+	}
+	leaseTaken(t, func() { write(t, config.FileName, edited) })
+
+	evs, stderr, err := driveEventsOf(t, "1")
+	if err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	if n := strings.Count(stderr, "config changed on disk at "); n != 1 {
+		t.Errorf("the drive printed the config line %d times, want 1:\n%s", n, stderr)
+	}
+	got := configChanges(evs)
+	if len(got) != 1 {
+		t.Fatalf("%d config_changed events, want 1: %+v", len(got), evs)
+	}
+	if e := evs[got[0]]; !slices.Equal(e.Tables, []string{"[drive]"}) {
+		t.Errorf("config_changed names tables %v, want [drive]", e.Tables)
+	}
+	if one := eventIndex(evs, evDispatched, "1"); got[0] < one {
+		t.Errorf("config_changed is at %d, before item 1's dispatch at %d", got[0], one)
+	}
+}
+
+// The lease names the config a drive runs under from the moment the drive
+// holds the checkout, before reconciliation can move the file under it.
+func TestADriveLeaseCarriesItsConfigDigestBeforeReconcile(t *testing.T) {
+	enqueueFixture(t)
+	raw, err := os.ReadFile(config.FileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	want := hex.EncodeToString(sum[:])
+	var at lease.Lease
+	var busy bool
+	leaseTaken(t, func() {
+		at, busy, _ = lease.Read(mustLeasePath(t))
+		write(t, config.FileName, strings.Replace(string(raw), "[drive]\n", "[drive]\nprotected_paths = [\"migrations/*\"]\n", 1))
+	})
+
+	if _, stderr, err := driveEventsOf(t, "1"); err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	if !busy {
+		t.Fatal("no lease was held when the drive reported taking it")
+	}
+	if at.ConfigSHA256 != want {
+		t.Errorf("the lease carried config_sha256 %q before reconcile, want %q (the bytes the drive decoded)", at.ConfigSHA256, want)
+	}
+	if at.ConfigResumed {
+		t.Error("a drive that has not resumed published config_resumed")
+	}
 }
 
 // An edit to .drover.toml mid-drive is reported once per distinct content and

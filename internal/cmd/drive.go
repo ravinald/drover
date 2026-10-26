@@ -1047,6 +1047,12 @@ drive with exit 0 and each item it held reports held. At usage_admission =
 				return lerr
 			}
 			defer release()
+			// Published before reconciliation, which can fast-forward a trunk
+			// carrying a new .drover.toml: the digest names what open() decoded.
+			publishConfig(s.cfg.Raw(), driveTakeover != "")
+			if driveLeaseTaken != nil {
+				driveLeaseTaken()
+			}
 			defer closeQueue("the drive is exiting")
 			if len(s.cfg.Status.Render) > 0 {
 				activeRender.Store(&driveRenderer{targets: s.cfg.Status.Render})
@@ -1083,6 +1089,11 @@ drive with exit 0 and each item it held reports held. At usage_admission =
 		return refused
 	},
 }
+
+// driveLeaseTaken, when set, runs once a drive has taken its lease and
+// published its config, before reconciliation reads the queue. Tests set it;
+// nothing else does.
+var driveLeaseTaken func()
 
 // driveLabel is --label.
 var driveLabel string
@@ -1463,7 +1474,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 	s.inputs = s.snapshotInputs(reviewer)
 	s.inputs.resumed = driveTakeover != ""
 	sched.inputs = s.inputs
-	publishConfig(s.inputs)
+	publishConfig(s.inputs.toml, s.inputs.resumed)
 	if driveJobs > 1 {
 		defer sched.watchInterrupt(ctx)()
 	}

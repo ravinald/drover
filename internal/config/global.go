@@ -38,6 +38,11 @@ func GlobalPath() string {
 // find is worse than a setting nobody made.
 func (c *Config) Sources() []string { return slices.Clone(c.sources) }
 
+// Raw returns the project file's bytes as Load decoded them. A caller that
+// hashes or compares the file takes these rather than reading it again, since
+// a second read can see an edit the parsed config never did.
+func (c *Config) Raw() []byte { return slices.Clone(c.raw) }
+
 // GlobalKeys reports the file the per-user config was read from and every key
 // it defines, dotted: "paths.backlog", "verify.default". Both are empty when
 // there is no global config.
