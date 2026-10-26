@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -357,14 +358,38 @@ func (s *session) transcriptDirs() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	root, prefix := transcriptSlug(s.cfg.Root), transcriptSlug(trees)+"-"
+	roots, prefixes := transcriptSlugs(s.cfg.Root), transcriptSlugs(trees)
 	var out []string
 	for _, e := range entries {
-		if e.IsDir() && (e.Name() == root || strings.HasPrefix(e.Name(), prefix)) {
+		if e.IsDir() && matchesTranscriptDir(e.Name(), roots, prefixes) {
 			out = append(out, filepath.Join(base, e.Name()))
 		}
 	}
 	return out, nil
+}
+
+// transcriptSlugs is the slug of path as given and, when it differs, the slug
+// of path with its symlinks resolved, which is the one Claude Code names the
+// directory after: on macOS anything under /tmp or /var is really under
+// /private. A path that does not resolve contributes its literal slug alone.
+func transcriptSlugs(path string) []string {
+	slugs := []string{transcriptSlug(path)}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil && transcriptSlug(resolved) != slugs[0] {
+		slugs = append(slugs, transcriptSlug(resolved))
+	}
+	return slugs
+}
+
+func matchesTranscriptDir(name string, roots, trees []string) bool {
+	if slices.Contains(roots, name) {
+		return true
+	}
+	for _, t := range trees {
+		if strings.HasPrefix(name, t+"-") {
+			return true
+		}
+	}
+	return false
 }
 
 // syncUsage backfills, then records the interactive sessions the transcripts

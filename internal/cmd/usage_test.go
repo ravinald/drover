@@ -402,6 +402,114 @@ func TestSyncDryRunWritesNothing(t *testing.T) {
 	}
 }
 
+// behindSymlink points a fresh symlink at path's resolved form and returns both,
+// the way /tmp and /var lead into /private on macOS.
+func behindSymlink(t *testing.T, path string) (link, resolved string) {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link = filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(resolved, link); err != nil {
+		t.Fatal(err)
+	}
+	return link, resolved
+}
+
+// syncOneTranscript writes one finished day's transcript under dir and syncs.
+func syncOneTranscript(t *testing.T, s *session, dir string) usageTally {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "x.jsonl"), transcriptLine("assistant", "x", "m", time.Date(2026, 10, 1, 9, 0, 0, 0, time.Local), 1, 1, 1)+"\n")
+	_, tally, err := s.syncUsage(false, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tally
+}
+
+// Claude Code names a transcript directory after the working directory with
+// its symlinks resolved, so a root reached through one files its sessions
+// under a slug the root as given never produces.
+func TestSyncReadsTheResolvedRootSlug(t *testing.T) {
+	claude := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	s := fixture(t, "")
+	link, resolved := behindSymlink(t, s.cfg.Root)
+	s.cfg.Root = link
+
+	tally := syncOneTranscript(t, s, filepath.Join(claude, "projects", transcriptSlug(resolved)))
+	if tally.Read != 1 || tally.Wrote != 1 {
+		t.Errorf("sync of a root behind a symlink: %+v, want its resolved transcript read", tally)
+	}
+}
+
+func TestSyncStillReadsTheLiteralRootSlug(t *testing.T) {
+	claude := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	s := fixture(t, "")
+	link, _ := behindSymlink(t, s.cfg.Root)
+	s.cfg.Root = link
+
+	tally := syncOneTranscript(t, s, filepath.Join(claude, "projects", transcriptSlug(link)))
+	if tally.Read != 1 || tally.Wrote != 1 {
+		t.Errorf("sync of the literal slug: %+v, want it read", tally)
+	}
+}
+
+func TestTranscriptDirsListsARootWithNoSymlinkOnce(t *testing.T) {
+	claude := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	s := fixture(t, "")
+	resolved, err := filepath.EvalSymlinks(s.cfg.Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Root = resolved
+	dir := filepath.Join(claude, "projects", transcriptSlug(resolved))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	dirs, err := s.transcriptDirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dirs) != 1 || dirs[0] != dir {
+		t.Errorf("transcript dirs = %v, want %s once", dirs, dir)
+	}
+}
+
+func TestSyncReadsAWorktreeUnderTheResolvedStateDir(t *testing.T) {
+	claude := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", claude)
+	state, _ := behindSymlink(t, t.TempDir())
+	t.Setenv("XDG_STATE_HOME", state)
+	s := fixture(t, "")
+	trees, err := s.projectTrees()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(trees, state) {
+		t.Fatalf("worktrees %s are not under the symlinked state dir %s", trees, state)
+	}
+	if err := os.MkdirAll(trees, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	realTrees, err := filepath.EvalSymlinks(trees)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tally := syncOneTranscript(t, s, filepath.Join(claude, "projects", transcriptSlug(filepath.Join(realTrees, "01"))))
+	if tally.Read != 1 || tally.Wrote != 1 {
+		t.Errorf("sync of a worktree under a symlinked state dir: %+v, want its resolved transcript read", tally)
+	}
+}
+
 // syncFixture is a project whose log directory and root transcript directory
 // both exist, with Claude Code's config and the log cache in temp dirs.
 func syncFixture(t *testing.T) (s *session, logs, transcripts string) {
