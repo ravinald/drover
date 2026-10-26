@@ -633,6 +633,7 @@ func TestAgentsWriteInASessionLeavesTheLinkedCheckoutCopy(t *testing.T) {
 			target := filepath.Join(s.cfg.Root, "AGENTS.md")
 			write(t, target, "# House rules\n")
 			tree := newRepo(t)
+			git(t, s.cfg.Root, "init", "-q", "-b", "main")
 			link := filepath.Join(tree, "AGENTS.md")
 			if err := os.Symlink(target, link); err != nil {
 				t.Fatal(err)
@@ -671,6 +672,73 @@ func TestAgentsWriteInASessionLeavesTheLinkedCheckoutCopy(t *testing.T) {
 			}
 			if !strings.Contains(out, "the link to ") || !strings.Contains(out, "so the checkout's copy is unchanged") {
 				t.Errorf("the write did not say it replaced the link: %q", out)
+			}
+		})
+	}
+}
+
+// Only a link drive made gives way. A supervisor writes from the checkout, where
+// a link is the operator's own, and a tracked link is the branch's content:
+// replacing either would change what the operator or the branch holds, so the
+// write follows the link to its target as it does outside a session.
+func TestAgentsWriteInASessionFollowsALinkDriveDidNotMake(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		actor string
+		place func(t *testing.T, s *session, target string) (tree string)
+	}{
+		{"a supervisor in the checkout", runner.ActorSupervisor, func(t *testing.T, s *session, target string) string {
+			isolate(t)
+			git(t, s.cfg.Root, "init", "-q", "-b", "main")
+			if err := os.Symlink(target, filepath.Join(s.cfg.Root, "AGENTS.md")); err != nil {
+				t.Fatal(err)
+			}
+			return s.cfg.Root
+		}},
+		{"an agent beside a tracked link", runner.ActorAgent, func(t *testing.T, s *session, target string) string {
+			tree := newRepo(t)
+			git(t, s.cfg.Root, "init", "-q", "-b", "main")
+			if err := os.Symlink(target, filepath.Join(tree, "AGENTS.md")); err != nil {
+				t.Fatal(err)
+			}
+			git(t, tree, "add", "AGENTS.md")
+			git(t, tree, "commit", "-q", "-m", "link")
+			return tree
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := fixture(t, "")
+			target := filepath.Join(t.TempDir(), "AGENTS.md")
+			write(t, target, "# Shared rules\n")
+			tree := c.place(t, s, target)
+			before := git(t, tree, "status", "--porcelain")
+			t.Chdir(tree)
+			t.Setenv(runner.EnvActor, c.actor)
+
+			block, err := s.renderAgents()
+			if err != nil {
+				t.Fatal(err)
+			}
+			out := captureErr(t, func() {
+				if err := s.writeAgents("AGENTS.md", block); err != nil {
+					t.Fatal(err)
+				}
+			})
+			fi, err := os.Lstat(filepath.Join(tree, "AGENTS.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fi.Mode()&os.ModeSymlink == 0 {
+				t.Error("the write replaced a link drive did not make")
+			}
+			if got := read(t, target); !strings.Contains(got, "# Shared rules") || !strings.Contains(got, agentsBegin) {
+				t.Errorf("the write did not reach the link's target:\n%s", got)
+			}
+			if after := git(t, tree, "status", "--porcelain"); after != before {
+				t.Errorf("git status changed from %q to %q", before, after)
+			}
+			if strings.Contains(out, "in this worktree") {
+				t.Errorf("the write claimed it replaced the link: %q", out)
 			}
 		})
 	}
