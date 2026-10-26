@@ -469,7 +469,6 @@ func TestEveryBodyWriterRecordsWhatItWrote(t *testing.T) {
 		{"resolve", "B1", "260", "fixed", "--code-by", "agent", "--link", "shipped here"},
 	} {
 		t.Run(args[0], func(t *testing.T) {
-			t.Cleanup(func() { resolveCodeBy, resolveLink = "", false })
 			dir := linkProject(t, "")
 			t.Chdir(dir)
 			if err := execute(t, args...); err != nil {

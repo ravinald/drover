@@ -256,7 +256,6 @@ func TestOutputRefusesAnExistingFileAndReplacesItAtomically(t *testing.T) {
 // fails once, without that failure reaching the drive: the same two items run,
 // and the drive still exits 0.
 func TestADriveRendersAndAFailedRenderLeavesItsExitAlone(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	mergeProject(t)
 	dir, _ := os.Getwd()
 	out := t.TempDir()

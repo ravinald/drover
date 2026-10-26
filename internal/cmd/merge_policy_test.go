@@ -153,7 +153,6 @@ func TestTheDefaultPolicyRefusesASupervisorFinish(t *testing.T) {
 }
 
 func TestFinishForceRefusesASupervisorAtAnyPolicy(t *testing.T) {
-	t.Cleanup(func() { finishForce = false })
 	supervisedFinish(t, permissiveTable, passPassed)
 	err := refuse(t, "finish", "B1", "--force")
 	if Code(err) != ExitRefused || !strings.Contains(err.Error(), "--force") {

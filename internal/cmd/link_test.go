@@ -143,7 +143,6 @@ func TestLinkIsIdempotent(t *testing.T) {
 func TestResolveLinkWidensThenRecords(t *testing.T) {
 	dir := linkProject(t, "240")
 	t.Chdir(dir)
-	t.Cleanup(func() { resolveCodeBy, resolveLink = "", false })
 
 	if err := execute(t, "resolve", "B1", "259", "fixed", "--code-by", "agent", "--link", "shipped here"); err != nil {
 		t.Fatalf("resolve --link: %v", err)
@@ -161,7 +160,6 @@ func TestResolveLinkWidensThenRecords(t *testing.T) {
 func TestResolveWithoutLinkStillRefusesAndNamesLink(t *testing.T) {
 	dir := linkProject(t, "240")
 	t.Chdir(dir)
-	t.Cleanup(func() { resolveCodeBy, resolveLink = "", false })
 
 	err := execute(t, "resolve", "B1", "259", "fixed", "--code-by", "agent")
 	if err == nil {

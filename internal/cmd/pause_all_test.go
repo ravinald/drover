@@ -89,11 +89,6 @@ func (d *stubDrive) lease(t *testing.T) lease.Lease {
 // registry of its own, and leaves the caller outside all of them.
 func registered(t *testing.T, extra map[string]string, names ...string) map[string]string {
 	t.Helper()
-	t.Cleanup(func() {
-		drivePause, driveResume, driveEveryProject, driveWait, driveKeepBinary = false, false, false, false, false
-		driveTimeout = 2 * time.Hour
-		driveCmd.Flags().Lookup("timeout").Changed = false
-	})
 	poll := quietPoll
 	quietPoll = 20 * time.Millisecond
 	t.Cleanup(func() { quietPoll = poll })
@@ -113,7 +108,6 @@ func registered(t *testing.T, extra map[string]string, names ...string) map[stri
 
 func driveOut(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	drivePause, driveResume, driveEveryProject, driveWait = false, false, false, false
 	var err error
 	out := capture(t, func() { captureErr(t, func() { err = execute(t, append([]string{"drive"}, args...)...) }) })
 	return out, err

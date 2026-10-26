@@ -76,7 +76,6 @@ func stubIssueGH(t *testing.T, dir string) {
 // nobody can falsify, a defect absorbed from a sibling, or a marker deleted by
 // the agent that drafted the very requirements the marker holds inert.
 func TestDraftBriefCarriesWhatAnAuthorNeeds(t *testing.T) {
-	t.Cleanup(func() { draftRunner, draftHeadless = "", false })
 	dir := draftProject(t, "")
 	stubIssueGH(t, stubPATH(t))
 
@@ -129,7 +128,6 @@ func TestDraftRefusesABodyPastIntake(t *testing.T) {
 // writes. A draft that left a ledger row or touched the body itself would be
 // claiming work it did not do.
 func TestDraftLaunchesAndWritesNothingItself(t *testing.T) {
-	t.Cleanup(func() { draftRunner, draftHeadless = "", false })
 	logs := t.TempDir()
 	t.Setenv("XDG_CACHE_HOME", logs)
 	dir := draftProject(t, `

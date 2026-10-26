@@ -198,7 +198,6 @@ func TestALinkedFileTheTrunkStopsTrackingReachesTheNextSession(t *testing.T) {
 // finish removes the item's worktree before deleting its branch, which git
 // refuses while any worktree has the branch checked out.
 func TestFinishRemovesTheItemsWorktree(t *testing.T) {
-	t.Cleanup(func() { finishDelete = false })
 	s, _ := treeProject(t)
 	dir := s.cfg.Root
 	mergedLaunched(t, s, "1", "first")

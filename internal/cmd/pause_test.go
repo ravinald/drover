@@ -315,7 +315,6 @@ func TestCleanupListsADirtyWorktreeAndApplyKeepsIt(t *testing.T) {
 // refusal names that action rather than enqueue, which every other drive is.
 func TestASupervisorPausesOnlyAtSupervisorPolicy(t *testing.T) {
 	enqueueFixture(t)
-	t.Cleanup(func() { drivePause = false })
 	t.Setenv(runner.EnvActor, runner.ActorSupervisor)
 	err := refuse(t, "drive", "--pause")
 	if Code(err) != ExitRefused || !strings.Contains(err.Error(), "pause_for_config_change") {
@@ -385,10 +384,6 @@ func TestTheLeaseHoldsWhatIsHeldNowAcrossConcurrentHolds(t *testing.T) {
 // before it takes the lease, rather than started with the flag dropped.
 func TestTimeoutWithoutWaitRefusesADrive(t *testing.T) {
 	enqueueFixture(t)
-	t.Cleanup(func() {
-		driveTimeout = 2 * time.Hour
-		driveCmd.Flags().Lookup("timeout").Changed = false
-	})
 	err := refuse(t, "drive", "--timeout", "1m", "1")
 	if Code(err) != ExitRefused || err == nil || !strings.Contains(err.Error(), "--timeout bounds --wait") {
 		t.Fatalf("drive --timeout 1m 1 exited %d (%v), want %d naming --wait", Code(err), err, ExitRefused)

@@ -140,7 +140,6 @@ func TestSignoffRefusesALaunchedSession(t *testing.T) {
 // request open and needs_operator naming it, and goes through once signoff has
 // recorded it. Two drives of the same fixture, differing by one ledger row.
 func TestTheMergeHoldsUntilSignoff(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	for _, attested := range []bool{false, true} {
 		name := "unattested"
 		if attested {

@@ -249,7 +249,6 @@ func TestAHandEditIsReportedUntilRecorded(t *testing.T) {
 // rather than spending an implement and a review to park body_edited.
 func TestDriveRefusesAHandEditedItemBeforeLaunch(t *testing.T) {
 	resetAmendFlags(t)
-	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	s := driveProject(t)
 	if err := execute(t, "touch", "1", "--reason", "baseline digest"); err != nil {
 		t.Fatal(err)

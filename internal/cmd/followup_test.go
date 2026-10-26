@@ -23,7 +23,6 @@ const finishedResult = `{"event":"result","result":{"status":"SUCCESS","response
 // narrows PATH to git.
 func reviewProject(t *testing.T, exit int, result string, rows ...string) (s *session) {
 	t.Helper()
-	t.Cleanup(func() { reviewRunner, reviewHeadless = "", false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	s = fixture(t, "\n[runners.rev]\ninteractive = [\"stub-rev\"]\nheadless    = [\"stub-rev\"]\n")
 	git(t, s.cfg.Root, "init", "-q", "-b", "main")

@@ -193,7 +193,6 @@ func TestTheDetailPicksTheActionThatOwnsThePark(t *testing.T) {
 // launches are cut before it passes; past one, the second loss parks.
 func driveCutReview(t *testing.T, lossesBefore int) DriveItem {
 	t.Helper()
-	resetDrive(t)
 	mergeProject(t)
 	rev, err := exec.LookPath("rev")
 	if err != nil {
@@ -240,7 +239,6 @@ func TestACutReviewIsRerunOnceOnTheSameHead(t *testing.T) {
 }
 
 func TestASecondCutParksWithItsDetail(t *testing.T) {
-	t.Cleanup(func() { showJSON = false })
 	got := driveCutReview(t, 2)
 	if got.Reviews != 2 || got.Outcome != outcomeParked || got.Park != passDied || got.Detail != detailStreamCut {
 		t.Fatalf("item 1: reviews %d, %s %s (%s), want 2 reviews and parked %s (%s)",
@@ -315,7 +313,6 @@ func mustItem(t *testing.T, s *session, id string) backlog.Item {
 // stands reviewed, then the gate, the pull request and the merge a clean pass
 // gets.
 func TestReviewOnlyReachesTheMerge(t *testing.T) {
-	resetDrive(t)
 	t.Cleanup(func() { driveReviewOnly, reviewOnlyID = false, "" })
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
@@ -363,7 +360,6 @@ func TestReviewOnlyReachesTheMerge(t *testing.T) {
 // An expired login found at the start costs nothing: the drive refuses before
 // any session, and names the command that signs the runner in.
 func TestAnAuthFailureAtPreflightRefusesBeforeAnyLaunch(t *testing.T) {
-	t.Cleanup(func() { driveRunner = "" })
 	bin := t.TempDir()
 	launched := filepath.Join(bin, "launched")
 	claude := filepath.Join(bin, "claude")
@@ -393,7 +389,6 @@ func TestAnAuthFailureAtPreflightRefusesBeforeAnyLaunch(t *testing.T) {
 // returns ErrNotFound from a PATH lookup, so a path that fails to start has to
 // be told apart some other way, or the operator is sent to log in.
 func TestAMissingRunnerPathIsNotRefusedAsSignedOut(t *testing.T) {
-	t.Cleanup(func() { driveRunner = "" })
 	claude := filepath.Join(t.TempDir(), "claude")
 	driveProjectWith(t, "\n[drive]\nmerge_gate = [\"stub-gate\"]\n\n[runners.claude]\nheadless = [\""+claude+"\"]\n")
 

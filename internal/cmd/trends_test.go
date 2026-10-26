@@ -309,7 +309,6 @@ func TestTheGoldenHTMLDrawsSparklinesAndNoScript(t *testing.T) {
 // A [verify] run's wall time lands on the row drive writes after it: here the
 // head row of a catch-up whose verify command passed.
 func TestTheCatchUpVerifyTimeIsOnTheRowAfterIt(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -333,7 +332,6 @@ func TestTheCatchUpVerifyTimeIsOnTheRowAfterIt(t *testing.T) {
 // own session, so the time rides the head row it recorded for the merged tree
 // before the changes row.
 func TestARequestedChangesCatchUpsVerifyTimeIsNotOnTheChangesRow(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -374,7 +372,6 @@ func TestARequestedChangesCatchUpsVerifyTimeIsNotOnTheChangesRow(t *testing.T) {
 // A trunk that fails the verify command alone undoes the merge before drive
 // records a head row for it, so the item's verify time rides the trunk_red park row.
 func TestARedTrunksVerifyTimeRidesTheParkRow(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)

@@ -18,9 +18,6 @@ import (
 // one park row each.
 func twoDrives(t *testing.T) (root string, events string) {
 	t.Helper()
-	t.Cleanup(func() {
-		driveJSON, driveEvents, driveLabel, driveFor, driveUntil, driveMax = false, false, "", 0, "", 0
-	})
 	mergeProject(t)
 	root, err := os.Getwd()
 	if err != nil {
@@ -101,7 +98,6 @@ func TestADrivesParkRowCarriesItsID(t *testing.T) {
 
 func TestStatusJSONNamesEachItemsDriveAndListsTheDrives(t *testing.T) {
 	twoDrives(t)
-	t.Cleanup(func() { statusJSON, statusNoTracker = false, false })
 	out := capture(t, func() {
 		if err := execute(t, "status", "--json", "--no-tracker"); err != nil {
 			t.Fatalf("status: %v", err)
@@ -128,7 +124,6 @@ func TestStatusJSONNamesEachItemsDriveAndListsTheDrives(t *testing.T) {
 }
 
 func TestDrivesAllReadsEveryRegisteredProject(t *testing.T) {
-	t.Cleanup(func() { drivesAll, drivesJSON = false, false })
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	reg := projects.Path(config.GlobalPath())
 	labels := map[string]string{}
@@ -206,7 +201,6 @@ func drivesAllJSON(t *testing.T) []ProjectDrives {
 }
 
 func TestDrivesAllIgnoresDroverRoot(t *testing.T) {
-	t.Cleanup(func() { drivesAll, drivesJSON = false, false })
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	reg := projects.Path(config.GlobalPath())
 	alpha := registerDriven(t, reg, "alpha")
@@ -227,7 +221,6 @@ func TestDrivesAllIgnoresDroverRoot(t *testing.T) {
 }
 
 func TestDrivesAllSkipsARegisteredRootWithNoConfig(t *testing.T) {
-	t.Cleanup(func() { drivesAll, drivesJSON = false, false })
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	reg := projects.Path(config.GlobalPath())
 	alpha := registerDriven(t, reg, "alpha")
@@ -245,7 +238,6 @@ func TestDrivesAllSkipsARegisteredRootWithNoConfig(t *testing.T) {
 }
 
 func TestALabelWithANewlineIsRefused(t *testing.T) {
-	t.Cleanup(func() { driveLabel = "" })
 	driveProject(t)
 	for _, label := range []string{"one\ntwo", strings.Repeat("x", labelMax+1)} {
 		err := execute(t, "drive", "--label", label)

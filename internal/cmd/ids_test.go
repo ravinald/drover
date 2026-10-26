@@ -230,7 +230,6 @@ func TestGitAllocatorUnreachableRemoteRefuses(t *testing.T) {
 	isolate(t)
 	remote := filepath.Join(t.TempDir(), "missing.git")
 	dir := idHost(t, remote)
-	t.Cleanup(func() { localAlloc = false })
 
 	err := execute(t, "new", "bug", "the remote is down")
 	if Code(err) != ExitRefused {

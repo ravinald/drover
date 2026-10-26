@@ -146,7 +146,6 @@ func TestShowJSONCarriesDepState(t *testing.T) {
 	}, map[string]string{})
 	t.Chdir(dir)
 
-	t.Cleanup(func() { showJSON = false })
 	out := capture(t, func() {
 		if err := execute(t, "show", "B1", "--json"); err != nil {
 			t.Fatal(err)
@@ -201,7 +200,6 @@ func TestShowTableAndJSONAgreePerDep(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	t.Cleanup(func() { showJSON = false })
 	out := capture(t, func() {
 		if err := execute(t, "show", "B1", "--json"); err != nil {
 			t.Fatal(err)

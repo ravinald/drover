@@ -63,7 +63,6 @@ func TestAPolicyAboveItsCeilingFailsLoad(t *testing.T) {
 // drover does not rewrite .drover.toml, so the picker writes only where no
 // table exists to be rewritten, and prints otherwise. Both exit 0.
 func TestInitSuperviseAppendsOnlyWhereNoTableExists(t *testing.T) {
-	t.Cleanup(func() { initSuperviseDefaults = false })
 	s := fixture(t, "")
 	t.Chdir(s.cfg.Root)
 	path := filepath.Join(s.cfg.Root, config.FileName)
@@ -269,7 +268,6 @@ func TestAcceptRefusesASupervisorWhateverThePolicy(t *testing.T) {
 // not, because an agent starting a queue of sessions is the nesting the seal
 // exists to stop.
 func TestDriveRunsUnderASupervisorAndRefusesUnderAnAgent(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	mergeProject(t)
 
 	t.Setenv(runner.EnvActor, runner.ActorAgent)
@@ -345,7 +343,6 @@ func driveEventsOf(t *testing.T, args ...string) (evs []DriveEvent, stderr strin
 }
 
 func TestEventsCarryAParkAsItHappens(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	mergeProject(t)
 
 	evs, _, err := driveEventsOf(t)
@@ -397,7 +394,6 @@ func TestEventsCarryAParkAsItHappens(t *testing.T) {
 // The exit event is the drive's exit status as a supervisor reads it, so a
 // drive that fails must say so there, not only in its own return.
 func TestEventsExitCarriesTheDrivesFailure(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	mergeProject(t)
 
 	evs, _, err := driveEventsOf(t, "999")
@@ -416,7 +412,6 @@ func TestEventsExitCarriesTheDrivesFailure(t *testing.T) {
 // The picker decides what a supervisor may do, so no session drover launched
 // may run it, with or without a terminal, and the project file stays as it was.
 func TestInitSuperviseRefusesALaunchedSession(t *testing.T) {
-	t.Cleanup(func() { initSuperviseDefaults = false })
 	for _, actor := range []string{runner.ActorAgent, runner.ActorSupervisor} {
 		t.Run(actor, func(t *testing.T) {
 			s := fixture(t, "")
@@ -442,7 +437,6 @@ func TestInitSuperviseRefusesALaunchedSession(t *testing.T) {
 }
 
 func TestEventsNeedJSON(t *testing.T) {
-	t.Cleanup(func() { driveEvents = false })
 	s := fixture(t, "")
 	t.Chdir(s.cfg.Root)
 	if err := refuse(t, "drive", "--events"); Code(err) != ExitRefused {
@@ -465,7 +459,6 @@ func TestAFailingNotifierLeavesTheDriveAlone(t *testing.T) {
 		{"is missing", func(bin string) string { return filepath.Join(bin, "no-such-notifier") }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 			mergeProject(t)
 			bin := t.TempDir()
 			notified := filepath.Join(bin, "notified.json")
@@ -517,7 +510,6 @@ func TestAFailingNotifierLeavesTheDriveAlone(t *testing.T) {
 // The brief names every action with this project's policy, and --dry-run
 // launches nothing to show it.
 func TestSuperviseDryRunPrintsTheBrief(t *testing.T) {
-	t.Cleanup(func() { superviseDry = false })
 	s := fixture(t, "\n[supervise]\nresolve_conflict = \"operator\"\n")
 	t.Chdir(s.cfg.Root)
 	var err error
@@ -540,7 +532,6 @@ func TestSuperviseDryRunPrintsTheBrief(t *testing.T) {
 // A stage that launches a session names its log, the file the runner's stream
 // went to, so attach can follow it; a stage that launches nothing names none.
 func TestStageEventsNameTheSessionLog(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	mergeProject(t)
 
 	evs, stderr, err := driveEventsOf(t)

@@ -202,7 +202,6 @@ func TestTruncatedReadIsReportedEvenWithNoMatchingRows(t *testing.T) {
 func TestTruncatedReadIsReportedInJSON(t *testing.T) {
 	registerProject(t, "[github]\nrepo = \"owner/name\"\npage_limit = 1\n")
 	stubGHIssues(t, stubPATH(t), onePage)
-	t.Cleanup(func() { registerJSON = false })
 
 	var err error
 	out := capture(t, func() { err = execute(t, "follow-ups", "--json") })
