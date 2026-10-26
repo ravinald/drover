@@ -61,7 +61,21 @@ type LongSession struct {
 	Weighted   int64   `json:"weighted"`
 	// Reason is why it qualified, in words a view prints as they are.
 	Reason string `json:"reason"`
+	// Started and LastSeen are the earliest and latest instants its rows
+	// place it at.
+	Started  string `json:"started"`
+	LastSeen string `json:"last_seen"`
+	// State is "ended" when every row is headless, written once the session
+	// exits, and "last_seen" otherwise. Never "open": an interactive row is
+	// written per finished day, so no row says a session is open now.
+	State string `json:"state"`
 }
+
+// Long session states. The ledger holds no row written while a session runs.
+const (
+	sessionEnded    = "ended"
+	sessionLastSeen = "last_seen"
+)
 
 // stageInteractive is the by_stage key of a usage row no stage launched.
 const stageInteractive = "interactive"
@@ -206,6 +220,7 @@ func (s *session) longSessions(start, now time.Time) *[]LongSession {
 		first, last time.Time
 		tokens      runlog.Usage
 		inWindow    bool
+		interactive bool
 	}
 	byID := map[string]*span{}
 	var order []string
@@ -220,6 +235,7 @@ func (s *session) longSessions(start, now time.Time) *[]LongSession {
 			order = append(order, r.SessionID)
 		}
 		sp.inWindow = sp.inWindow || inWindow(r, start, now)
+		sp.interactive = sp.interactive || r.Source != ledger.SourceHeadless
 		if sp.ID == "" {
 			sp.ID = r.ID
 		}
@@ -259,6 +275,11 @@ func (s *session) longSessions(start, now time.Time) *[]LongSession {
 		sp.Reason = reasons[0]
 		if len(reasons) > 1 {
 			sp.Reason += "; " + reasons[1]
+		}
+		sp.Started, sp.LastSeen = sp.first.Format(time.RFC3339), sp.last.Format(time.RFC3339)
+		sp.State = sessionEnded
+		if sp.interactive {
+			sp.State = sessionLastSeen
 		}
 		out = append(out, sp.LongSession)
 	}

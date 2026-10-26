@@ -301,8 +301,9 @@ func TestTheGoldenHTMLDrawsSparklinesAndNoScript(t *testing.T) {
 			t.Errorf("the golden page lacks %q", want)
 		}
 	}
-	if strings.Contains(strings.ToLower(string(page)), "<script") {
-		t.Error("the golden page carries a <script>")
+	trends := string(page)[strings.Index(string(page), "<h2>Trends</h2>"):strings.Index(string(page), "<h2>Key</h2>")]
+	if strings.Contains(strings.ToLower(trends), "<script") {
+		t.Error("the golden page's Trends section carries a <script>")
 	}
 }
 

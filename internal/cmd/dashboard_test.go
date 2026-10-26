@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -173,6 +174,10 @@ func TestBuiltinTemplatesCarryTheLayout(t *testing.T) {
 	if !strings.HasPrefix(md, "%% drover builtin:obsidian") {
 		t.Errorf("the Obsidian render does not open by naming where it came from:\n%.120s", md)
 	}
+	heading := map[string]func(string) string{
+		"obsidian": func(h string) string { return "## " + h + "\n" },
+		"html":     func(h string) string { return "<h2>" + h + "</h2>" },
+	}
 	for name, out := range map[string]string{"obsidian": md, "html": page} {
 		var at []int
 		for _, h := range []string{"Needs you", "Running drive", "Open", "Done", "Rendered "} {
@@ -202,7 +207,7 @@ func TestBuiltinTemplatesCarryTheLayout(t *testing.T) {
 		}
 		// B10 ran and B8 is the lease's: each sits under its own state word,
 		// and both carry the running class.
-		open := out[strings.Index(out, "Open"):strings.Index(out, "Done")]
+		open := out[strings.Index(out, heading[name]("Open")):strings.Index(out, heading[name]("Done"))]
 		for title, word := range map[string]string{"Ran clean": "implemented", "Running now": "running"} {
 			at := strings.Index(open, title)
 			if at < 0 {
@@ -269,7 +274,11 @@ func TestBuiltinHTMLParsesAndRequestsNothing(t *testing.T) {
 			t.Errorf("the page names %s, which is not a forge link", u)
 		}
 	}
-	for _, tag := range []string{"<script", "<link", "<img", "@import", "url("} {
+	// The one script is inline and keeps which sections are open.
+	if n, bare := strings.Count(page, "<script"), strings.Count(page, "<script>"); n != 1 || bare != 1 {
+		t.Errorf("the page carries %d scripts, %d of them inline, want the one inline", n, bare)
+	}
+	for _, tag := range []string{"<link", "<img", "@import", "url(", "fetch(", "XMLHttpRequest"} {
 		if strings.Contains(page, tag) {
 			t.Errorf("the page carries %s, which fetches or runs something", tag)
 		}
@@ -326,7 +335,7 @@ func TestBuiltinHTMLTabulatesTheItems(t *testing.T) {
 		}
 		ids[m[1]] = true
 	}
-	for _, m := range regexp.MustCompile(`<h2 id="([^"]+)"`).FindAllStringSubmatch(page, -1) {
+	for _, m := range regexp.MustCompile(`<(?:h2|details)[^>]* id="([^"]+)"`).FindAllStringSubmatch(page, -1) {
 		ids[m[1]] = true
 	}
 	links := regexp.MustCompile(`href="#([^"]+)"`).FindAllStringSubmatch(page, -1)
@@ -585,5 +594,103 @@ func TestARunningItemReadsPausingUntilTheDriveHoldsIt(t *testing.T) {
 	}
 	if got := heldAt(lease(true, "F1"), "F1"); got != "review" {
 		t.Errorf("heldAt = %q, want review", got)
+	}
+}
+
+// Both dashboards open on a contents line whose every link lands on a section
+// and whose counts are the report's, each HTML section is one <details>, and
+// each long session says whether it ended.
+func TestBuiltinDashboardsLinkEverySectionFromTheContents(t *testing.T) {
+	stubPATH(t)
+	s := dashboardProject(t)
+	report := s.statusReport(false, false, dashboardNow)
+	attention := len(s.attention(report.all))
+	var open, done int
+	for _, r := range report.Items {
+		if r.State == stateDone {
+			done++
+		} else {
+			open++
+		}
+	}
+	states := map[string]int{}
+	for _, l := range *report.LongSessions {
+		states[l.State]++
+	}
+	if attention == 0 || open == 0 || done == 0 || states["ended"] == 0 || states["last_seen"] == 0 {
+		t.Fatalf("the fixture holds %d attention rows, %d open, %d done and long sessions %v; this test has nothing to prove", attention, open, done, states)
+	}
+	counts := map[string]string{
+		"Needs you": fmt.Sprintf("Needs you (%d)", attention),
+		"Open":      fmt.Sprintf("Open (%d)", open),
+		"Done":      fmt.Sprintf("Done (%d)", done),
+	}
+	sections := []string{"Needs you", "Running drive", "Open", "Done", "Trends", "Key"}
+
+	page := renderBuiltin(t, s, "html")
+	nav := regexp.MustCompile(`(?s)<nav id="contents"[^>]*>(.*?)</nav>`).FindStringSubmatch(page)
+	if nav == nil {
+		t.Fatal("the HTML page has no contents line")
+	}
+	links := regexp.MustCompile(`<a href="#([^"]+)">([^<]+)</a>`).FindAllStringSubmatch(nav[1], -1)
+	if len(links) != len(sections) {
+		t.Errorf("the HTML contents line links %d sections, want %d: %s", len(links), len(sections), nav[1])
+	}
+	for i, m := range links {
+		if n := strings.Count(page, `<details open="" id="`+m[1]+`" class="section`); n != 1 {
+			t.Errorf("the HTML contents link #%s lands on %d sections, want 1", m[1], n)
+		}
+		if i < len(sections) {
+			want := sections[i]
+			if c, ok := counts[want]; ok {
+				want = c
+			}
+			if m[2] != want {
+				t.Errorf("the HTML contents line reads %q, want %q", m[2], want)
+			}
+		}
+	}
+	if n := strings.Count(page, "<details"); n != len(sections) {
+		t.Errorf("the HTML page carries %d <details>, want one per section, %d", n, len(sections))
+	}
+	if !strings.Contains(page, `id="needs-you" class="section attention"`) {
+		t.Error("Needs you holds rows and is not marked for the red border")
+	}
+
+	md := renderBuiltin(t, s, "obsidian")
+	for _, h := range sections {
+		label := h
+		if c, ok := counts[h]; ok {
+			label = c
+		}
+		link := "[[#" + h + "]]"
+		if label != h {
+			link = "[[#" + h + "|" + label + "]]"
+		}
+		if !strings.Contains(md, "- "+link+"\n") {
+			t.Errorf("the Obsidian contents list lacks %s", link)
+		}
+		if strings.Count(md, "\n## "+h+"\n") != 1 {
+			t.Errorf("the Obsidian page has no single heading ## %s for its contents to land on", h)
+		}
+		fold := "-"
+		if h == "Needs you" {
+			fold = "+"
+		}
+		if want := "\n> [!note]" + fold + " " + label + "\n"; !strings.Contains(md, want) {
+			t.Errorf("the Obsidian %s section is not the callout %q", h, want)
+		}
+	}
+
+	for name, wants := range map[string][]string{
+		"html":     {"<td>headless</td><td>ended</td>", "<td>interactive</td><td>last seen 6h ago</td>"},
+		"obsidian": {"headless · ended ·", "interactive · last seen 6h ago ·"},
+	} {
+		out := map[string]string{"html": page, "obsidian": md}[name]
+		for _, want := range wants {
+			if !strings.Contains(out, want) {
+				t.Errorf("builtin:%s lists no long session as %q", name, want)
+			}
+		}
 	}
 }

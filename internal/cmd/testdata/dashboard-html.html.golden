@@ -25,7 +25,12 @@ body { margin: 0 auto; max-width: 60rem; padding: 1rem; background: var(--bg); c
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 a { color: var(--link); }
 h1 { font-size: 1.5rem; margin: 0 0 1rem; }
-h2 { font-size: 1.2rem; margin: 1.5rem 0 0.5rem; border-bottom: 1px solid var(--line); }
+h2 { font-size: 1.2rem; margin: 0; display: inline; }
+.contents a { white-space: nowrap; }
+details.section { margin: 1.5rem 0 0; }
+details.section > summary { cursor: pointer; padding: 0.25rem 0; }
+details.section > .body { margin-top: 0.25rem; padding: 0.25rem 0.75rem 0.5rem; background: var(--stripe); border: 1px solid var(--line); border-radius: 0.4rem; }
+details.attention > .body { border-color: var(--red); }
 h3 { font-size: 1.05rem; margin: 1rem 0 0.25rem; }
 h4 { font-size: 0.95rem; margin: 0.75rem 0 0.25rem; }
 code { font-size: 0.9em; }
@@ -47,8 +52,8 @@ th { font-weight: 600; }
 .scroll { overflow: auto; max-height: 80vh; margin-bottom: 0.5rem; }
 .items td { white-space: nowrap; }
 .items td.title, .items td.reason { white-space: normal; overflow-wrap: anywhere; min-width: 12rem; }
-.items thead th { position: sticky; top: 0; background: var(--bg); white-space: nowrap; }
-.items tbody tr:nth-child(even) { background: var(--stripe); }
+.items thead th { position: sticky; top: 0; background: var(--stripe); white-space: nowrap; }
+.items tbody tr:nth-child(even) { background: var(--bg); }
 .items tbody tr:hover { background: var(--hover); }
 .items tr:target { outline: 2px solid var(--link); outline-offset: -2px; }
 .key td { padding: 0.2rem 0.5rem 0.2rem 0; }
@@ -60,9 +65,9 @@ th { font-weight: 600; }
 </head>
 <body>
 <h1>fixture</h1>
-<p class="meta"><a href="#key">What the colors mean</a></p>
+<nav id="contents" class="meta contents" data-project="fixture"><a href="#needs-you">Needs you (5)</a> · <a href="#running-drive">Running drive</a> · <a href="#open">Open (12)</a> · <a href="#done">Done (2)</a> · <a href="#trends">Trends</a> · <a href="#key">Key</a></nav>
 
-<h2>Needs you</h2>
+<details open="" id="needs-you" class="section attention"><summary><h2>Needs you</h2></summary><div class="body">
 <div class="scroll"><table class="items">
 <thead><tr><th>State</th><th>Item</th><th>Reason</th><th>Since</th><th>Command</th></tr></thead>
 <tbody>
@@ -74,15 +79,17 @@ th { font-weight: 600; }
 </tbody>
 </table></div>
 <h3>Long sessions</h3>
+<p class="meta">Sessions read from the ledger, which records one when it exits or when its day ends, so a session running now shows up only after that. Live work is under Running drive.</p>
 <div class="scroll"><table class="items">
-<thead><tr><th>Session</th><th>Item</th><th>Source</th><th>Tokens</th><th>Reason</th></tr></thead>
+<thead><tr><th>Session</th><th>Item</th><th>Source</th><th>State</th><th>Tokens</th><th>Reason</th></tr></thead>
 <tbody>
-<tr><td><code>s-b2</code></td><td><a class="id" href="#item-b2">B2</a></td><td>headless</td><td class="num">12.2M</td><td class="reason">context reached 520K, past 400K</td></tr>
-<tr><td><code>i-long</code></td><td>-</td><td>interactive</td><td class="num">5.8M</td><td class="reason">open 16d 3h, past 24h; context reached 965K, past 400K</td></tr>
+<tr><td><code>s-b2</code></td><td><a class="id" href="#item-b2">B2</a></td><td>headless</td><td>ended</td><td class="num">12.2M</td><td class="reason">context reached 520K, past 400K</td></tr>
+<tr><td><code>i-long</code></td><td>-</td><td>interactive</td><td>last seen 6h ago</td><td class="num">5.8M</td><td class="reason">open 16d 3h, past 24h; context reached 965K, past 400K</td></tr>
 </tbody>
 </table></div>
+</div></details>
 
-<h2>Running drive</h2>
+<details open="" id="running-drive" class="section"><summary><h2>Running drive</h2></summary><div class="body">
 <p><span class="id">D2</span> · day run <span class="meta">started 1h ago · 1 at a time</span></p>
 <div class="scroll"><table class="items">
 <thead><tr><th>Item</th><th>Title</th><th>Stage</th><th>Elapsed</th><th>ETA</th></tr></thead>
@@ -91,8 +98,9 @@ th { font-weight: 600; }
 </tbody>
 </table></div>
 <p class="meta">queued: <a href="#item-b9">B9</a></p>
+</div></details>
 
-<h2>Open</h2>
+<details open="" id="open" class="section"><summary><h2>Open</h2></summary><div class="body">
 <h3>Drive D2 · day run</h3>
 <h4><span class="state drover-running">running</span></h4>
 <div class="scroll"><table class="items">
@@ -156,8 +164,9 @@ th { font-weight: 600; }
 <tr id="item-b5"><td><span class="state drover-scaffold">scaffold</span> <span class="id">B5</span></td><td class="title">Scaffold</td><td>-</td><td>-</td><td>-</td><td>-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td><td class="num">-</td></tr>
 </tbody>
 </table></div>
+</div></details>
 
-<h2>Done</h2>
+<details open="" id="done" class="section"><summary><h2>Done</h2></summary><div class="body">
 <div class="scroll"><table class="items">
 <thead><tr><th>Item</th><th>Title</th><th>Level</th><th>PR</th><th>Merged</th><th>Tokens</th><th>List $</th></tr></thead>
 <tbody>
@@ -165,8 +174,9 @@ th { font-weight: 600; }
 <tr id="item-b1"><td><span class="id">B1</span></td><td class="title">Merged first</td><td><span class="state drover-unaudited">unaudited</span></td><td class="num">-</td><td class="num">2026-01-15</td><td class="num">140K</td><td class="num">$3</td></tr>
 </tbody>
 </table></div>
+</div></details>
 
-<h2>Trends</h2>
+<details open="" id="trends" class="section"><summary><h2>Trends</h2></summary><div class="body">
 <p class="meta">2026-10-04 to 2026-10-17, 14 days. n is how many items each figure is read from; n/a is a period with nothing to read.</p>
 <table>
 <tr><th>Metric</th><th>Window</th><th>n</th><th>By day</th></tr>
@@ -179,8 +189,9 @@ th { font-weight: 600; }
 <tr><td>Review passed to merge, median</td><td class="num">n/a</td><td class="num"></td><td><svg class="spark" viewBox="0 0 120 24" width="120" height="24" role="img" aria-label="review_to_merge median by day"></svg></td></tr>
 <tr><td>Verify, median</td><td class="num">n/a</td><td class="num"></td><td><svg class="spark" viewBox="0 0 120 24" width="120" height="24" role="img" aria-label="verify median by day"></svg></td></tr>
 </table>
+</div></details>
 
-<h2 id="key">Key</h2>
+<details open="" id="key" class="section"><summary><h2>Key</h2></summary><div class="body">
 <p class="meta">Red waits on a person, yellow is moving, gray is held by a paused drive, orange cannot move yet or is unproven, green is settled.</p>
 <table class="key">
 <tr><td><span class="state drover-needs-operator">needs-operator</span></td><td>Waiting on you. Needs you names the command.</td></tr>
@@ -197,9 +208,41 @@ th { font-weight: 600; }
 <tr><td><span class="state drover-unaudited">unaudited</span></td><td>Merged, and nobody has audited it.</td></tr>
 <tr><td><span class="state">follow-up</span></td><td>An open follow-up nothing is scheduled to carry.</td></tr>
 </table>
+</div></details>
 
 <footer>
 <p>Usage over the last 7 days: 19.2M weighted tokens, $1,277 at list price</p>
 Rendered 2026-10-17 11:00 PDT (America/Los_Angeles) · fixture · drover v9.9.9-test</footer>
+<script>
+(function () {
+  var sections = document.querySelectorAll("details.section");
+  var key = "drover-sections:" + document.getElementById("contents").getAttribute("data-project");
+  try {
+    var saved = JSON.parse(localStorage.getItem(key));
+    if (saved !== null) {
+      sections.forEach(function (d) {
+        if (typeof saved[d.id] === "boolean") d.open = saved[d.id];
+      });
+    }
+  } catch (e) {}
+  sections.forEach(function (d) {
+    d.addEventListener("toggle", function () {
+      var state = {};
+      sections.forEach(function (s) { state[s.id] = s.open; });
+      try { localStorage.setItem(key, JSON.stringify(state)); } catch (e) {}
+    });
+  });
+  function reveal(id) {
+    for (var el = document.getElementById(id); el; el = el.parentElement) {
+      if (el.tagName === "DETAILS") el.open = true;
+    }
+  }
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest("a[href^='#']");
+    if (a) reveal(a.getAttribute("href").slice(1));
+  });
+  window.addEventListener("hashchange", function () { reveal(location.hash.slice(1)); });
+})();
+</script>
 </body>
 </html>

@@ -231,6 +231,39 @@ func TestStatusLongSessionsNamesAgeAndContext(t *testing.T) {
 	}
 }
 
+// A session whose every row is headless exited when its row was written, so
+// it reads ended. Any interactive row leaves it at last seen, because the day
+// it is in has no row until that day ends.
+func TestStatusLongSessionsSayWhetherTheyEnded(t *testing.T) {
+	usage := `"usage":{"input":1,"output":1,"cache_create":0,"cache_read":0},"context_max":500000`
+	rows := []string{
+		`{"id":"B1","stage":"implement",` + usage + `,"session_id":"headless","source":"headless","duration_ms":3600000,"date":"2026-10-23","ts":"2026-10-23T10:00:00Z"}`,
+		`{"id":"",` + usage + `,"session_id":"interactive","source":"interactive","started":"2026-10-22T08:00:00Z","first_ts":"2026-10-23T08:00:00Z","date":"2026-10-23","ts":"2026-10-23T09:00:00Z"}`,
+		`{"id":"B1","stage":"implement",` + usage + `,"session_id":"both","source":"headless","duration_ms":600000,"date":"2026-10-22","ts":"2026-10-22T12:00:00Z"}`,
+		`{"id":"",` + usage + `,"session_id":"both","source":"interactive","first_ts":"2026-10-23T07:00:00Z","date":"2026-10-23","ts":"2026-10-23T11:30:00Z"}`,
+	}
+	list, _ := usageReport(t, usageProject(t, "", rows...))["long_sessions"].([]any)
+	got := map[string]map[string]any{}
+	for _, l := range list {
+		m := l.(map[string]any)
+		got[m["session_id"].(string)] = m
+	}
+	for _, c := range []struct{ id, state, started, lastSeen string }{
+		{"headless", "ended", "2026-10-23T09:00:00Z", "2026-10-23T10:00:00Z"},
+		{"interactive", "last_seen", "2026-10-22T08:00:00Z", "2026-10-23T09:00:00Z"},
+		{"both", "last_seen", "2026-10-22T11:50:00Z", "2026-10-23T11:30:00Z"},
+	} {
+		m := got[c.id]
+		if m == nil {
+			t.Errorf("%s is not listed: %v", c.id, list)
+			continue
+		}
+		if m["state"] != c.state || m["started"] != c.started || m["last_seen"] != c.lastSeen {
+			t.Errorf("%s: state %v, started %v, last_seen %v; want %s, %s, %s", c.id, m["state"], m["started"], m["last_seen"], c.state, c.started, c.lastSeen)
+		}
+	}
+}
+
 func TestTokensAndUSDTemplateFunctions(t *testing.T) {
 	s := usageProject(t, "")
 	funcs := s.templateFuncs(usageNow, time.UTC)

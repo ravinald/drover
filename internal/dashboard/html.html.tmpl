@@ -29,7 +29,12 @@ body { margin: 0 auto; max-width: 60rem; padding: 1rem; background: var(--bg); c
   font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 a { color: var(--link); }
 h1 { font-size: 1.5rem; margin: 0 0 1rem; }
-h2 { font-size: 1.2rem; margin: 1.5rem 0 0.5rem; border-bottom: 1px solid var(--line); }
+h2 { font-size: 1.2rem; margin: 0; display: inline; }
+.contents a { white-space: nowrap; }
+details.section { margin: 1.5rem 0 0; }
+details.section > summary { cursor: pointer; padding: 0.25rem 0; }
+details.section > .body { margin-top: 0.25rem; padding: 0.25rem 0.75rem 0.5rem; background: var(--stripe); border: 1px solid var(--line); border-radius: 0.4rem; }
+details.attention > .body { border-color: var(--red); }
 h3 { font-size: 1.05rem; margin: 1rem 0 0.25rem; }
 h4 { font-size: 0.95rem; margin: 0.75rem 0 0.25rem; }
 code { font-size: 0.9em; }
@@ -51,8 +56,8 @@ th { font-weight: 600; }
 .scroll { overflow: auto; max-height: 80vh; margin-bottom: 0.5rem; }
 .items td { white-space: nowrap; }
 .items td.title, .items td.reason { white-space: normal; overflow-wrap: anywhere; min-width: 12rem; }
-.items thead th { position: sticky; top: 0; background: var(--bg); white-space: nowrap; }
-.items tbody tr:nth-child(even) { background: var(--stripe); }
+.items thead th { position: sticky; top: 0; background: var(--stripe); white-space: nowrap; }
+.items tbody tr:nth-child(even) { background: var(--bg); }
 .items tbody tr:hover { background: var(--hover); }
 .items tr:target { outline: 2px solid var(--link); outline-offset: -2px; }
 .key td { padding: 0.2rem 0.5rem 0.2rem 0; }
@@ -85,9 +90,9 @@ th { font-weight: 600; }
 <footer>Rendered {{time "2006-01-02 15:04 MST" .now}}</footer>
 {{- else}}
 <h1>{{with .index}}<a href="{{.}}">drover</a> / {{end}}{{.project}}</h1>
-<p class="meta"><a href="#key">What the colors mean</a></p>
+<nav id="contents" class="meta contents" data-project="{{.project}}"><a href="#needs-you">Needs you ({{with .attention}}{{len .}}{{else}}0{{end}})</a> · <a href="#running-drive">Running drive</a> · <a href="#open">Open ({{len (open .items)}})</a> · <a href="#done">Done ({{len (done .items)}})</a> · <a href="#trends">Trends</a> · <a href="#key">Key</a></nav>
 
-<h2>Needs you</h2>
+<details open="" id="needs-you" class="section{{if .attention}} attention{{end}}"><summary><h2>Needs you</h2></summary><div class="body">
 {{- with .attention}}
 <div class="scroll"><table class="items">
 <thead><tr><th>State</th><th>Item</th><th>Reason</th><th>Since</th><th>Command</th></tr></thead>
@@ -102,17 +107,19 @@ th { font-weight: 600; }
 {{- end}}{{end}}
 {{- with .long_sessions}}
 <h3>Long sessions</h3>
+<p class="meta">Sessions read from the ledger, which records one when it exits or when its day ends, so a session running now shows up only after that. Live work is under Running drive.</p>
 <div class="scroll"><table class="items">
-<thead><tr><th>Session</th><th>Item</th><th>Source</th><th>Tokens</th><th>Reason</th></tr></thead>
+<thead><tr><th>Session</th><th>Item</th><th>Source</th><th>State</th><th>Tokens</th><th>Reason</th></tr></thead>
 <tbody>
 {{- range .}}
-<tr><td><code>{{.session_id}}</code></td><td>{{with .id}}<a class="id" href="#item-{{anchor .}}">{{.}}</a>{{else}}-{{end}}</td><td>{{.source}}</td><td class="num">{{tokens .weighted}}</td><td class="reason">{{.reason}}</td></tr>
+<tr><td><code>{{.session_id}}</code></td><td>{{with .id}}<a class="id" href="#item-{{anchor .}}">{{.}}</a>{{else}}-{{end}}</td><td>{{.source}}</td><td>{{if eq .state "ended"}}ended{{else}}last seen {{ago .last_seen}}{{end}}</td><td class="num">{{tokens .weighted}}</td><td class="reason">{{.reason}}</td></tr>
 {{- end}}
 </tbody>
 </table></div>
 {{- end}}
+</div></details>
 
-<h2>Running drive</h2>
+<details open="" id="running-drive" class="section"><summary><h2>Running drive</h2></summary><div class="body">
 {{- $running := false}}
 {{- range .drives}}{{if .running}}{{$running = true}}
 <p><span class="id">{{.id}}</span>{{with .label}} · {{.}}{{end}}{{if .paused}}{{with pausing $.lease}} · <span class="state drover-pausing">pausing</span> <span class="meta">{{.}} still finishing a stage</span>{{else}} · <span class="state drover-paused">paused</span>{{end}}{{end}} <span class="meta">started {{ago .started}}{{with .jobs}} · {{.}} at a time{{end}}</span></p>
@@ -132,8 +139,9 @@ th { font-weight: 600; }
 {{- if not $running}}
 <p class="empty">No drive is running.</p>
 {{- end}}
+</div></details>
 
-<h2>Open</h2>
+<details open="" id="open" class="section"><summary><h2>Open</h2></summary><div class="body">
 {{- range groups .items .drives .lease}}
 <h3>{{if .drive}}Drive {{.drive}}{{with .label}} · {{.}}{{end}}{{else}}No drive{{end}}</h3>
 {{- range .states}}{{$st := .}}
@@ -153,8 +161,9 @@ th { font-weight: 600; }
 {{- else}}
 <p class="empty">Nothing is open.</p>
 {{- end}}
+</div></details>
 
-<h2>Done</h2>
+<details open="" id="done" class="section"><summary><h2>Done</h2></summary><div class="body">
 {{- with done .items}}
 <div class="scroll"><table class="items">
 <thead><tr><th>Item</th><th>Title</th><th>Level</th><th>PR</th><th>Merged</th><th>Tokens</th><th>List $</th></tr></thead>
@@ -167,8 +176,9 @@ th { font-weight: 600; }
 {{- else}}
 <p class="empty">Nothing has merged yet.</p>
 {{- end}}
+</div></details>
 
-<h2>Trends</h2>
+<details open="" id="trends" class="section"><summary><h2>Trends</h2></summary><div class="body">
 {{- with .trends}}
 <p class="meta">{{.from}} to {{.to}}, {{.window}} days. n is how many items each figure is read from; n/a is a period with nothing to read.</p>
 <table>
@@ -185,9 +195,12 @@ th { font-weight: 600; }
 <tr><td>Verify, median</td><td class="num">{{with .verify}}{{secs .median}}{{else}}n/a{{end}}</td><td class="num">{{with .verify}}{{.n}}{{end}}</td><td>{{spark $d "verify" "median"}}</td></tr>
 {{- end}}
 </table>
+{{- else}}
+<p class="empty">No trends to read.</p>
 {{- end}}
+</div></details>
 
-<h2 id="key">Key</h2>
+<details open="" id="key" class="section"><summary><h2>Key</h2></summary><div class="body">
 <p class="meta">Red waits on a person, yellow is moving, gray is held by a paused drive, orange cannot move yet or is unproven, green is settled.</p>
 <table class="key">
 <tr><td><span class="state drover-needs-operator">needs-operator</span></td><td>Waiting on you. Needs you names the command.</td></tr>
@@ -204,12 +217,45 @@ th { font-weight: 600; }
 <tr><td><span class="state drover-unaudited">unaudited</span></td><td>Merged, and nobody has audited it.</td></tr>
 <tr><td><span class="state">follow-up</span></td><td>An open follow-up nothing is scheduled to carry.</td></tr>
 </table>
+</div></details>
 
 <footer>
 {{- with .usage}}
 <p>Usage {{if eq .window "7d"}}over the last 7 days{{else}}since {{time "Mon 2006-01-02 15:04 MST" .window}}{{end}}: {{tokens .weighted}} weighted tokens, {{usd .cost_usd}} at list price{{with .budget_used}} · {{$c := budget .}}<span class="state{{with $c}} drover-{{.}}{{end}}">budget {{pct .}}</span> of {{tokens $.usage.budget}} across every project{{end}}{{with .budget_unread}} · not read: {{range $i, $p := .}}{{if $i}}; {{end}}{{$p}}{{end}}{{end}}</p>
 {{- end}}
 Rendered {{time "2006-01-02 15:04 MST" .now}} ({{.zone}}) · {{.project}} · drover {{.version}}</footer>
+{{- /* Without storage or script every section stays open, as the markup has it. The script holds no < or & so the page still parses as XML. */}}
+<script>
+(function () {
+  var sections = document.querySelectorAll("details.section");
+  var key = "drover-sections:" + document.getElementById("contents").getAttribute("data-project");
+  try {
+    var saved = JSON.parse(localStorage.getItem(key));
+    if (saved !== null) {
+      sections.forEach(function (d) {
+        if (typeof saved[d.id] === "boolean") d.open = saved[d.id];
+      });
+    }
+  } catch (e) {}
+  sections.forEach(function (d) {
+    d.addEventListener("toggle", function () {
+      var state = {};
+      sections.forEach(function (s) { state[s.id] = s.open; });
+      try { localStorage.setItem(key, JSON.stringify(state)); } catch (e) {}
+    });
+  });
+  function reveal(id) {
+    for (var el = document.getElementById(id); el; el = el.parentElement) {
+      if (el.tagName === "DETAILS") el.open = true;
+    }
+  }
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest("a[href^='#']");
+    if (a) reveal(a.getAttribute("href").slice(1));
+  });
+  window.addEventListener("hashchange", function () { reveal(location.hash.slice(1)); });
+})();
+</script>
 {{- end}}
 </body>
 </html>
