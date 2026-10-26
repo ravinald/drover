@@ -30,6 +30,11 @@ type Key struct {
 	// Default is the TOML literal drover resolves the key to when nothing
 	// declares it, so a reported line pastes into a file unchanged.
 	Default string
+	// Unset is what leaving the key out means, for a key whose unset state no
+	// value can write: every literal it accepts is a decision. Empty for every
+	// other key. A report prints such a key commented out, naming this, so that
+	// pasting the report leaves it unset.
+	Unset string
 	// Open marks a table whose entry names a project chooses: [verify],
 	// [runners], ids.namespaces. Nothing can enumerate those, so the table is
 	// the unit reported and its entries are never missing.
@@ -46,6 +51,7 @@ func Keys() []Key {
 		if def, ok := resolved[k.Dotted]; ok {
 			out[i].Default = def
 		}
+		out[i].Unset = unset[k.Dotted]
 	}
 	return out
 }
@@ -66,6 +72,23 @@ var resolved = map[string]string{
 	"usage.context_warn":      strconv.Itoa(DefaultContextWarn),
 	"usage.overage.mode":      strconv.Quote(OveragePause),
 	"notify.coalesce":         strconv.Quote("0s"),
+
+	// A usage level nobody set is no step at all, which "off" also says, and
+	// 0 does not: pause_remaining = 0 holds at 100% used.
+	"usage.weekly.notify_remaining":    strconv.Quote(Off),
+	"usage.weekly.pause_remaining":     strconv.Quote(Off),
+	"usage.five_hour.notify_remaining": strconv.Quote(Off),
+	"usage.five_hour.pause_remaining":  strconv.Quote(Off),
+	"usage.overage.max_usd":            strconv.Quote(Off),
+	"usage.overage.notify_usd":         strconv.Quote(Off),
+}
+
+// unset are the keys whose zero value is a load error or a decision, and that
+// have no literal meaning unset, each with what unset means. The zero value
+// still sits in Default, because Keys answers what the struct holds; a report
+// that prints one of these prints it commented.
+var unset = map[string]string{
+	"usage.weekly_budget": "no budget",
 }
 
 // NotifyKeys is every key under notify., the destination keys written under

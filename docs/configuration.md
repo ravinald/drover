@@ -87,6 +87,8 @@ A third section appears where either file declares a key nothing here reads, eac
 
 The headers name where each line goes rather than being part of the paste. A stanza for a table the file does not have yet appends whole; one for a table it already declares does not, because TOML refuses the second header.
 
+A pasted line never changes what the config resolves to, so a key printed at its zero value would have to mean what leaving it out means. The usage levels do not: `pause_remaining = 0` is a hold at 100% used, and `max_usd = 0` refuses to load. The six usage level keys in `[usage.weekly]`, `[usage.five_hour]` and `[usage.overage]` print as `"off"`, which says no such step the way leaving them out does. A key with no value that means unset, such as `[usage] weekly_budget`, prints commented and names what unset means (`# weekly_budget =   # unset: no budget`), so pasting the stanza leaves it out.
+
 A key this build reads that the per-user config supplies reaches neither of the first two sections. Repeating it in a project file would shadow the global value rather than inherit it, and the next edit to that file would then silently miss this project. A retired key in the per-user config is still reported, in the third section, against the per-user file.
 
 Without `--diff` the whole file is printed, from the same generator `drover init` uses and carrying this project's own values. That answers a different question: what would today's config look like with my decisions in it. The live lines in it are what the project's own file declares, plus the current `schema_version`:
