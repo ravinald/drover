@@ -113,10 +113,19 @@ var (
 	okWords   = regexp.MustCompile(`\b(merged|passed|finished|ready_to_merge|merged_by_drover|merged_immediately)\b`)
 	// idWord is an id that cannot be a count: a prefixed one (B84, F14) or a
 	// drive's (D3). A bare planned id is a number, so it is an id only where
-	// the line's form says so: leading a detail line, or a line of its own.
-	idWord    = regexp.MustCompile(`\b[A-Z][0-9]+[a-z]?\b`)
-	leadID    = regexp.MustCompile(`^(\s*· )([A-Za-z]?[0-9]+[a-z]?)(:)`)
+	// the line's form says so: leading a detail line or a warning, heading a
+	// stage's preamble, listed on the drive header, or on a line of its own.
+	idWord = regexp.MustCompile(`\b[A-Z][0-9]+[a-z]?\b`)
+	// A detail line's id is followed by a colon, because "· 4 merged" opens
+	// on a count.
+	leadIDs = []*regexp.Regexp{
+		regexp.MustCompile(`^(\s*· )([A-Za-z]?[0-9]+[a-z]?)(:)`),
+		regexp.MustCompile(`^(\s*! )([A-Za-z]?[0-9]+[a-z]?)([: ])`),
+		regexp.MustCompile(`^(\s*==> )([A-Za-z]?[0-9]+[a-z]?)( · )`),
+	}
+	idList    = regexp.MustCompile(`^(\s*==> drive · [0-9]+ items?: )(.+)$`)
 	bareID    = regexp.MustCompile(`^[A-Za-z]?[0-9]+[a-z]?$`)
+	zeroCount = regexp.MustCompile(`(^|[^0-9.])0 $`)
 	oscLink   = regexp.MustCompile(`\x1b\]8;;[^\x1b]*\x1b\\`)
 	cmdOnce   sync.Once
 	cmdRegexp *regexp.Regexp
@@ -218,7 +227,7 @@ func lineRole(s string) string {
 		role string
 	}{{failWords, pal.Fail}, {warnWords, pal.Warn}, {okWords, pal.OK}} {
 		for _, m := range c.re.FindAllStringIndex(s, -1) {
-			if !strings.HasSuffix(s[:m[0]], "0 ") {
+			if !zeroCount.MatchString(s[:m[0]]) {
 				return c.role
 			}
 		}
@@ -230,9 +239,19 @@ func lineRole(s string) string {
 // so a URL keeps its bytes.
 func highlight(line string) string {
 	var b strings.Builder
-	if p := leadID.FindStringSubmatch(line); p != nil {
-		b.WriteString(p[1] + sgr(p[2], pal.ID, true) + p[3])
-		line = line[len(p[0]):]
+	if p := idList.FindStringSubmatch(line); p != nil {
+		ids := strings.Split(p[2], " ")
+		for i, id := range ids {
+			ids[i] = sgr(id, pal.ID, true)
+		}
+		return p[1] + strings.Join(ids, " ")
+	}
+	for _, re := range leadIDs {
+		if p := re.FindStringSubmatch(line); p != nil {
+			b.WriteString(p[1] + sgr(p[2], pal.ID, true) + p[3])
+			line = line[len(p[0]):]
+			break
+		}
 	}
 	at := 0
 	for _, m := range oscLink.FindAllStringIndex(line, -1) {
@@ -244,6 +263,18 @@ func highlight(line string) string {
 	return b.String()
 }
 
+// referents are the words that make what follows a noun phrase, so "the next
+// drover drive finishes it" names a drive and tells nobody to run one.
+var referents = map[string]bool{"the": true, "a": true, "an": true, "next": true, "this": true,
+	"that": true, "each": true, "every": true, "one": true}
+
+// namesACommand reports whether the text before a match turns it into prose
+// about a command rather than a command to run.
+func namesACommand(before string) bool {
+	words := strings.Fields(before)
+	return len(words) > 0 && referents[strings.ToLower(words[len(words)-1])]
+}
+
 func highlightText(s string) string {
 	ids := func(t string) string {
 		return idWord.ReplaceAllStringFunc(t, func(id string) string { return sgr(id, pal.ID, true) })
@@ -251,7 +282,7 @@ func highlightText(s string) string {
 	var b strings.Builder
 	at := 0
 	for _, m := range commandPattern().FindAllStringIndex(s, -1) {
-		if m[0] < at {
+		if m[0] < at || namesACommand(s[:m[0]]) {
 			continue
 		}
 		end := commandEnd(s, m[1])

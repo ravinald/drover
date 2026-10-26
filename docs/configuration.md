@@ -438,7 +438,7 @@ The palette names roles rather than colors. It uses the 16 base ANSI colors plus
 | `command` | magenta | a command the operator is told to run, such as `drover drive --resume`         |
 | `muted`   | dim     | timestamps and the comments beside help's examples                             |
 
-The `[severity]` colors are applied through the same mechanism and keep their own palette, which is 256-color because orange has no base ANSI code.
+The `[severity]` colors are applied through the same mechanism and draw on the same 16 base colors: `red` is red (31), `orange` is bright red (91, since the base set has no orange), `yellow` is yellow (33), `blue` is bright blue (94, because base blue is hard to read on a dark background), `green` is green (32), `grey` is bright black (90), and `white` emits no escape, leaving the terminal's own foreground.
 
 ## `[run]`
 

@@ -134,6 +134,9 @@ func TestStyleLineRoles(t *testing.T) {
 		{"  ! 4 implements and reviews with one runner (claude). Driving anyway.", pal.Warn},
 		{"  · 4: run exited 2 (exit status 2); asking the ledger anyway", pal.Fail},
 		{"  · 4: the verify command exited 0 after 3s", pal.Detail},
+		{"· 10 parked since the last drive", pal.Fail},
+		{"· 20 failed since the last drive", pal.Fail},
+		{"· 0 parked since the last drive", pal.Detail},
 	} {
 		got := styleLine(c.line)
 		if !strings.HasPrefix(got, "\x1b["+c.role+"m") {
@@ -151,6 +154,25 @@ func TestStyleLineRoles(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("styled %q, want it to carry %q", got, want)
 		}
+	}
+	for _, line := range []string{
+		"==> 2 · implement · branch second · round 1",
+		"  ! 2 parked no_record at abc: the review recorded nothing",
+		"==> drive · 2 items: 1 2",
+	} {
+		if got := styleLine(line); !strings.Contains(got, sgr("2", pal.ID, true)) {
+			t.Errorf("styled %q, want 2 in id", got)
+		}
+	}
+	if got := styleLine("==> drive · 2 items: 1 2"); !strings.Contains(got, sgr("1", pal.ID, true)) ||
+		!strings.Contains(got, "\x1b[1m==> drive · 2 items: ") {
+		t.Errorf("styled %q, want each listed id in id and the count left alone", got)
+	}
+	if got := styleLine("· 4 merged since the last drive"); strings.Contains(got, sgr("4", pal.ID, true)) {
+		t.Errorf("styled %q, want the count left out of id", got)
+	}
+	if got := styleLine("  Next steps: nothing yet: the next drover drive finishes it"); strings.Contains(got, pal.Command+"m") {
+		t.Errorf("styled %q, want prose naming a drive left uncolored", got)
 	}
 	if got := styleLine("· B84 is merged, but drover never launched it"); !strings.Contains(got, sgr("B84", pal.ID, true)) ||
 		strings.Contains(got, pal.Command+"m") {

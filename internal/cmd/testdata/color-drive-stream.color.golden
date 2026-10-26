@@ -1,11 +1,11 @@
 == stderr
-[1m==> drive · 2 items: 1 2[0m
+[1m==> drive · 2 items: [36m1[0m[1m [36m2[0m[1m[0m
 [1m==> runners: implement per item (default impl) · review rev[0m
 [1m==> prompts: implement built-in default · review built-in review[0m
 [1m==> bounds: unbounded · merge: [drive] merge_gate decides[0m
 [1m==> forge: push each branch to origin · open a pull request for what the merge gate passes, then ask the forge to merge it[0m
 [2m  · work not linked into the worktree: git would not ignore a link there (ignore it as work, without the trailing slash, to give sessions a copy)[0m
-[1m==> 1 · implement · branch first · round 1[0m
+[1m==> [36m1[0m[1m · implement · branch first · round 1[0m
 [1m==> item   work/01-first.md[0m
 [1m==> prompt built-in default[0m
 [1m==> runner impl: <path>[0m
@@ -13,7 +13,7 @@
 [1m==> log    <path>[0m
 
 [1m==> report saved: reports/01-first.md[0m
-[1m==> 1 · review · branch first · round 1[0m
+[1m==> [36m1[0m[1m · review · branch first · round 1[0m
 [1m==> item   work/01-first.md[0m
 [1m==> prompt built-in review[0m
 [1m==> runner rev: <path>[0m
@@ -23,7 +23,7 @@
 [2m  · [36m1[0m[2m: merge queued at the forge; the next drive finishes it[0m
 [2m  · work not linked into the worktree: git would not ignore a link there (ignore it as work, without the trailing slash, to give sessions a copy)[0m
 [2m  · reports not linked into the worktree: git would not ignore a link there (ignore it as reports, without the trailing slash, to give sessions a copy)[0m
-[1m==> 2 · implement · branch second · round 1[0m
+[1m==> [36m2[0m[1m · implement · branch second · round 1[0m
 [1m==> item   work/02-second.md[0m
 [1m==> prompt built-in default[0m
 [1m==> runner impl: <path>[0m
@@ -31,20 +31,20 @@
 [1m==> log    <path>[0m
 
 [1m==> report saved: reports/02-second.md[0m
-[1m==> 2 · review · branch second · round 1[0m
+[1m==> [36m2[0m[1m · review · branch second · round 1[0m
 [1m==> item   work/02-second.md[0m
 [1m==> prompt built-in review[0m
 [1m==> runner rev: <path>[0m
 [1m==> argv   <path> <prompt>[0m
 [1m==> log    <path>[0m
 
-[31m  ! 2 parked no_record at <sha>: the review recorded nothing: no audit and no request for changes, so what it found is unknown[0m
+[31m  ! [36m2[0m[31m parked no_record at <sha>: the review recorded nothing: no audit and no request for changes, so what it found is unknown[0m
 
 2 attempted · [32m1 ready to merge[0m · [31m1 parked[0m · 0 skipped
 
 [36m1[0m
   Outcome:    green and reviewed; PR #7 went to the forge to merge: merge queued at the forge; the next drive finishes it
-  Next steps: nothing yet: the next [35mdrover drive[0m finishes it, or [35mdrover finish 1[0m once the forge has merged it
+  Next steps: nothing yet: the next drover drive finishes it, or [35mdrover finish 1[0m once the forge has merged it
 
 [36m2[0m
   Outcome:    the review recorded nothing: no audit and no request for changes, so what it found is unknown
