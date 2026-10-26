@@ -62,10 +62,6 @@ enabled = true
 // reason the marker exists.
 func TestNewScaffoldsAnItemRunRefusesUntilAccepted(t *testing.T) {
 	dir := newProject(t)
-	// runDry is a package-level flag cobra does not reset between Execute calls,
-	// so a test that dry-runs leaves every later one dry — and a dry run writes
-	// no ledger row.
-
 	capture(t, func() {
 		if err := execute(t, "new", "bug", "the resolver drops a trailing dot"); err != nil {
 			t.Fatalf("new: %v", err)

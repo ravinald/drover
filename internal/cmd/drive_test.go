@@ -1185,8 +1185,6 @@ func splitGateLine(t *testing.T, line string) (branch, local, remote string) {
 // config error as an absent gate: it fails identically for every item, and a
 // park per item reports it once per paid session.
 func TestDriveRefusesAQueueItCannotPush(t *testing.T) {
-	// driveDry among them: this case passes --dry-run, and a leaked preview flag
-	// turns every later drive in the package into one that launches nothing.
 	s := driveProject(t)
 	dir := s.cfg.Root
 	git(t, dir, "remote", "remove", "origin")

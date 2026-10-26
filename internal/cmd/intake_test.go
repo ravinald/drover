@@ -357,8 +357,6 @@ esac
 	bin := stubPATH(t)
 	stub(t, filepath.Join(bin, "gh"), script)
 	t.Chdir(dir)
-	// Both flags are package state cobra never resets between executions, so a
-	// promotion test would leave --kind and --json set for whatever runs next.
 	return dir
 }
 
