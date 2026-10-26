@@ -553,11 +553,11 @@ func originRepo(root string) string {
 	return ""
 }
 
-// markerIgnore is the .gitignore line for the session marker. The marker alone
-// rather than .drover/: that directory is where a project keeps its backlog by
-// default, and ignoring it would drop the backlog of every project that
-// versions it.
-var markerIgnore = "/" + runner.MarkerDir + "/" + runner.MarkerName
+// markerIgnore is the .gitignore line for the session marker. The whole
+// directory rather than the marker alone: it is also where the backlog lives by
+// default, and the config init writes already advises keeping that out of the
+// published tree.
+var markerIgnore = runner.MarkerDir + "/"
 
 // ignoreMarker appends markerIgnore to dir's .gitignore unless a line there
 // already names the marker, and reports whether it wrote.
@@ -569,7 +569,7 @@ func ignoreMarker(dir string) (bool, error) {
 	}
 	for _, line := range strings.Split(string(b), "\n") {
 		switch strings.TrimSpace(line) {
-		case markerIgnore, markerIgnore[1:], "/" + runner.MarkerDir + "/", runner.MarkerDir + "/", runner.MarkerDir:
+		case markerIgnore, "/" + markerIgnore, runner.MarkerDir, "/" + runner.MarkerDir + "/" + runner.MarkerName, runner.MarkerDir + "/" + runner.MarkerName:
 			return false, nil
 		}
 	}

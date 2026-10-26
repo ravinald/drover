@@ -101,7 +101,7 @@ const idPush = " Under [ids] allocator = \"git\" it first reserves the id by pus
 var classified = map[string]classification{
 	// Setup
 	"init": {group: groupSetup, class: localWrite, who: either,
-		effect: "Writes .drover.toml and the directories it names, in the working directory, and in a git work tree appends .drover/session to .gitignore unless a line there already names it. Refuses if one is already there. --user writes the per-user config under $XDG_CONFIG_HOME/drover, or ~/.config/drover, instead, refuses if one is already there, and touches no project. init supervise appends a [supervise] table to .drover.toml when it has none, and otherwise prints one."},
+		effect: "Writes .drover.toml and the directories it names, in the working directory, and in a git work tree appends .drover/ to .gitignore unless a line there already names it or the marker. Refuses if one is already there. --user writes the per-user config under $XDG_CONFIG_HOME/drover, or ~/.config/drover, instead, refuses if one is already there, and touches no project. init supervise appends a [supervise] table to .drover.toml when it has none, and otherwise prints one."},
 	"projects": {group: groupSetup, class: readOnly, who: either,
 		effect: "Reads the per-user registry beside the global config. Needs no project."},
 	"schema": {group: groupSetup, class: readOnly, who: either,

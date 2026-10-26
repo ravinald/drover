@@ -2,11 +2,14 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/ravinald/drover/internal/runner"
 	"github.com/spf13/cobra"
@@ -132,7 +135,7 @@ func TestCheckReportsAStaleOrTrackedMarkerAndNotALiveOne(t *testing.T) {
 	}
 }
 
-func TestInitIgnoresTheMarkerAndNotTheBacklog(t *testing.T) {
+func TestInitIgnoresTheMarkerDirectory(t *testing.T) {
 	dir := t.TempDir()
 	if added, err := ignoreMarker(dir); err != nil || !added {
 		t.Fatalf("ignoreMarker on no .gitignore: %v, %v", added, err)
@@ -140,7 +143,7 @@ func TestInitIgnoresTheMarkerAndNotTheBacklog(t *testing.T) {
 	if added, err := ignoreMarker(dir); err != nil || added {
 		t.Errorf("a second ignoreMarker wrote again: %v, %v", added, err)
 	}
-	if got := read(t, filepath.Join(dir, ".gitignore")); got != "/.drover/session\n" {
+	if got := read(t, filepath.Join(dir, ".gitignore")); got != ".drover/\n" {
 		t.Errorf(".gitignore = %q", got)
 	}
 
@@ -161,7 +164,7 @@ func TestInitIgnoresTheMarkerAndNotTheBacklog(t *testing.T) {
 	if err := execute(t, "init", "--verify", "true"); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	if got := read(t, filepath.Join(repo, ".gitignore")); got != "/.drover/session\n" {
+	if got := read(t, filepath.Join(repo, ".gitignore")); got != ".drover/\n" {
 		t.Errorf("init left .gitignore as %q", got)
 	}
 }
@@ -215,5 +218,138 @@ func TestHelpNamesTheMarkerAndTheOptOut(t *testing.T) {
 		if !strings.Contains(help(name), "writes .drover/session") {
 			t.Errorf("%s --help: the Safety line does not name the session marker", name)
 		}
+	}
+}
+
+// plantSealed is plantMarker with the .drover/.gitignore claim drops beside the
+// marker, so the checkout stays clean and run gets as far as the marker.
+func plantSealed(t *testing.T, dir string, m runner.Marker) string {
+	t.Helper()
+	path := plantMarker(t, dir, m)
+	write(t, filepath.Join(filepath.Dir(path), ".gitignore"), "/session\n/.gitignore\n")
+	return path
+}
+
+// A person's plain run from the checkout another run holds is told which
+// marker and which session hold it, not that drover launched them; and one
+// left by a drover that died is replaced with no export.
+func TestAPlainRunFromTheCheckoutJudgesItsMarker(t *testing.T) {
+	s, launches := treeProject(t)
+	dir := s.cfg.Root
+	t.Chdir(dir)
+
+	path := plantSealed(t, dir, runner.Marker{Actor: runner.ActorAgent, Session: "s-other", Root: dir, PID: os.Getpid()})
+	err := execute(t, "run", "1", "--headless")
+	if Code(err) != ExitRefused || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "s-other") {
+		t.Fatalf("run beside a live marker: %v (exit %d), want exit %d naming %s and s-other", err, Code(err), ExitRefused, path)
+	}
+	if strings.Contains(err.Error(), "launched by drover") {
+		t.Errorf("a person was told drover launched them: %v", err)
+	}
+	if got := launched(t, launches); len(got) != 0 {
+		t.Fatalf("a refused run launched %v", got)
+	}
+
+	plantSealed(t, dir, runner.Marker{Actor: runner.ActorAgent, Session: "s-gone", Root: dir, PID: goneDrover(t)})
+	stderr := captureStream(t, &os.Stderr, func() {
+		if err := execute(t, "run", "1", "--headless"); err != nil {
+			t.Fatalf("run beside a stale marker: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "replacing stale session marker "+path) {
+		t.Errorf("stderr does not report the stale marker:\n%s", stderr)
+	}
+	if got := launched(t, launches); len(got) != 1 {
+		t.Errorf("launches after the stale marker: %v, want one", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("the run left its marker behind: %v", err)
+	}
+}
+
+// A refusal a marker caused says so, and names the way out for each case.
+func TestARefusalFromAMarkerNamesItAndTheWayOut(t *testing.T) {
+	dir := markerProject(t, map[string]string{"B01-scaffold.md": scaffold})
+	path := plantMarker(t, dir, runner.Marker{Actor: runner.ActorAgent, Session: "s-gone", Root: dir, PID: goneDrover(t)})
+	t.Chdir(dir)
+	err := execute(t, "accept", "B1")
+	if Code(err) != ExitRefused {
+		t.Fatalf("accept under a stale marker: %v (exit %d), want exit %d", err, Code(err), ExitRefused)
+	}
+	for _, want := range []string{path, "s-gone", "not running", "rm " + path, "DROVER_ACTOR=operator"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q:\n%v", want, err)
+		}
+	}
+
+	plantMarker(t, dir, runner.Marker{Actor: runner.ActorAgent, Session: "s-live", Root: dir, PID: os.Getpid()})
+	for _, err := range []error{gate("finish"), operatorStep("init supervise", "x"), sealedFlag("request-changes", "over-limit", "x")} {
+		if Code(err) != ExitRefused || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), ", running") ||
+			!strings.Contains(err.Error(), "DROVER_ACTOR=operator") {
+			t.Errorf("a refusal under a live marker: %v", err)
+		}
+	}
+
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(runner.EnvActor, runner.ActorAgent)
+	if err := gate("finish"); err == nil || strings.Contains(err.Error(), "session marker") {
+		t.Errorf("the environment's refusal changed: %v", err)
+	}
+	if err := noNestedLaunch(); !errors.Is(err, runner.ErrNested) {
+		t.Errorf("the environment's launch refusal: %v, want ErrNested", err)
+	}
+}
+
+// A closed terminal tab sends SIGHUP, and the run it ends removes its marker.
+func TestAHangupRemovesTheMarker(t *testing.T) {
+	s, _ := treeProject(t)
+	dir := s.cfg.Root
+	bin := t.TempDir()
+	stub(t, filepath.Join(bin, "stub-impl"), "#!/bin/sh\nexec sleep 30\n")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := exec.Command(self, "run", "1", "--headless")
+	c.Dir = dir
+	c.Env = append(os.Environ(), envAsDrover+"=1")
+	var stderr strings.Builder
+	c.Stderr = &stderr
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- c.Wait() }()
+	t.Cleanup(func() {
+		_ = c.Process.Kill()
+		select {
+		case <-exited:
+		default:
+		}
+	})
+
+	path := runner.MarkerPath(dir)
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(path); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the run never wrote its marker\n%s", stderr.String())
+		}
+	}
+	if err := c.Process.Signal(syscall.SIGHUP); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-exited:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the run did not exit on SIGHUP")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("SIGHUP left %s behind: %v\n%s", path, err, stderr.String())
 	}
 }

@@ -95,27 +95,76 @@ func FindMarker(dir string) (string, Marker, bool) {
 // two sessions in one tree.
 func Alive(pid int) bool { return pid > 0 && processAlive(pid) }
 
-// ambient is the actor and session this process runs under: the
-// environment's when EnvActor is set, the nearest marker's otherwise. The root
-// is config.Find's to read, from the directory it was asked about.
-func ambient() (actor, session string) {
+// seal is the actor and session this process runs under, and the marker that
+// says so when the environment does not. path is empty for the environment's.
+type seal struct {
+	actor, session string
+	path           string
+	marker         Marker
+}
+
+// ambient is the environment's seal when EnvActor is set, the nearest marker's
+// otherwise. The root is config.Find's to read, from the directory it was asked
+// about.
+func ambient() seal {
 	if a := os.Getenv(EnvActor); a != "" {
 		if a == ActorOperator {
-			return a, ""
+			return seal{actor: a}
 		}
-		return a, os.Getenv(EnvSession)
+		return seal{actor: a, session: os.Getenv(EnvSession)}
 	}
 	wd, err := os.Getwd()
 	if err != nil {
-		return "", ""
+		return seal{}
 	}
-	if _, m, ok := FindMarker(wd); ok {
+	if path, m, ok := FindMarker(wd); ok {
 		if m.Actor == ActorOperator {
-			return m.Actor, ""
+			return seal{actor: m.Actor}
 		}
-		return m.Actor, m.Session
+		return seal{actor: m.Actor, session: m.Session, path: path, marker: m}
 	}
-	return "", ""
+	return seal{}
+}
+
+// SealedBy is the marker that seals this process, when a marker rather than the
+// environment does. A refusal reads it to say what sealed a person's terminal,
+// because "drover launched this session" is not true of one.
+func SealedBy() (string, Marker, bool) {
+	s := ambient()
+	if s.path == "" {
+		return "", Marker{}, false
+	}
+	return s.path, s.marker, true
+}
+
+// NestedLaunch is the refusal for a launch from this process, nil when nothing
+// seals it against one.
+//
+// The environment refuses with ErrNested, because only drover sets it. A marker
+// refuses only while its pid runs, and with ErrOccupied naming it: the process
+// reading it may be a person in a tree a session holds, whom ErrNested would
+// misdescribe. A marker whose pid is gone seals no launch, because the session
+// it names has ended and claim replaces the file when the launch lands in the
+// same tree.
+func NestedLaunch() error {
+	s := ambient()
+	switch {
+	case s.actor == "" || s.actor == ActorOperator:
+		return nil
+	case s.path == "":
+		return ErrNested
+	case !Alive(s.marker.PID):
+		return nil
+	}
+	return occupied(s.path, s.marker,
+		"; a person launching from inside that tree on purpose exports "+EnvActor+"="+ActorOperator+" first")
+}
+
+// occupied is ErrOccupied naming the marker and the session it belongs to.
+func occupied(path string, m Marker, more string) error {
+	return fmt.Errorf("%w: %s names session %s (%s, drover pid %d, started %s).\n"+
+		"Wait for it to end, or remove the file if that process is not drover%s",
+		ErrOccupied, path, blank(m.Session), m.Actor, m.PID, m.Started.Format(time.RFC3339), more)
 }
 
 // claim writes the marker for a launch into dir and returns what removes it.
@@ -181,9 +230,7 @@ func claim(dir string, m Marker) (func(), error) {
 		old, _ := ReadMarker(path)
 		if Alive(old.PID) {
 			undo()
-			return nil, fmt.Errorf("%w: %s names session %s (%s, drover pid %d, started %s).\n"+
-				"Wait for it to end, or remove the file if that process is not drover",
-				ErrOccupied, path, blank(old.Session), old.Actor, old.PID, old.Started.Format(time.RFC3339))
+			return nil, occupied(path, old, "")
 		}
 		fmt.Fprintf(os.Stderr, "warn: replacing stale session marker %s: session %s, pid %d is not running\n",
 			path, blank(old.Session), old.PID)

@@ -75,11 +75,12 @@ func init() {
 // Execute runs the root command.
 func Execute() error {
 	install()
-	// One context for the process, cancelled by an interrupt or a terminate, and
+	// One context for the process, cancelled by an interrupt, a terminate or a
+	// hangup (a closed terminal tab, which ends an interactive run), and
 	// handed to every command through cmd.Context(). The launch paths pass it to
 	// runner.Run, which signals the child's process group: without this the
 	// signal reaches drover and leaves the agent it started running.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 	return root.ExecuteContext(ctx)
 }

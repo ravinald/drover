@@ -64,8 +64,7 @@ const EnvSession = "DROVER_SESSION"
 // Session is the id this process was launched under, empty outside a session
 // drover started and under ActorOperator.
 func Session() string {
-	_, session := ambient()
-	return session
+	return ambient().session
 }
 
 // NewSession mints a launch id. It names one launch and nothing else, so a
@@ -104,15 +103,14 @@ type Where struct {
 // started, by its environment or by the marker in the tree it works in.
 // Commands that belong to the operator read it to refuse.
 func Launched() bool {
-	actor, _ := ambient()
+	actor := ambient().actor
 	return actor != "" && actor != ActorOperator
 }
 
 // Supervising reports whether this process runs inside the session `drover
 // supervise` started.
 func Supervising() bool {
-	actor, _ := ambient()
-	return actor == ActorSupervisor
+	return ambient().actor == ActorSupervisor
 }
 
 // Mode is how a run is executed.
@@ -411,7 +409,9 @@ func Run(ctx context.Context, at Where, spec Spec, mode Mode, prompt, logPath st
 		actor = ActorAgent
 	}
 	if Launched() && (!Supervising() || actor == ActorSupervisor || mode != Headless) {
-		return oc, ErrNested
+		if err := NestedLaunch(); err != nil {
+			return oc, err
+		}
 	}
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) // #nosec G204 -- argv is project config, not user input
@@ -441,7 +441,7 @@ func Run(ctx context.Context, at Where, spec Spec, mode Mode, prompt, logPath st
 	cmd.Dir = at.Dir
 	// The same three values, on disk, for whatever else opens a session in this
 	// tree. Removed by the defer on every return below: a cancelled context and
-	// the SIGINT or SIGTERM root turns into one both come back through Wait. A
+	// the SIGINT, SIGTERM or SIGHUP root turns into one both come back through Wait. A
 	// SIGKILL to drover leaves it, and the next launch or check names it stale.
 	release, err := claim(at.Dir, Marker{
 		Actor: actor, Session: session, Root: at.Root, PID: os.Getpid(), Started: time.Now().UTC().Truncate(time.Second),

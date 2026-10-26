@@ -128,7 +128,7 @@ A command that finds `DROVER_ACTOR` unset walks up from its working directory to
 
 A sandbox that starts sessions itself (a T3 Code thread, a hosted agent) and wants the seal to hold writes this file into the session's working directory before it starts and removes it afterward. drover reads nothing else from it, so the sandbox's own process is the right `pid` to name.
 
-A launch into a directory whose marker names a running `pid` refuses with exit `3`, naming the marker and its session, because two sessions in one tree write over each other. A marker whose `pid` is gone is replaced, with a line on stderr saying so; `drover check` reports one as `SESSION MARKER`, as it does a marker git tracks. The launch adds a `.drover/.gitignore` naming the marker and itself when the directory has none, so an agent staging everything does not commit the seal, and `drover init` adds `/.drover/session` to the project's `.gitignore`. `drover show <id>` prints the marker in the item's worktree and the stage row naming its session.
+A launch into a directory whose marker names a running `pid` refuses with exit `3`, naming the marker and its session, because two sessions in one tree write over each other. A marker whose `pid` is gone is replaced, with a line on stderr saying so; `drover check` reports one as `SESSION MARKER`, as it does a marker git tracks. The launch adds a `.drover/.gitignore` naming the marker and itself when the directory has none, so an agent staging everything does not commit the seal, and `drover init` adds `.drover/` to the project's `.gitignore`. `drover show <id>` prints the marker in the item's worktree and the stage row naming its session.
 
 ### The supervisor
 
