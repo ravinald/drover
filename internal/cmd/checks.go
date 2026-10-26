@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	goversion "go/version"
 	"net/url"
 	"os/exec"
 	"regexp"
@@ -63,10 +64,6 @@ var infraPatterns = []string{
 	"Temporary failure in name resolution",
 	"connection reset by peer",
 	"TLS handshake timeout",
-	// govulncheck on a standard-library finding: the runner's setup-go installs
-	// the toolchain, so the patch release that fixes it arrives on a rerun and
-	// no diff can supply it.
-	"from the Go standard library",
 }
 
 // failurePatterns pick out the lines of a code failure's log that say what
@@ -81,6 +78,27 @@ var failurePatterns = []string{
 	`^\s*Found in: `,
 	`^\s*Fixed in: `,
 	`^panic: `,
+}
+
+// stdlibFixed is govulncheck's Fixed in line for a standard-library package,
+// whose version is a Go release where a module's is a semver tag.
+var stdlibFixed = regexp.MustCompile(`^\s*Fixed in: \S+@(go\d\S*)$`)
+
+// toolchainFix is the line telling a session how to fix a standard-library
+// vulnerability its failure lines name, and empty when they name none. A rerun
+// does not fix one: setup-go takes whatever patch release the runner image has
+// cached, and only go.mod picks a newer one.
+func toolchainFix(failure []string) string {
+	var newest string
+	for _, l := range failure {
+		if m := stdlibFixed.FindStringSubmatch(l); m != nil && goversion.Compare(m[1], newest) > 0 {
+			newest = m[1]
+		}
+	}
+	if newest == "" {
+		return ""
+	}
+	return "The fix is a `toolchain " + newest + "` line in go.mod, or one naming a newer release.\n"
 }
 
 // failureMax is how many lines a failure carries.

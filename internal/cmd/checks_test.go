@@ -28,7 +28,6 @@ import (
 //	infratrunk the first head read fails build with no step run; every other
 //	           head fails vuln, which main fails too
 //	joblog     build fails with $DROVER_TEST_CHECKS_LOG as its job log
-//	stdvuln    as joblog until its run is rerun, then green
 //
 // gh run rerun counts into reruns.
 func checksForge(t *testing.T, scenario string) string {
@@ -54,7 +53,7 @@ case "$*" in
     case "$DROVER_TEST_CHECKS_SCENARIO" in
       ratelimit) echo '2026-10-17T01:02:03.4567890Z Error response from daemon: toomanyrequests: You have reached your pull rate limit.' ;;
       disk) echo '2026-10-17T01:02:03.4567890Z write /tmp/go-build: No space left on device' ;;
-      joblog|stdvuln) cat "$DROVER_TEST_CHECKS_LOG" ;;
+      joblog) cat "$DROVER_TEST_CHECKS_LOG" ;;
       *) echo '2026-10-17T01:02:03.4567890Z GO-2026-6617 found in golang.org/x/net' ;;
     esac ;;
   *'/actions/jobs/'*)
@@ -92,7 +91,7 @@ case "$*" in
       infratrunk)
         [ -f "$DROVER_TEST_CHECKS_STATE/first" ] || echo "$sha" > "$DROVER_TEST_CHECKS_STATE/first"
         if [ "$(cat "$DROVER_TEST_CHECKS_STATE/first")" = "$sha" ]; then id=40; name=build; else name=vuln; fi ;;
-      ratelimit|stdvuln) [ "$reruns" -gt 0 ] && { echo '{"total_count":1,"check_runs":[{"id":'$id',"name":"build","status":"completed","conclusion":"success"}]}' ; exit 0 ; } ; name=build ;;
+      ratelimit) [ "$reruns" -gt 0 ] && { echo '{"total_count":1,"check_runs":[{"id":'$id',"name":"build","status":"completed","conclusion":"success"}]}' ; exit 0 ; } ; name=build ;;
       trunk|behind|pending) name=vuln ;;
       *) name=build ;;
     esac
@@ -625,47 +624,57 @@ func TestFailureLinesFallBackAndTakeConfiguredPatterns(t *testing.T) {
 	}
 }
 
-// govulncheck's standard-library finding is the runner's toolchain, which the
-// diff cannot change; one in a module is the code's.
-func TestAStandardLibraryVulnerabilityIsInfra(t *testing.T) {
-	b, err := os.ReadFile("testdata/f14-govulncheck-d9108ba.log")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := infraLine(string(b), infraPatterns); got != "Your code is affected by 1 vulnerability from the Go standard library." {
-		t.Errorf("infra line %q, want govulncheck's standard-library summary", got)
-	}
-	b, err = os.ReadFile("testdata/f14-revive-ae30c3c.log")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := infraLine(string(b), infraPatterns); got != "" {
-		t.Errorf("the lint log read infra on %q", got)
-	}
-	if got := infraLine("Your code is affected by 2 vulnerabilities from 1 module and the Go standard library.", infraPatterns); got != "" {
-		t.Errorf("a module vulnerability beside a standard-library one read infra on %q", got)
-	}
-}
-
-// The stdlib finding goes through rerun_infra_failure: rerun, and merged once
-// the rerun is green, with no round spent.
-func TestAStandardLibraryVulnerabilityIsRerun(t *testing.T) {
+// F14's govulncheck finding is in the standard library, and a rerun lands on
+// the runner's cached toolchain again, so it is code: sent back without a rerun,
+// with the release that fixes it and the go.mod line that installs it.
+func TestAStandardLibraryVulnerabilityIsCode(t *testing.T) {
 	logPath, err := filepath.Abs("testdata/f14-govulncheck-d9108ba.log")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ghLog := checksForge(t, "stdvuln")
+	ghLog := checksForge(t, "joblog")
 	t.Setenv("DROVER_TEST_CHECKS_LOG", logPath)
+	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
 
-	got := driveAll(t)[0]
-	if got.Outcome != outcomeMergedByGate || got.Rounds != 0 {
-		t.Fatalf("item 1 is %s/%s rounds=%d (%s), want merged by the merge gate with no round", got.Outcome, got.Park, got.Rounds, got.Reason)
+	driveAll(t)
+	if n := reruns(t, ghLog); n != 0 {
+		t.Errorf("gh run rerun ran %d times, want none", n)
 	}
-	if n := reruns(t, ghLog); n != 1 {
-		t.Errorf("gh run rerun ran %d times, want 1", n)
+	if cs := checkRows(t); len(cs) == 0 || cs[0].Class != ledger.ClassCode {
+		t.Errorf("classification rows %+v, want code", cs)
 	}
-	if cs := checkRows(t); len(cs) != 1 || cs[0].Class != ledger.ClassInfra {
-		t.Errorf("classification rows %+v, want one infra row", cs)
+	body, err := os.ReadFile("work/01-first.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Found in: crypto/x509@go1.26.9",
+		"Fixed in: crypto/x509@go1.26.10",
+		"The fix is a `toolchain go1.26.10` line in go.mod, or one naming a newer release.",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("sent-back body lacks %q:\n%s", want, body)
+		}
+	}
+}
+
+// Only a Go release in a Fixed in line asks for a toolchain; a module's fix is
+// a require line, and the newest of several releases is the one to name.
+func TestToolchainFix(t *testing.T) {
+	cases := []struct {
+		failure []string
+		want    string
+	}{
+		{[]string{"Fixed in: golang.org/x/net@v0.38.0"}, ""},
+		{[]string{"Fixed in: crypto/x509@go1.26.10", "Fixed in: net/http@go1.26.9"}, "go1.26.10"},
+		{[]string{"Fixed in: net/http@go1.26.9", "Fixed in: crypto/x509@go1.27.2"}, "go1.27.2"},
+		{nil, ""},
+	}
+	for _, c := range cases {
+		got := toolchainFix(c.failure)
+		if c.want == "" && got != "" || c.want != "" && !strings.Contains(got, "`toolchain "+c.want+"`") {
+			t.Errorf("toolchainFix(%q) = %q, want %q", c.failure, got, c.want)
+		}
 	}
 }
 
