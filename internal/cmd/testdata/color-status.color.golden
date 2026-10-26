@@ -1,0 +1,9 @@
+example status  (ledger: ledger.jsonl)
+
+[>]   [36m1    [0m       unknown (--no-tracker) First                    [32mREADY[0m
+[~]   [36m2    [0m       unknown (--no-tracker) Second                   [31mparked: no_record (unknown) · pass 2[0m
+
+0 of 2 planned complete
+1 awaiting PR
+
+▸ here: branch main  (no item owns it)

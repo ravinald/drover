@@ -687,28 +687,28 @@ func (s *session) takeAppended(closeIfNone bool, seen map[string]bool, holds fun
 	for {
 		ids, err := held.Take(closeIfNone)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "· the queue in this drive's lease would not read, so no appended id is taken: %v\n", err)
+			fmt.Fprintf(errOut, "· the queue in this drive's lease would not read, so no appended id is taken: %v\n", err)
 			return out
 		}
 		if len(ids) == 0 {
 			return out
 		}
 		if err := s.reload(); err != nil {
-			fmt.Fprintf(os.Stderr, "· the backlog would not reload to read appended ids: %v\n", err)
+			fmt.Fprintf(errOut, "· the backlog would not reload to read appended ids: %v\n", err)
 		}
 		for _, id := range ids {
 			it, err := s.item(id)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "· %s was appended and no longer resolves, so it is skipped: %v\n", id, err)
+				fmt.Fprintf(errOut, "· %s was appended and no longer resolves, so it is skipped: %v\n", id, err)
 				continue
 			}
 			if holds(it.ID.Bare()) {
-				fmt.Fprintf(os.Stderr, "· --enqueue: %s is already in this drive's queue\n", id)
+				fmt.Fprintf(errOut, "· --enqueue: %s is already in this drive's queue\n", id)
 				continue
 			}
 			seen[it.ID.Bare()] = true
 			out = append(out, newQueued(it, true))
-			fmt.Fprintf(os.Stderr, "· --enqueue: %s appended at position %d\n", id, at+len(out))
+			fmt.Fprintf(errOut, "· --enqueue: %s appended at position %d\n", id, at+len(out))
 			events.emit(DriveEvent{Event: evQueued, ID: id, Action: "enqueue", Position: at + len(out)})
 		}
 		if len(out) > 0 || !closeIfNone {
@@ -725,11 +725,11 @@ func closeQueue(why string) {
 	}
 	dropped, err := held.Close()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "· the queue in this drive's lease would not close: %v\n", err)
+		fmt.Fprintf(errOut, "· the queue in this drive's lease would not close: %v\n", err)
 		return
 	}
 	if len(dropped) > 0 {
-		fmt.Fprintf(os.Stderr, "· %s, so %s, appended with --enqueue, will not run in this drive\n", why, strings.Join(dropped, " "))
+		fmt.Fprintf(errOut, "· %s, so %s, appended with --enqueue, will not run in this drive\n", why, strings.Join(dropped, " "))
 	}
 }
 
@@ -743,6 +743,6 @@ func (s *session) enqueueTo(ids []string, label string) error {
 	if res.free {
 		return Refusal{fmt.Errorf("the drive that took this checkout has already exited; run --enqueue again")}
 	}
-	res.report(os.Stdout, os.Stderr)
+	res.report(os.Stdout, errOut)
 	return res.refusal()
 }

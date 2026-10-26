@@ -515,7 +515,7 @@ as [prompts] implement does the run's.`,
 		launchInfo{
 			ID: s.cfg.Project, Stage: "supervise",
 			Prompt: s.promptPath(s.superviseTemplatePath(), "supervise"),
-		}.from(name, spec, runner.Interactive).write(os.Stderr)
+		}.from(name, spec, runner.Interactive).write(errOut)
 		_, err = runner.Run(c.Context(),
 			runner.Where{Dir: s.cfg.Root, Root: s.cfg.Root, Actor: runner.ActorSupervisor},
 			spec, runner.Interactive, brief, "", os.Stdout)

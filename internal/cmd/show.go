@@ -458,10 +458,15 @@ the same text as body.`,
 // metadata line gets a colour is the project's decision, not the renderer's.
 func (sh Show) print(cfg *config.Config) {
 	s := sh.s
-	fmt.Printf("%s  %s\n", sh.ID, sh.Title)
-	fmt.Printf("  state      %s\n", sh.State)
+	tint := colorFor(os.Stdout)
+	fmt.Printf("%s  %s\n", sgr(sh.ID, pal.ID, tint), sh.Title)
+	stateRole := pal.state(sh.State)
+	if sh.Parked != nil {
+		stateRole = pal.Fail
+	}
+	fmt.Printf("  state      %s\n", sgr(sh.State, stateRole, tint))
 	if p := sh.Parked; p != nil {
-		fmt.Printf("  parked     %s (%s) on %s\n", p.Park, blankDetail(p.Detail), p.Date)
+		fmt.Printf("  parked     %s on %s\n", sgr(p.Park+" ("+blankDetail(p.Detail)+")", pal.Fail, tint), p.Date)
 		for _, line := range strings.Split(p.Evidence, "\n") {
 			if line = strings.TrimSpace(line); line != "" {
 				fmt.Printf("             %s\n", trunc(line, 160))
@@ -501,7 +506,6 @@ func (sh Show) print(cfg *config.Config) {
 	case sh.CreatedUnknown != "":
 		fmt.Printf("  created    unknown (%s)\n", sh.CreatedUnknown)
 	}
-	tint := colour()
 	for _, k := range sortedKeys(sh.Meta) {
 		if v := sh.Meta[k]; v != "" && k != "title" {
 			if k == cfg.Severity.Key {
@@ -578,7 +582,8 @@ func (sh Show) print(cfg *config.Config) {
 			if a.Reviewer != "" {
 				by += ", reviewed by " + a.Reviewer
 			}
-			fmt.Printf("    %s  %-12s %s\n", a.Date, a.Level, by)
+			level := sgr(fmt.Sprintf("%-12s", a.Level), pal.state(a.Level), tint)
+			fmt.Printf("    %s  %s %s\n", sgr(a.Date, pal.Muted, tint), level, by)
 			if a.Note != "" {
 				fmt.Printf("      %s\n", trunc(a.Note, 96))
 			}

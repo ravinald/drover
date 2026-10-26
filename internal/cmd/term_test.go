@@ -14,7 +14,7 @@ func TestSgrLeavesTheStringAloneWhenItHasNothingToSay(t *testing.T) {
 		code string
 		on   bool
 	}{
-		{"off", "38;5;196", false},
+		{"off", "31", false},
 		{"no colour", "", true},
 		{"off and no colour", "", false},
 	} {
@@ -22,7 +22,7 @@ func TestSgrLeavesTheStringAloneWhenItHasNothingToSay(t *testing.T) {
 			t.Errorf("%s: sgr = %q, want the string untouched", c.name, got)
 		}
 	}
-	if got := sgr("B01", "38;5;196", true); got != "\x1b[38;5;196mB01\x1b[0m" {
+	if got := sgr("B01", "31", true); got != "\x1b[31mB01\x1b[0m" {
 		t.Errorf("sgr = %q, want the cell wrapped", got)
 	}
 }
@@ -33,13 +33,13 @@ func TestSgrLeavesTheStringAloneWhenItHasNothingToSay(t *testing.T) {
 func TestColourAfterPaddingKeepsTheColumnWidth(t *testing.T) {
 	const w = 6
 	plain := fmt.Sprintf("%-*s", w, "C")
-	tinted := sgr(plain, "38;5;196", true)
+	tinted := sgr(plain, "31", true)
 
 	if visible := utf8.RuneCountInString(strip(tinted)); visible != w {
 		t.Errorf("visible width = %d, want %d", visible, w)
 	}
 	// The other order, shown failing, so the test says why it exists.
-	wrong := fmt.Sprintf("%-*s", w, sgr("C", "38;5;196", true))
+	wrong := fmt.Sprintf("%-*s", w, sgr("C", "31", true))
 	if utf8.RuneCountInString(strip(wrong)) == w {
 		t.Error("colouring before padding produced the right width — the trap is gone and this test is stale")
 	}

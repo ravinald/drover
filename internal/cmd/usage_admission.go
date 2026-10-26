@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -420,13 +419,13 @@ func (s *session) sendUsageWarnings(g *usageGate, warnings []usageStep, a accoun
 		row := driveStamp(ledger.Row{ID: ledger.UsageRowID, UsageWarning: u.Window, ResetsAt: u.Resets.Unix(), Note: u.Reason})
 		wrote, err := ledger.AppendUnless(path, row, func(l *ledger.Ledger) bool { return l.Warned(u.Window, u.Resets.Unix()) })
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "· usage_warning: the ledger row would not write, so the notice is not sent: %v\n", err)
+			fmt.Fprintf(errOut, "· usage_warning: the ledger row would not write, so the notice is not sent: %v\n", err)
 			continue
 		}
 		if !wrote {
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "· usage_warning: %s\n", u.Reason)
+		fmt.Fprintf(errOut, "· usage_warning: %s\n", u.Reason)
 		events.emit(u.event(DriveEvent{Event: evUsageWarning, Action: "usage_admission"}))
 	}
 }
@@ -462,7 +461,7 @@ func (s *session) holdForUsage(q *driveSched, holds []usageStep) bool {
 	if held != nil {
 		_ = held.Update(func(l *lease.Lease) { l.Paused, l.UsageHolds = true, standingHolds(holds) })
 	}
-	fmt.Fprintf(os.Stderr, "· usage_admission: %s; nothing more is dispatched, each running item finishes its stage and holds, and %s%s\n",
+	fmt.Fprintf(errOut, "· usage_admission: %s; nothing more is dispatched, each running item finishes its stage and holds, and %s%s\n",
 		u.Reason, auto, behind(holds[1:]))
 	all := standingHolds(holds)
 	events.emit(u.event(DriveEvent{Event: evPaused, Action: "usage_admission", Policy: string(p), Holds: all}))
@@ -483,7 +482,7 @@ func (s *session) resumeFromUsage(q *driveSched) {
 		_ = held.Update(func(l *lease.Lease) { l.Paused, l.UsageHolds = false, nil })
 	}
 	why := "the " + u.Window + " hold reached its reset at " + localReset(u.Resets) + ", so the drive dispatches again"
-	fmt.Fprintf(os.Stderr, "· usage_admission: %s\n", why)
+	fmt.Fprintf(errOut, "· usage_admission: %s\n", why)
 	ev := u.event(DriveEvent{Event: evResumed, Action: "usage_admission"})
 	ev.Reason = why
 	events.emit(ev)

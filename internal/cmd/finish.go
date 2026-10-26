@@ -175,7 +175,7 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 		// than fatal — otherwise recording the merge by hand strands the branch.
 		wrote := false
 		if !s.ledger.State(id).Merged {
-			warnUndeclaredRunner(os.Stderr, runner, s.cfg.Runners)
+			warnUndeclaredRunner(errOut, runner, s.cfg.Runners)
 			yes := true
 			agent := s.attribution(runner, id)
 			row := ledger.Row{ID: id, Merged: &yes, MergedRunner: agent, Date: ledger.Today()}

@@ -239,7 +239,7 @@ func (s *session) heldAt(ctx context.Context, it backlog.Item, next string) []st
 	s.inputs, s.cfg = in, in.cfg
 	events.emit(DriveEvent{Event: evResumed, ID: it.ID.Bare(), Stage: next, Changed: changed})
 	if len(changed) > 0 {
-		fmt.Fprintf(os.Stderr, "  · %s: resumed before %s under the reloaded %s\n", it.ID.Bare(), next, strings.Join(changed, ", "))
+		fmt.Fprintf(errOut, "  · %s: resumed before %s under the reloaded %s\n", it.ID.Bare(), next, strings.Join(changed, ", "))
 	}
 	return changed
 }
@@ -256,7 +256,7 @@ func (s *session) reverify(ctx context.Context, it backlog.Item, d *DriveItem,
 		return DriveItem{}, false, false
 	}
 	events.stage(d.ID, stageGate)
-	fmt.Fprintf(os.Stderr, "  · %s: its verify command changed while the drive was paused; running the new one on %s: %s\n",
+	fmt.Fprintf(errOut, "  · %s: its verify command changed while the drive was paused; running the new one on %s: %s\n",
 		d.ID, d.Branch, gate)
 	code, gout, err := s.runItemVerify(ctx, d.ID, s.workDir(), gate)
 	switch {
@@ -302,13 +302,13 @@ func (s *session) answerControl(sched *driveSched) {
 		if !sched.isPaused() {
 			sched.pause()
 			rewrite = true
-			fmt.Fprintln(os.Stderr, "· paused by drive --pause: nothing more is dispatched, and each running item holds at its next stage boundary until drive --resume")
+			fmt.Fprintln(errOut, "· paused by drive --pause: nothing more is dispatched, and each running item holds at its next stage boundary until drive --resume")
 			events.emit(DriveEvent{Event: evPaused})
 		}
 	case ctrlStop:
 		if !errors.Is(sched.draining(), errStopRequested) {
 			sched.drain(errStopRequested)
-			fmt.Fprintln(os.Stderr, "· stopped by drive --stop: nothing more is dispatched, and each running item finishes the stage it is in and parks stopped")
+			fmt.Fprintln(errOut, "· stopped by drive --stop: nothing more is dispatched, and each running item finishes the stage it is in and parks stopped")
 		}
 	case ctrlResume, ctrlResumeKeep:
 		if !sched.isPaused() {
@@ -321,7 +321,7 @@ func (s *session) answerControl(sched *driveSched) {
 			// binary was replaced.
 			if err := probeResume(to); err != nil {
 				refused = err.Error()
-				fmt.Fprintf(os.Stderr, "· drive --resume refused, and the drive stays paused: %v\n", err)
+				fmt.Fprintf(errOut, "· drive --resume refused, and the drive stays paused: %v\n", err)
 				break
 			}
 			released, standing = s.releaseUsage(sched)
@@ -331,14 +331,14 @@ func (s *session) answerControl(sched *driveSched) {
 			}
 			sched.reexec = to.String()
 			sched.mu.Unlock()
-			fmt.Fprintf(os.Stderr, "· resumed by drive --resume onto %s, which replaced %s at %s; "+
+			fmt.Fprintf(errOut, "· resumed by drive --resume onto %s, which replaced %s at %s; "+
 				"re-executing once every running item holds at a boundary\n", to, startedFrom, to.path)
 			break
 		}
 		in, next, err := loadDriveInputs()
 		if err != nil {
 			refused = err.Error()
-			fmt.Fprintf(os.Stderr, "· drive --resume refused, and the drive stays paused: %v\n", err)
+			fmt.Fprintf(errOut, "· drive --resume refused, and the drive stays paused: %v\n", err)
 			break
 		}
 		in.resumed = true
@@ -353,7 +353,7 @@ func (s *session) answerControl(sched *driveSched) {
 		if len(changed) > 0 {
 			what = "reloaded " + strings.Join(changed, ", ")
 		}
-		fmt.Fprintf(os.Stderr, "· resumed by drive --resume; %s\n", what)
+		fmt.Fprintf(errOut, "· resumed by drive --resume; %s\n", what)
 		events.emit(DriveEvent{Event: evResumed, Changed: changed})
 	default:
 		refused = "drover does not know the request " + verb
@@ -386,7 +386,7 @@ func (s *session) releaseUsage(sched *driveSched) (*lease.UsageHold, []lease.Usa
 	sched.usage.mu.Lock()
 	rest := v.unwaived(sched.usage.waived)
 	sched.usage.mu.Unlock()
-	fmt.Fprintf(os.Stderr, "· drive --resume releases the usage hold on the %s window, which stays released until it resets%s\n",
+	fmt.Fprintf(errOut, "· drive --resume releases the usage hold on the %s window, which stays released until it resets%s\n",
 		u.Window, stillHolding(standingHolds(rest)))
 	r := u.standing()
 	return &r, standingHolds(rest)
@@ -709,7 +709,7 @@ func (s *session) noticeConfig() {
 	ev := DriveEvent{Event: evConfigChanged}
 	if err != nil {
 		ev.Error = err.Error()
-		fmt.Fprintf(os.Stderr, "  ! config on disk will not read: %v; this drive goes on under the .drover.toml it %s with\n", err, since)
+		fmt.Fprintf(errOut, "  ! config on disk will not read: %v; this drive goes on under the .drover.toml it %s with\n", err, since)
 		events.emit(ev)
 		return
 	}
@@ -727,7 +727,7 @@ func (s *session) noticeConfig() {
 	} else {
 		line += "; no setting changed, only comments or layout"
 	}
-	fmt.Fprintln(os.Stderr, line)
+	fmt.Fprintln(errOut, line)
 	events.emit(ev)
 }
 

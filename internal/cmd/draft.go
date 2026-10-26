@@ -118,8 +118,8 @@ Declared: {runners}.`,
 			Item:   rel(s.cfg.Root, it.Path),
 			Prompt: s.promptPath(s.cfg.Prompts.Draft, "draft"),
 			Log:    displayPath(s.cfg.Root, logPath),
-		}.from(name, spec, mode).write(os.Stderr)
-		fmt.Fprintln(os.Stderr, "==> the agent writes the body above; the stop marker stays until you delete it")
+		}.from(name, spec, mode).write(errOut)
+		fmt.Fprintln(errOut, "==> the agent writes the body above; the stop marker stays until you delete it")
 		// A draft writes no stage row, so the session id is minted here for
 		// the usage row to carry: the one the runner's environment holds.
 		at := s.where()

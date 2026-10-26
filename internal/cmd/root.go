@@ -3,8 +3,10 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -45,6 +47,11 @@ Exit codes:
   2  findings against the project (check)
   3  a rule drover enforces refused the operation; nothing was written
 
+Color is on by default where a stream is a terminal and off everywhere else.
+--color=auto|always|never sets it for one invocation (--no-color is never),
+ahead of NO_COLOR, CLICOLOR_FORCE and TERM=dumb. --json, --events and every
+file drover writes are never colored, and every colored state is a word too.
+
 --json is on status, show, unaudited, drive, drives, attach, check, follow-ups, intake --list,
 projects, skills and report. Each of those carries a sample object under Examples in its own --help.
 ` + "`drover schema`" + ` prints the .drover.toml contract for a validator or a generator.`,
@@ -70,6 +77,41 @@ projects, skills and report. Each of those carries a sample object under Example
 func init() {
 	root.PersistentFlags().BoolVarP(&ignoreStale, "ignore-stale", "I", false,
 		"run even though .drover.toml or the generated agent instructions are older than this binary")
+	root.PersistentFlags().Var(colorValue{}, "color",
+		"color terminal output: auto, always or never; --json, --events and files are never colored")
+	noColor := root.PersistentFlags().VarPF(noColorValue{}, "no-color", "", "the same as --color=never")
+	noColor.NoOptDefVal = "true"
+}
+
+// colorValue is --color, refusing at parse anything but the three modes, so a
+// typo fails loudly rather than reading as auto.
+type colorValue struct{}
+
+func (colorValue) String() string { return colorMode }
+func (colorValue) Type() string   { return "mode" }
+func (colorValue) Set(v string) error {
+	switch v {
+	case colorAuto, colorAlways, colorNever:
+		colorMode = v
+		return nil
+	}
+	return fmt.Errorf("--color takes auto, always or never; got %q", v)
+}
+
+// noColorValue is --no-color, an alias writing never into the same mode.
+type noColorValue struct{}
+
+func (noColorValue) String() string { return strconv.FormatBool(colorMode == colorNever) }
+func (noColorValue) Type() string   { return "bool" }
+func (noColorValue) Set(v string) error {
+	off, err := strconv.ParseBool(v)
+	if err != nil {
+		return err
+	}
+	if off {
+		colorMode = colorNever
+	}
+	return nil
 }
 
 // Execute runs the root command.

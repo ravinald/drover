@@ -99,7 +99,7 @@ the last line lists the ids that were not accepted.`,
 		refusedAll := true
 		for _, a := range args {
 			if err := s.acceptOne(a); err != nil {
-				fmt.Fprintf(os.Stderr, "accept %s: %v\n", a, err)
+				fmt.Fprintf(errOut, "accept %s: %v\n", a, err)
 				failed = append(failed, a)
 				if Code(err) != ExitRefused {
 					refusedAll = false

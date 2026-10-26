@@ -211,7 +211,7 @@ func (s *session) depIssues(it backlog.Item) (nums []int, unlinked []string) {
 // and drive reach the mirror mid-command, and stdout under drive --json carries
 // one object per line and nothing else.
 func mirrorWarn(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, "  ! mirror: "+format+"; drover check lists it until it finishes\n", args...)
+	fmt.Fprintf(errOut, "  ! mirror: "+format+"; drover check lists it until it finishes\n", args...)
 }
 
 // publish brings the item's issue in line with its file, opening the issue when
@@ -334,7 +334,7 @@ func (s *session) mirrorShelved(id backlog.ID, path string) {
 	bare := id.Bare()
 	meta, err := s.shelvedMeta(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  ! mirror: %s moved, and its issue, if it names one, was not closed: %v\n", bare, err)
+		fmt.Fprintf(errOut, "  ! mirror: %s moved, and its issue, if it names one, was not closed: %v\n", bare, err)
 		return
 	}
 	m, ok := s.mirrored(backlog.Item{ID: id, Path: path, Meta: meta})
@@ -350,7 +350,7 @@ func (s *session) mirrorShelved(id backlog.ID, path string) {
 		mirrorWarn("%v", err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "  ✓ %s closed as not planned: %s is shelved\n", s.issueRefTo(os.Stderr, m.Number), bare)
+	fmt.Fprintf(errOut, "  ✓ %s closed as not planned: %s is shelved\n", s.issueRefTo(os.Stderr, m.Number), bare)
 }
 
 // shelvedMeta reads a shelved body's frontmatter and nothing else. Nothing
@@ -432,7 +432,7 @@ func (s *session) reportMirror(it backlog.Item) {
 		return
 	}
 	fix := "drover accept " + strings.Join(append([]string{it.ID.Bare()}, ids...), " ")
-	fmt.Fprintf(os.Stderr, "  · --no-tracker: %s not relabeled or closed; %s brings the mirror up to date\n",
+	fmt.Fprintf(errOut, "  · --no-tracker: %s not relabeled or closed; %s brings the mirror up to date\n",
 		s.issueRefsTo(os.Stderr, issues), fix)
 }
 
@@ -476,7 +476,7 @@ func (s *session) writeState(m mirrorIssue, id, state string) {
 		mirrorWarn("issue %s is not labeled %s for %s: %v", s.issueRefTo(os.Stderr, m.Number), want, id, err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "  ✓ %s: %s\n", s.issueRefTo(os.Stderr, m.Number), want)
+	fmt.Fprintf(errOut, "  ✓ %s: %s\n", s.issueRefTo(os.Stderr, m.Number), want)
 }
 
 // writeOpen closes or reopens the issue to match whether the item merged.
@@ -488,13 +488,13 @@ func (s *session) writeOpen(m mirrorIssue, id string, done bool) {
 			mirrorWarn("%v", err)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "  ✓ %s closed: %s is recorded done\n", s.issueRefTo(os.Stderr, m.Number), id)
+		fmt.Fprintf(errOut, "  ✓ %s closed: %s is recorded done\n", s.issueRefTo(os.Stderr, m.Number), id)
 	case !done && !open:
 		if err := gh.Reopen(s.labels(), m.Number, id+" is not recorded done, so the work is open again."); err != nil {
 			mirrorWarn("%v", err)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "  ✓ %s reopened: %s is not recorded done\n", s.issueRefTo(os.Stderr, m.Number), id)
+		fmt.Fprintf(errOut, "  ✓ %s reopened: %s is not recorded done\n", s.issueRefTo(os.Stderr, m.Number), id)
 	}
 }
 
@@ -509,7 +509,7 @@ func (s *session) writeRequirements(m mirrorIssue, it backlog.Item) {
 	if err := gh.EditIssue(s.labels(), m.Number, nil, nil, &body); err != nil {
 		mirrorWarn("issue %s still carries %s's old requirements: %v", s.issueRefTo(os.Stderr, m.Number), it.ID.Bare(), err)
 	} else if ok {
-		fmt.Fprintf(os.Stderr, "  ✓ %s: requirements rewritten from %s\n", s.issueRefTo(os.Stderr, m.Number), rel(s.cfg.Root, it.Path))
+		fmt.Fprintf(errOut, "  ✓ %s: requirements rewritten from %s\n", s.issueRefTo(os.Stderr, m.Number), rel(s.cfg.Root, it.Path))
 	}
 }
 
@@ -519,7 +519,7 @@ func (s *session) writeRequirements(m mirrorIssue, it backlog.Item) {
 func (s *session) writeLinks(m mirrorIssue, it backlog.Item, named bool) {
 	deps, unlinked := s.depIssues(it)
 	if named && len(unlinked) > 0 {
-		fmt.Fprintf(os.Stderr, "  · %s: no blocked-by link for %s, which %s no issue\n",
+		fmt.Fprintf(errOut, "  · %s: no blocked-by link for %s, which %s no issue\n",
 			s.issueRefTo(os.Stderr, m.Number), strings.Join(unlinked, ", "), plural(len(unlinked), "names", "name"))
 	}
 	missing := m.missingLinks(deps)
@@ -530,5 +530,5 @@ func (s *session) writeLinks(m mirrorIssue, it backlog.Item, named bool) {
 		mirrorWarn("%v", err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "  ✓ %s: blocked by %s\n", s.issueRefTo(os.Stderr, m.Number), s.issueRefsTo(os.Stderr, missing))
+	fmt.Fprintf(errOut, "  ✓ %s: blocked by %s\n", s.issueRefTo(os.Stderr, m.Number), s.issueRefsTo(os.Stderr, missing))
 }

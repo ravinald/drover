@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"os"
 	"os/exec"
 	"regexp"
 	"slices"
@@ -130,7 +129,7 @@ func (s *session) settleChecks(ctx context.Context, d *DriveItem, sha string, de
 		if len(runs) == 0 {
 			why := fmt.Sprintf("no workflow ran on this head (%s) in %s", shortSHA(sha), s.cfg.ForgeChecksWait())
 			s.recordCheck(d.ID, sha, judged{class: ledger.ClassNone, evidence: why}, false, "")
-			fmt.Fprintf(os.Stderr, "  · %s: %s; [drive] merge_gate decides\n", d.ID, why)
+			fmt.Fprintf(errOut, "  · %s: %s; [drive] merge_gate decides\n", d.ID, why)
 			return settled{none: why}
 		}
 		// A rerun attempt the forge has not replaced yet is still the old red
@@ -230,9 +229,9 @@ func (s *session) actOnReds(ctx context.Context, d *DriveItem, sha string, reds 
 		first := !rerun[j.workflow]
 		if first {
 			rerun[j.workflow] = true
-			fmt.Fprintf(os.Stderr, "  · %s: %s failed on the forge (%s); rerunning its failed jobs\n", d.ID, j.run.Name, j.evidence)
+			fmt.Fprintf(errOut, "  · %s: %s failed on the forge (%s); rerunning its failed jobs\n", d.ID, j.run.Name, j.evidence)
 			if err := s.rerunFailed(ctx, j.workflow); err != nil {
-				fmt.Fprintf(os.Stderr, "  · %s: the rerun of %s would not start, so [drive] merge_gate decides: %v\n", d.ID, j.run.Name, err)
+				fmt.Fprintf(errOut, "  · %s: the rerun of %s would not start, so [drive] merge_gate decides: %v\n", d.ID, j.run.Name, err)
 				s.recordCheck(d.ID, sha, j, true, "rerun_infra_failure")
 				return settled{}, nil
 			}
@@ -524,7 +523,7 @@ func (s *session) ghAPI(ctx context.Context, args ...string) ([]byte, error) {
 func (s *session) recordCheck(id, sha string, j judged, rerun bool, act string) {
 	row := ledger.Row{ID: id, Head: sha, Check: j.run.Name, Class: j.class, Evidence: j.evidence, Rerun: rerun, Date: ledger.Today()}
 	if err := s.record(row); err != nil {
-		fmt.Fprintf(os.Stderr, "  · %s: the ledger would not record %s as %s: %v\n", id, row.Check, j.class, err)
+		fmt.Fprintf(errOut, "  · %s: the ledger would not record %s as %s: %v\n", id, row.Check, j.class, err)
 	}
 	events.emit(DriveEvent{Event: evCheck, ID: id, Action: act, Head: sha, Check: row.Check, Class: j.class, Evidence: j.evidence})
 }
@@ -591,10 +590,10 @@ func (s *session) recheckInfra(ctx context.Context, done []DriveItem, deadline t
 			return nil
 		}
 		if !s.headGreen(ctx, d) {
-			fmt.Fprintf(os.Stderr, "  · %s: checks on %s still red at the end of the drive; left parked\n", d.ID, shortSHA(d.head))
+			fmt.Fprintf(errOut, "  · %s: checks on %s still red at the end of the drive; left parked\n", d.ID, shortSHA(d.head))
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "  · %s: checks on %s went green after the park; picking it up\n", d.ID, shortSHA(d.head))
+		fmt.Fprintf(errOut, "  · %s: checks on %s went green after the park; picking it up\n", d.ID, shortSHA(d.head))
 		r := s.pickUp(ctx, d, deadline)
 		done[i] = r
 		events.itemEvents(r)
@@ -605,7 +604,7 @@ func (s *session) recheckInfra(ctx context.Context, done []DriveItem, deadline t
 			}
 		}
 		if r.stop != nil {
-			fmt.Fprintf(os.Stderr, "· %v; stopping the drive\n", r.stop)
+			fmt.Fprintf(errOut, "· %v; stopping the drive\n", r.stop)
 			return r.stop
 		}
 	}

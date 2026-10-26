@@ -1,6 +1,9 @@
 package sev
 
-import "testing"
+import (
+	"regexp"
+	"testing"
+)
 
 // Both spellings of a rank arrive from different authors — a hand-written item
 // tends to carry the letter, an audit tool writes the word — and neither should
@@ -98,5 +101,21 @@ func TestWordRoundTrips(t *testing.T) {
 	}
 	if Unranked.Word() != "" {
 		t.Errorf("Unranked.Word() = %q, want empty", Unranked.Word())
+	}
+}
+
+// A 256-color or truecolor code ignores the terminal's theme, so a severity
+// cell legible on a dark background can vanish on a light one.
+func TestColoursAreBaseANSI(t *testing.T) {
+	base := regexp.MustCompile(`^(1|2|3[0-7]|9[0-7])$`)
+	for _, name := range ColourNames() {
+		code, ok := Colour(name)
+		if !ok {
+			t.Errorf("%s: not in the palette", name)
+			continue
+		}
+		if code != "" && !base.MatchString(code) {
+			t.Errorf("%s resolves to %q, want one of the 16 base colors or none", name, code)
+		}
 	}
 }

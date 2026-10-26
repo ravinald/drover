@@ -261,10 +261,10 @@ func (s *session) warnDeadlock(id string) {
 	}
 	found, waiters := s.deadlocksOf(it)
 	for _, d := range found {
-		fmt.Fprintf(os.Stderr, "warning: %s\n", d)
+		fmt.Fprintf(errOut, "warning: %s\n", d)
 	}
 	if len(found) > 0 {
-		fmt.Fprintf(os.Stderr, "  %s runs from the trunk, which cannot give it that code. Point the dependency the other way: %s,\n"+
+		fmt.Fprintf(errOut, "  %s runs from the trunk, which cannot give it that code. Point the dependency the other way: %s,\n"+
 			"  or rewrite its proposal so it stands on the trunk alone; accept refuses it until then, or until --yes.\n\n", id, flipDeps(id, waiters))
 	}
 }

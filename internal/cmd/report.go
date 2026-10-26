@@ -156,18 +156,18 @@ func (s *session) reportData(it backlog.Item) (reports.Data, string, error) {
 func (s *session) captureReport(it backlog.Item) {
 	data, _, err := s.reportData(it)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warn: report not captured: %v\n", err)
+		fmt.Fprintf(errOut, "warn: report not captured: %v\n", err)
 		return
 	}
 	path := s.reportPath(it)
 	written, err := reports.Write(path, data)
 	switch {
 	case err != nil:
-		fmt.Fprintf(os.Stderr, "warn: report not saved: %v\n", err)
+		fmt.Fprintf(errOut, "warn: report not saved: %v\n", err)
 	case written:
-		fmt.Fprintf(os.Stderr, "==> report saved: %s\n", rel(s.cfg.Root, path))
+		fmt.Fprintf(errOut, "==> report saved: %s\n", rel(s.cfg.Root, path))
 	default:
-		fmt.Fprintf(os.Stderr, "==> report kept (already saved): %s\n", rel(s.cfg.Root, path))
+		fmt.Fprintf(errOut, "==> report kept (already saved): %s\n", rel(s.cfg.Root, path))
 	}
 }
 

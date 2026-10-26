@@ -87,7 +87,7 @@ register backend; ` + "`drover check`" + ` does that.`,
 			if err := stampConfig(in.Path, stamp); err != nil {
 				return err
 			}
-			fmt.Fprintf(os.Stderr, "stamped %s: drover_version = %q\n", rel(in.Root, in.Path), stamp)
+			fmt.Fprintf(errOut, "stamped %s: drover_version = %q\n", rel(in.Root, in.Path), stamp)
 			return nil
 		}
 		if configDiff {

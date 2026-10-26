@@ -1,0 +1,46 @@
+Reads the drive rows in the ledger. Each drive that launches takes the next id in
+its project, D1, D2 and so on, with the label --label gave it, and every row it
+appends carries that id. A drive with no end row is running when this checkout's
+lease names it, and interrupted otherwise: it was killed before it could write
+one.
+
+--all reads every project in the per-user registry instead, and needs no
+project, so it answers from anywhere. A project whose config or ledger will not
+read says why and the rest still answer.
+
+Safety: read-only. Reads ledger.jsonl and this checkout's lease. --all reads
+every project in the per-user registry instead, each project's config, ledger
+and lease, and needs no project.
+
+Usage:
+  drover drives [flags]
+
+Examples:
+  drover drives                     # this project's drives, newest first
+  drover drives --all               # every registered project's
+  drover drives --json              # an array, one object per drive:
+    [{"id":"D2","label":"night run","started":"2026-10-17T01:00:00-07:00",
+      "queued":["4","5"],"jobs":2,"items":[{"id":"4","outcome":""},
+        {"id":"5","outcome":"skipped","reason":"blocked by 4, which parked protected_paths for the operator"}],
+      "running":true,"paused":true},
+     {"id":"D1","started":"2026-10-16T22:00:00-07:00","queued":["1","2"],
+      "ended":"2026-10-16T23:10:00-07:00","exit":0,
+      "items":[{"id":"1","outcome":"ready_to_merge"},{"id":"2","outcome":"parked"}]}]
+  drover drives --all --json        # an array, one object per project:
+    [{"project":"webapp","root":"/home/me/src/webapp","drives":[...]}]
+
+  ended and exit are absent until the drive wrote its end row. items is each
+  item's outcome from that row, and the ids queued at launch with an empty
+  outcome until then, save one the drive already skipped, which its lease
+  publishes as skipped with a reason. running is true while this checkout's lease names the
+  drive, and paused while that lease reads paused (drive --pause).
+
+Flags:
+      --all    every project in the per-user registry, not just this one
+  -h, --help   help for drives
+      --json   emit the drives as JSON
+
+Global Flags:
+      --color mode     color terminal output: auto, always or never; --json, --events and files are never colored (default auto)
+  -I, --ignore-stale   run even though .drover.toml or the generated agent instructions are older than this binary
+      --no-color       the same as --color=never

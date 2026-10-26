@@ -1,0 +1,20 @@
+2  Second
+  state      implemented
+  parked     no_record (unknown) on <date>
+             {"type":"result","subtype":"success","is_error":false}
+  park log   <path>
+  body       work/02-second.md  (1 numbered requirement)
+  branch     second
+  pr         unknown  (--no-tracker: the forge was not asked)
+  modified   <date>
+  created    unknown (work/02-second.md is not tracked in the work tree)
+
+  audit history
+    implemented by  impl  (2 runs)
+    reviewed by     rev  (2 launches drover resolved a runner for)
+    recent commits  1 lines changed
+    (no audit level — nobody has recorded a look)
+
+  report     reports/02-second.md
+  logs       2, newest <path>
+  verify     <path> default

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -524,7 +523,7 @@ func (n *notifier) enqueueLocked(d *destination, nt notice) {
 	default:
 		d.inflight.Done()
 		if d.said.dropped.CompareAndSwap(false, true) {
-			fmt.Fprintf(os.Stderr, "· [notify.destinations.%s] is %d messages behind; dropping this one and any more it cannot take, without reporting them\n",
+			fmt.Fprintf(errOut, "· [notify.destinations.%s] is %d messages behind; dropping this one and any more it cannot take, without reporting them\n",
 				d.Name, queueDepth)
 		}
 	}
@@ -635,17 +634,17 @@ func (d *destination) send(nt notice) {
 	switch d.Type {
 	case config.DestNtfy:
 		if loose := tokenLoose(d.TokenFile); loose != "" && d.said.loose.CompareAndSwap(false, true) {
-			fmt.Fprintf(os.Stderr, "· %s %s; the send goes out\n", where, loose)
+			fmt.Fprintf(errOut, "· %s %s; the send goes out\n", where, loose)
 		}
 		res, err := postNtfy(d.Destination, nt, d.n.click(nt.event))
 		if err != nil && d.said.failed.CompareAndSwap(false, true) {
-			fmt.Fprintf(os.Stderr, "· %s POST %s failed (%v)%s; the drive goes on, and later failures here are not reported\n",
+			fmt.Fprintf(errOut, "· %s POST %s failed (%v)%s; the drive goes on, and later failures here are not reported\n",
 				where, d.URL, err, res.bodyClause())
 		}
 	case config.DestCommand:
 		out, err := runArgvNotifier(d.n.root, d.Argv, nt.payload())
 		if err != nil && d.said.failed.CompareAndSwap(false, true) {
-			fmt.Fprintf(os.Stderr, "· %s %s failed (%v)%s; the drive goes on, and later failures here are not reported\n",
+			fmt.Fprintf(errOut, "· %s %s failed (%v)%s; the drive goes on, and later failures here are not reported\n",
 				where, strings.Join(d.Argv, " "), err, outClause(out))
 		}
 	}

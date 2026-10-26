@@ -161,7 +161,7 @@ preview, and exits 3.`,
 		if !s.cfg.Git.On() {
 			banner.NoGit = fmt.Sprintf("in %s (no branch: [git] enabled is false)", s.cfg.Root)
 		}
-		banner.write(os.Stderr)
+		banner.write(errOut)
 
 		// Recorded before the launch and from the resolved name, so `finish` and
 		// `mark-merged` can attribute the work without parsing a log — which an
@@ -180,7 +180,7 @@ preview, and exits 3.`,
 		// from one never started, once both sit behind the trunk.
 		if s.cfg.Git.On() {
 			if err := s.recordHead(data.ID, data.Branch); err != nil {
-				fmt.Fprintf(os.Stderr, "  ! %v\n", err)
+				fmt.Fprintf(errOut, "  ! %v\n", err)
 			}
 		}
 		if runErr != nil {

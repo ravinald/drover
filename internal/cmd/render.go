@@ -993,6 +993,6 @@ func (r *driveRenderer) render() {
 	}
 	if err := errors.Join(errs...); err != nil && !r.warned {
 		r.warned = true
-		fmt.Fprintf(os.Stderr, "· %v; the drive goes on, and further render failures this drive are not reported\n", err)
+		fmt.Fprintf(errOut, "· %v; the drive goes on, and further render failures this drive are not reported\n", err)
 	}
 }

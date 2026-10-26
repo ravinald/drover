@@ -409,6 +409,37 @@ drover: unknown severity "P0" (known: C, H, M, L)
 
 Refusing rather than matching nothing is deliberate on the `status` side: an empty table would read as "no items at that rank", which is a wrong answer, not a degraded one.
 
+## Color
+
+Color is not a config key. drover decides it per stream at each invocation, so `drover drive > drive.log` still colors the stderr a terminal reads. Every colored state already has a word or a glyph beside it, so a plain run reads the same and loses nothing.
+
+The decision, highest precedence first:
+
+1. `--color=auto|always|never` on any command. `--no-color` is `--color=never`, and the later of the two wins.
+2. `NO_COLOR`: any non-empty value turns color off.
+3. `CLICOLOR_FORCE`: non-empty and not `0` turns color on, a pipe included.
+4. `TERM=dumb` turns color off.
+5. Otherwise a stream is colored when it is a terminal.
+
+OSC 8 links on issue and pull request numbers follow the same decision for the stream they are written to.
+
+Never colored, whatever the flag says: `--json` and `--events` output, every file drover writes (the detached drive's `<drive id>.log`, reports, `status -o` and `--render` outputs, the ledger), notification bodies and the generated `AGENTS.md`. `--color=always` reaches terminal-facing text only. A detached drive runs with `--color=never`, since its stderr is a log file.
+
+The palette names roles rather than colors. It uses the 16 base ANSI colors plus bold and dim, so the terminal's theme picks the shade and the text stays legible on a light background and a dark one.
+
+| Role      | Code    | Used for                                                                       |
+| --------- | ------- | ------------------------------------------------------------------------------ |
+| `ok`      | green   | merged, passed, done, a clean `check`                                          |
+| `warn`    | yellow  | paused, held, waiting, skipped, blocked, `needs_operator`, a `usage_warning`   |
+| `fail`    | red     | parked, refused, a red check, a `check` finding, the `drover:` before an error |
+| `heading` | bold    | the `==>` lines of a drive, help's section headings and `Safety:` label        |
+| `detail`  | dim     | the `·` lines of a drive that report no state                                  |
+| `id`      | cyan    | an item or drive id                                                            |
+| `command` | magenta | a command the operator is told to run, such as `drover drive --resume`         |
+| `muted`   | dim     | timestamps and the comments beside help's examples                             |
+
+The `[severity]` colors are applied through the same mechanism and draw on the same 16 base colors: `red` is red (31), `orange` is bright red (91, since the base set has no orange), `yellow` is yellow (33), `blue` is bright blue (94, because base blue is hard to read on a dark background), `green` is green (32), `grey` is bright black (90), and `white` emits no escape, leaving the terminal's own foreground.
+
 ## `[run]`
 
 | Key              | Default   | Meaning                                                                                                                                                                                                                                                           |

@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -439,9 +442,53 @@ func install() {
 		base := root.HelpFunc()
 		root.SetHelpFunc(func(c *cobra.Command, args []string) {
 			expand(c, helpVars())
+			out := c.OutOrStdout()
+			if !colorTo(out) {
+				base(c, args)
+				return
+			}
+			var buf bytes.Buffer
+			c.SetOut(&buf)
 			base(c, args)
+			c.SetOut(out)
+			_, _ = io.WriteString(out, styleHelp(buf.String()))
 		})
 	})
+}
+
+var (
+	helpHeading = regexp.MustCompile(`^[A-Z][A-Za-z ]*:$`)
+	helpLabel   = regexp.MustCompile(`^(Safety|Actor):`)
+)
+
+// styleHelp colors cobra's rendered help: each section heading, the label of
+// the Safety and Actor lines, and under Examples each drover command apart
+// from the comment beside it. It reads the text cobra already laid out, so
+// the plain help is the same bytes with or without it.
+func styleHelp(text string) string {
+	lines := strings.Split(text, "\n")
+	examples := false
+	for i, line := range lines {
+		switch {
+		case helpHeading.MatchString(line):
+			examples = line == "Examples:"
+			lines[i] = sgr(line, pal.Heading, true)
+		case helpLabel.MatchString(line):
+			n := strings.IndexByte(line, ':') + 1
+			lines[i] = sgr(line[:n], pal.Heading, true) + line[n:]
+		case examples && strings.HasPrefix(strings.TrimLeft(line, " "), "drover "):
+			lead := len(line) - len(strings.TrimLeft(line, " "))
+			// Two spaces before the #, so an issue number is not a comment.
+			cmd, comment, found := strings.Cut(line[lead:], "  #")
+			trimmed := strings.TrimRight(cmd, " ")
+			styled := line[:lead] + sgr(trimmed, pal.Command, true) + cmd[len(trimmed):]
+			if found {
+				styled += "  " + sgr("#"+comment, pal.Muted, true)
+			}
+			lines[i] = styled
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // expand resolves the config placeholders in one command's help and appends its
