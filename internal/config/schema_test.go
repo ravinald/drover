@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BurntSushi/toml"
 	"github.com/ravinald/drover/internal/backlog"
 )
 
@@ -44,7 +45,7 @@ func walk(t *testing.T, typ reflect.Type, node map[string]any, path string) {
 		if _, ok := child["description"]; !ok {
 			t.Errorf("%s.%s: no description — the schema is the machine-readable half of the reference", path, tag)
 		}
-		if f.Type.Kind() == reflect.Struct {
+		if f.Type.Kind() == reflect.Struct && !f.Type.Implements(reflect.TypeFor[toml.Marshaler]()) {
 			walk(t, f.Type, child, path+"."+tag)
 		}
 	}

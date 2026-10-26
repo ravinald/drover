@@ -875,3 +875,89 @@ func TestUsageLevelsLoadAndRefuseBadPairs(t *testing.T) {
 		}
 	}
 }
+
+// "off" is how a project removes a level the per-user file sets: TOML has no
+// null, and every number, 0 included, is a level. The last file decoded wins
+// either way, as for every other key.
+func TestUsageLevelOffOverridesTheOtherLayer(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	global := filepath.Join(home, "drover", GlobalFileName)
+	if err := os.MkdirAll(filepath.Dir(global), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	layered := func(perUser, project string) (*Config, error) {
+		t.Helper()
+		if err := os.WriteFile(global, []byte(perUser), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return Load(write(t, map[string]string{FileName: minimal + "\n" + project + "\n", "go.mod": "module x\n"}))
+	}
+
+	c, err := layered("[usage.weekly]\npause_remaining = 5\n", "[usage.weekly]\npause_remaining = \"off\"")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := c.UsageLevel(UsageWeekly, "pause"); ok {
+		t.Errorf("a project's \"off\" over a per-user 5 reads as set, at %d", p)
+	}
+	off := c.SwitchedOff()
+	if len(off) != 1 || off[0].Key != "usage.weekly.pause_remaining" || off[0].Path != filepath.Join(c.Root, FileName) || off[0].Inherited != "5" {
+		t.Errorf("SwitchedOff = %+v, want weekly pause_remaining off in the project over the per-user 5", off)
+	}
+
+	c, err = layered("[usage.weekly]\npause_remaining = \"off\"\n", "[usage.weekly]\npause_remaining = 5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := c.UsageLevel(UsageWeekly, "pause"); !ok || p != 5 {
+		t.Errorf("a project's 5 over a per-user \"off\" = %d %v, want 5 and set", p, ok)
+	}
+	if off := c.SwitchedOff(); len(off) != 0 {
+		t.Errorf("SwitchedOff = %+v, want nothing: the project's number won", off)
+	}
+
+	c, err = layered("[usage.overage]\nmode = \"continue\"\nmax_usd = 50\n", "[usage.overage]\nmax_usd = \"off\"")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m, ok := c.OverageUSD("max"); ok {
+		t.Errorf("max_usd = \"off\" reads as a cap of %g", m)
+	}
+
+	// The pair check reads "off" as unset, the way it reads a key nobody wrote.
+	if c, err = layered("", "[usage.weekly]\npause_remaining = \"off\"\nnotify_remaining = 20"); err != nil {
+		t.Errorf("pause_remaining = \"off\" beside notify_remaining = 20: %v", err)
+	} else if n, ok := c.UsageLevel(UsageWeekly, "notify"); !ok || n != 20 {
+		t.Errorf("notify_remaining = %d %v, want 20", n, ok)
+	}
+
+	for _, c := range []struct{ perUser, project, want string }{
+		{"", "[usage.weekly]\npause_remaining = \"of\"", "usage.weekly.pause_remaining"},
+		{"[usage.five_hour]\nnotify_remaining = \"none\"\n", "", "usage.five_hour.notify_remaining"},
+		{"", "[usage.overage]\nnotify_usd = \"OFF\"", "usage.overage.notify_usd"},
+		{"", "[usage.weekly]\npause_remaining = 5.5", "usage.weekly.pause_remaining"},
+		{"", "[usage.overage]\nmode = \"of\"", "usage.overage.mode"},
+		{"", "[usage.overage]\nmode = \"off\"", "usage.overage.mode"},
+		{"[usage.overage]\nmode = \"off\"\n", "", "usage.overage.mode"},
+	} {
+		_, err := layered(c.perUser, c.project)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%q over %q: err = %v, want one naming %s", c.project, c.perUser, err, c.want)
+			continue
+		}
+		file := filepath.Base(global)
+		if c.perUser == "" {
+			file = FileName
+		}
+		if !strings.Contains(err.Error(), file) {
+			t.Errorf("%q over %q: err = %v, want one naming %s", c.project, c.perUser, err, file)
+		}
+		if strings.HasPrefix(c.want, "usage.overage.mode") {
+			continue
+		}
+		if !strings.Contains(err.Error(), `"off"`) || !strings.Contains(err.Error(), "give a") {
+			t.Errorf("%q: err = %v, want one naming both accepted forms", c.project, err)
+		}
+	}
+}

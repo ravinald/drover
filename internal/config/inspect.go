@@ -92,6 +92,7 @@ func Inspect(dir string) (*Inspection, error) {
 			in.global = g
 			in.globalVersion = c.SchemaVersion
 			in.absorb(md, g, false)
+			c.inheritedUsage = c.Usage
 			c.sources = append(c.sources, g)
 		}
 	}

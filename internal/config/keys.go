@@ -110,7 +110,7 @@ func walkKeys(v reflect.Value, table string, entries bool) []Key {
 		}
 		dotted := Join(table, tag)
 		f := v.Field(i)
-		if f.Kind() == reflect.Struct {
+		if f.Kind() == reflect.Struct && !isMarshaler(f) {
 			out = append(out, walkKeys(f, dotted, entries)...)
 			continue
 		}
@@ -149,6 +149,12 @@ func mapEntries(m reflect.Value, table string) []Key {
 // come out inline, because the line is meant to be pasted somewhere a reader
 // chose rather than written into a structure this cannot see.
 func literal(v reflect.Value) string {
+	if isMarshaler(v) {
+		b, err := v.Interface().(toml.Marshaler).MarshalTOML()
+		if err == nil {
+			return string(b)
+		}
+	}
 	switch v.Kind() {
 	case reflect.String:
 		return strconv.Quote(v.String())
@@ -196,6 +202,16 @@ func literal(v reflect.Value) string {
 		return inline(parts)
 	}
 	return fmt.Sprintf("%v", v.Interface())
+}
+
+// isMarshaler reports a value that writes its own literal, such as a usage
+// level that is a number or "off": a struct to Go, one key to a file.
+func isMarshaler(v reflect.Value) bool {
+	if v.Kind() != reflect.Struct || !v.CanInterface() {
+		return false
+	}
+	_, ok := v.Interface().(toml.Marshaler)
+	return ok
 }
 
 func inline(parts []string) string {

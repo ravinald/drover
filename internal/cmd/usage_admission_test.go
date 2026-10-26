@@ -443,3 +443,20 @@ func TestAResumeOntoAReplacedBinaryKeepsTheUsageHoldReleased(t *testing.T) {
 		t.Errorf("usage_admission paused the drive %d times, want 1\n%s", paused, stdout.String())
 	}
 }
+
+// The case "off" exists for: a per-user weekly pause every project inherits,
+// and one project that runs on purchased credit. At 0% left on the week the
+// project's "off" leaves nothing to hold on, and the dry run names the per-user
+// value it replaced so nobody reads the level as one that was never set.
+func TestAProjectOffRunsOnCreditUnderAPerUserWeeklyPause(t *testing.T) {
+	globalConfig(t, "[usage.weekly]\npause_remaining = 5\n")
+	s := fixture(t, "\n[usage.weekly]\npause_remaining = \"off\"\n\n[usage.overage]\nmode = \"continue\"\n")
+	now := time.Now()
+	r := reading("rejected", "seven_day", 1, 0.1, now.Add(30*time.Hour), true, "")
+	if h := judgeUsage(s.cfg, accountReading{Reading: r}, now).hold(nil); h != nil {
+		t.Errorf("hold %+v, want none: the project switched the weekly pause off and runs on credit", h)
+	}
+	if plan := s.usagePlan(); !strings.Contains(plan, "weekly pause_remaining off in .drover.toml (the per-user file sets 5)") {
+		t.Errorf("the dry run's usage_admission line does not name the switched-off level: %q", plan)
+	}
+}

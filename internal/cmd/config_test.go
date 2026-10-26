@@ -1634,3 +1634,33 @@ func TestTheMirrorLineNamesItsSource(t *testing.T) {
 		t.Errorf("init writes %q for a key it should leave to the default", got)
 	}
 }
+
+// A level switched off reads, in the print, as "off" and the file that wrote
+// it, never as a key the project could add: a project's "off" over a per-user 5
+// and a per-user "off" the project inherits both look, from the body alone,
+// like a level nobody set.
+func TestThePrintNamesASwitchedOffLevelAndTheDiffDoesNotOfferIt(t *testing.T) {
+	globalConfig(t, "[usage.weekly]\npause_remaining = 5\n\n[usage.overage]\nmax_usd = \"off\"\n")
+	dir := projectWith(t, v1Config+"\n[usage.weekly]\npause_remaining = \"off\"\n")
+	out := printed(t, dir)
+	for _, want := range []string{
+		"pause_remaining = \"off\"\n",
+		"# [usage.weekly] pause_remaining = \"off\" in .drover.toml (the per-user file sets 5)\n",
+		"# [usage.overage] max_usd = \"off\" in ",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the printed config does not carry %q:\n%s", want, out)
+		}
+	}
+	diff := diffOf(t, dir)
+	for _, key := range []string{"usage.weekly.pause_remaining", "usage.overage.max_usd"} {
+		table, name := config.Table(key)
+		section := diff[strings.Index(diff, "["+table+"]"):]
+		if end := strings.Index(section[1:], "\n["); end >= 0 {
+			section = section[:end+1]
+		}
+		if strings.Contains(section, name+" = ") {
+			t.Errorf("--diff offers %s, which a file switched off:\n%s", key, diff)
+		}
+	}
+}
