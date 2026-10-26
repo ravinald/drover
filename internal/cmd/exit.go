@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"errors"
+	"fmt"
+	"io"
 
 	"github.com/ravinald/drover/internal/runner"
 )
@@ -54,4 +56,11 @@ func Code(err error) int {
 		return ExitRefused
 	}
 	return ExitError
+}
+
+// PrintError writes the error Execute returned as drover reports every one:
+// the program's name, in the failure color when the stream takes it, and the
+// message in the reader's own foreground, which is the part they act on.
+func PrintError(w io.Writer, err error) {
+	fmt.Fprintln(w, sgr("drover:", pal.Fail, colorTo(w)), err)
 }

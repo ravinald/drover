@@ -1,0 +1,55 @@
+== stderr
+==> drive · 2 items: 1 2
+==> runners: implement per item (default impl) · review rev
+==> prompts: implement built-in default · review built-in review
+==> bounds: unbounded · merge: [drive] merge_gate decides
+==> forge: push each branch to origin · open a pull request for what the merge gate passes, then ask the forge to merge it
+  · work not linked into the worktree: git would not ignore a link there (ignore it as work, without the trailing slash, to give sessions a copy)
+==> 1 · implement · branch first · round 1
+==> item   work/01-first.md
+==> prompt built-in default
+==> runner impl: <path>
+==> argv   <path> <prompt>
+==> log    <path>
+
+==> report saved: reports/01-first.md
+==> 1 · review · branch first · round 1
+==> item   work/01-first.md
+==> prompt built-in review
+==> runner rev: <path>
+==> argv   <path> <prompt>
+==> log    <path>
+
+  · 1: merge queued at the forge; the next drive finishes it
+  · work not linked into the worktree: git would not ignore a link there (ignore it as work, without the trailing slash, to give sessions a copy)
+  · reports not linked into the worktree: git would not ignore a link there (ignore it as reports, without the trailing slash, to give sessions a copy)
+==> 2 · implement · branch second · round 1
+==> item   work/02-second.md
+==> prompt built-in default
+==> runner impl: <path>
+==> argv   <path> <prompt>
+==> log    <path>
+
+==> report saved: reports/02-second.md
+==> 2 · review · branch second · round 1
+==> item   work/02-second.md
+==> prompt built-in review
+==> runner rev: <path>
+==> argv   <path> <prompt>
+==> log    <path>
+
+  ! 2 parked no_record at <sha>: the review recorded nothing: no audit and no request for changes, so what it found is unknown
+
+2 attempted · 1 ready to merge · 1 parked · 0 skipped
+
+1
+  Outcome:    green and reviewed; PR #7 went to the forge to merge: merge queued at the forge; the next drive finishes it
+  Next steps: nothing yet: the next drover drive finishes it, or drover finish 1 once the forge has merged it
+
+2
+  Outcome:    the review recorded nothing: no audit and no request for changes, so what it found is unknown
+  Next steps: drover drive 2, or record what you found with drover audit 2
+== stdout
+{"id":"1","title":"First","branch":"first","outcome":"ready_to_merge","reason":"merge queued at the forge; the next drive finishes it","rounds":0,"reviews":1,"changes_requested":0,"audits":1,"implementer":"impl","review_runner":"rev","pr":7,"merged":true,"started":"<time>","ended":"<time>"}
+{"id":"2","title":"Second","branch":"second","outcome":"parked","park":"no_record","reason":"the review recorded nothing: no audit and no request for changes, so what it found is unknown","detail":"unknown","evidence":"{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false}","log":"<path>","rounds":0,"reviews":1,"changes_requested":0,"audits":0,"implementer":"impl","review_runner":"rev","started":"<time>","ended":"<time>"}
+{"findings_by_coverage":{"blocked":0,"orphaned":0,"queued":0,"scaffold":0,"unowned":0,"unqueued":0},"findings_needing_triage":[]}

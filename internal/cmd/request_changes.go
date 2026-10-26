@@ -129,7 +129,7 @@ change the numbered requirements, refuses evidence whose only findings are
 					if err := s.record(ledger.Row{
 						ID: it.ID.Bare(), Refused: "max_review_rounds", Date: ledger.Today(),
 					}); err != nil {
-						fmt.Fprintf(os.Stderr, "warn: the cap refusal went unrecorded: %v\n", err)
+						fmt.Fprintf(errOut, "warn: the cap refusal went unrecorded: %v\n", err)
 					}
 					return Refusal{s.capRefusal(it.ID.Bare(), n, limit)}
 				}
@@ -180,7 +180,7 @@ change the numbered requirements, refuses evidence whose only findings are
 		// five. A failure here costs that record and nothing else, so it warns.
 		round, err := s.keepRound(it, text)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warn: round not kept: %v\n", err)
+			fmt.Fprintf(errOut, "warn: round not kept: %v\n", err)
 		}
 		// After the body write, never before. A row claiming a request whose body
 		// write failed is the one wrong direction; a body written whose row
@@ -364,7 +364,7 @@ func unfenced(text string) string {
 func contradictionRefusal(id string, why []string, overLimit, yes bool) error {
 	list := "    " + strings.Join(why, "\n    ")
 	if overLimit {
-		fmt.Fprintf(os.Stderr, "  ! the evidence for %s may describe a contract the body does not hold:\n%s\n", id, list)
+		fmt.Fprintf(errOut, "  ! the evidence for %s may describe a contract the body does not hold:\n%s\n", id, list)
 		if yes {
 			return nil
 		}
@@ -525,10 +525,10 @@ func demoteEvidence(text string) (out string, numbered, headings int) {
 // is owed the news that their file reached the body in a different shape.
 func reportDemotions(numbered, headings int) {
 	if numbered > 0 {
-		fmt.Fprintf(os.Stderr, "note: demoted %d numbered line(s) to bullets; a top-level \"N.\" in the body is read as a requirement.\n", numbered)
+		fmt.Fprintf(errOut, "note: demoted %d numbered line(s) to bullets; a top-level \"N.\" in the body is read as a requirement.\n", numbered)
 	}
 	if headings > 0 {
-		fmt.Fprintf(os.Stderr, "note: demoted %d heading(s) below ###; a \"## \" line is one of the body's own sections.\n", headings)
+		fmt.Fprintf(errOut, "note: demoted %d heading(s) below ###; a \"## \" line is one of the body's own sections.\n", headings)
 	}
 }
 

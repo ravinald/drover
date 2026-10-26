@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -69,25 +70,53 @@ func titleWidthBeside(noteCell int) int {
 	return w
 }
 
-// colour is opt-out: a pipe has nobody to read the escapes, and NO_COLOR is the
-// one convention a tool emitting them is expected to honour.
-func colour() bool {
+// colorMode is --color: auto, always or never. --no-color writes never here
+// too, so whichever of the two came last on the command line wins.
+var colorMode = colorAuto
+
+const (
+	colorAuto   = "auto"
+	colorAlways = "always"
+	colorNever  = "never"
+)
+
+// colorFor decides escapes for one stream, because stdout and stderr go to
+// different places: a drive piped into a file still has a terminal on stderr.
+//
+// The flag outranks the environment, so one invocation can override a shell
+// that exports either variable. NO_COLOR is the convention a tool emitting
+// escapes is expected to honor; CLICOLOR_FORCE is its opposite, for a pager
+// that renders them. TERM=dumb declares a terminal that understands none.
+func colorFor(f *os.File) bool {
+	switch colorMode {
+	case colorAlways:
+		return true
+	case colorNever:
+		return false
+	}
 	if os.Getenv("NO_COLOR") != "" {
 		return false
 	}
-	fi, err := os.Stdout.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
-}
-
-// links is colour()'s rule for OSC 8 hyperlinks, asked of the stream the line
-// is written to, plus TERM=dumb: a terminal that declares it understands no
-// escapes prints this one as garbage around every number.
-func links(f *os.File) bool {
-	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" {
+	if v := os.Getenv("CLICOLOR_FORCE"); v != "" && v != "0" {
+		return true
+	}
+	if os.Getenv("TERM") == "dumb" {
 		return false
 	}
 	return onTerminal(f)
 }
+
+// colorTo is colorFor for a writer that may not be a stream at all. Anything
+// but an *os.File is a buffer on its way somewhere drover has not said, a file
+// or a notification body among them, so it is never colored.
+func colorTo(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && colorFor(f)
+}
+
+// links is colorFor's decision applied to OSC 8 hyperlinks on the stream the
+// line is written to.
+func links(f *os.File) bool { return colorFor(f) }
 
 // onTerminal is a variable so a test can drive the terminal-only paths, which
 // a captured stream never reaches.
@@ -159,11 +188,16 @@ func (s *session) repoURL() string {
 //
 // Callers pad before they colour. fmt counts escape bytes as width, so a cell
 // wrapped first and padded second shears the table by the length of the escape.
+//
+// A span colored inside s ends in a reset that would end this one too, so
+// each inner reset reopens the outer code: a dim line keeps its dim after the
+// id colored inside it.
 func sgr(s, code string, on bool) string {
 	if !on || code == "" {
 		return s
 	}
-	return "\x1b[" + code + "m" + s + "\x1b[0m"
+	open := "\x1b[" + code + "m"
+	return open + strings.ReplaceAll(s, "\x1b[0m", "\x1b[0m"+open) + "\x1b[0m"
 }
 
 // paint marks a line as the one worth looking at. Colour is never the only

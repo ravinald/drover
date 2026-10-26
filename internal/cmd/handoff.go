@@ -222,7 +222,7 @@ func sayReexecWaiting(q *driveSched, running map[int]queued, now time.Time) {
 	to := q.reexec
 	q.mu.Unlock()
 	line := reexecWaitingLine(to, waited, waiting)
-	fmt.Fprintf(os.Stderr, "· %s\n", line)
+	fmt.Fprintf(errOut, "· %s\n", line)
 	events.emit(DriveEvent{Event: evReexecWaiting, Reason: line, Waiting: waiting})
 	if held != nil {
 		_ = held.Update(func(l *lease.Lease) { l.ReexecWaiting = line })
@@ -255,7 +255,7 @@ func (s *session) reexec(q *driveSched, pending []queued, running map[int]queued
 		q.reexec = ""
 		q.mu.Unlock()
 		_ = held.Update(func(l *lease.Lease) { l.Reexec, l.Handoff = "", nil })
-		fmt.Fprintf(os.Stderr, "· the re-exec onto the replaced binary failed: %v\n"+
+		fmt.Fprintf(errOut, "· the re-exec onto the replaced binary failed: %v\n"+
 			"  The drive stays paused on %s; drive --resume --keep-binary resumes it there\n", err, startedFrom)
 	}
 	d := activeDrive.Load()
@@ -293,7 +293,7 @@ func (s *session) reexec(q *driveSched, pending []queued, running map[int]queued
 		failed(err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "· re-executing drive %s onto %s; %d held, %d queued\n", d.id, q.reexec, len(holds), len(queue))
+	fmt.Fprintf(errOut, "· re-executing drive %s onto %s; %d held, %d queued\n", d.id, q.reexec, len(holds), len(queue))
 	// Whatever coalescing or quiet hours hold goes out now: the process that
 	// holds it is about to be replaced, and its timers with it.
 	events.flushNotify()
@@ -353,7 +353,7 @@ func (s *session) driveTakeoverRun(ctx context.Context, reviewer string) error {
 	for _, id := range l.Queue {
 		it, err := s.item(id)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "· %s was queued in the drive this replaced and will not load: %v\n", id, err)
+			fmt.Fprintf(errOut, "· %s was queued in the drive this replaced and will not load: %v\n", id, err)
 			continue
 		}
 		pending, ids = append(pending, newQueued(it, true)), append(ids, id)
@@ -367,7 +367,7 @@ func (s *session) driveTakeoverRun(ctx context.Context, reviewer string) error {
 	}); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "· drive %s re-executed onto %s, replacing %s; %d held items go on, then the queue\n",
+	fmt.Fprintf(errOut, "· drive %s re-executed onto %s, replacing %s; %d held items go on, then the queue\n",
 		d.id, startedFrom, ho.From, len(l.Holds))
 	events.emit(DriveEvent{Event: evResumed, Changed: []string{inputBinary}})
 	return s.driveQueued(ctx, pending, reviewer, deadline, ho.Dispatched, s.adoptFindingWatch(ho.Findings), ho.Waived, ho.Operator)

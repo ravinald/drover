@@ -389,7 +389,7 @@ func (s *session) writeAgents(path, block string) error {
 		if err := os.WriteFile(abs, []byte(block), 0o644); err != nil { // #nosec G306
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "wrote %s\n", path)
+		fmt.Fprintf(errOut, "wrote %s\n", path)
 		return nil
 	case err != nil:
 		return err
@@ -402,7 +402,7 @@ func (s *session) writeAgents(path, block string) error {
 		if err := os.WriteFile(abs, []byte(out), 0o644); err != nil { // #nosec G306
 			return err
 		}
-		fmt.Fprintf(os.Stderr, "appended the drover block to %s\n", path)
+		fmt.Fprintf(errOut, "appended the drover block to %s\n", path)
 		return nil
 	}
 	// An opening marker with no closing one after it means the file was edited
@@ -424,7 +424,7 @@ func (s *session) writeAgents(path, block string) error {
 	if err := os.WriteFile(abs, []byte(out), 0o644); err != nil { // #nosec G306
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "regenerated the drover block in %s\n", path)
+	fmt.Fprintf(errOut, "regenerated the drover block in %s\n", path)
 	return nil
 }
 

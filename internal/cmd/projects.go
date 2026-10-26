@@ -46,7 +46,7 @@ func enroll(cfg *config.Config) {
 		err = projects.Append(reg, row)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warn: could not record this project in %s: %v\n", reg, err)
+		fmt.Fprintf(errOut, "warn: could not record this project in %s: %v\n", reg, err)
 	}
 }
 

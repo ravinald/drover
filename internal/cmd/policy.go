@@ -105,10 +105,10 @@ func (s *session) confirmPolicy(path string, yes bool) error {
 	if len(changes) == 0 {
 		return nil
 	}
-	fmt.Fprintf(os.Stderr, "the block in %s changes policy:\n", path)
+	fmt.Fprintf(errOut, "the block in %s changes policy:\n", path)
 	widens := 0
 	for _, c := range changes {
-		fmt.Fprintf(os.Stderr, "  %s\n", c)
+		fmt.Fprintf(errOut, "  %s\n", c)
 		if c.widens() {
 			widens++
 		}

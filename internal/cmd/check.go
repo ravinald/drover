@@ -459,6 +459,7 @@ func (s *session) badDeps(it backlog.Item) Finding {
 // can replay real output through the shipped rtk filter rather than through a
 // second copy of this format.
 func renderCheck(w io.Writer, rep CheckReport) {
+	tint := colorTo(w)
 	// Only when a file outside the repository had a say. Naming the project's
 	// own config on every run is noise; naming the one a reader would not think
 	// to open is the whole point.
@@ -466,23 +467,23 @@ func renderCheck(w io.Writer, rep CheckReport) {
 		fmt.Fprintf(w, "config: %s\n", strings.Join(rep.Config, " < "))
 	}
 	for _, f := range rep.Findings {
-		fmt.Fprintf(w, "%-*s %s\n", findingWidth, f.Kind, f.Message)
+		fmt.Fprintf(w, "%s %s\n", sgr(fmt.Sprintf("%-*s", findingWidth, f.Kind), pal.Fail, tint), f.Message)
 		if f.Detail != "" {
 			fmt.Fprintf(w, "%s%s\n", strings.Repeat(" ", findingWidth+1), f.Detail)
 		}
 	}
 	if rep.RegisterNote != "" {
-		fmt.Fprintf(w, "note: %s\n", rep.RegisterNote)
+		fmt.Fprintf(w, "%s %s\n", sgr("note:", pal.Warn, tint), rep.RegisterNote)
 	}
 	if rep.MirrorNote != "" {
-		fmt.Fprintf(w, "note: %s\n", rep.MirrorNote)
+		fmt.Fprintf(w, "%s %s\n", sgr("note:", pal.Warn, tint), rep.MirrorNote)
 	}
 	// Ahead of the result line, because it says the result is a floor.
 	if rep.Stopped != "" {
-		fmt.Fprintf(w, "stopped: %s\n", rep.Stopped)
+		fmt.Fprintf(w, "%s %s\n", sgr("stopped:", pal.Warn, tint), rep.Stopped)
 	}
 	if rep.OK {
-		fmt.Fprintln(w, checkLine(rep.Bodies, rep.Rows))
+		fmt.Fprintln(w, sgr(checkLine(rep.Bodies, rep.Rows), pal.OK, tint))
 	}
 }
 

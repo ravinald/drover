@@ -161,7 +161,7 @@ func statusEverywhere(w io.Writer) error {
 	// A rendered page or --json is a file somebody reads elsewhere, so the count
 	// goes to the operator on stderr rather than into the output.
 	if all.Skipped+all.Scratch > 0 {
-		fmt.Fprintln(os.Stderr, skippedLine(all.Skipped, all.Scratch))
+		fmt.Fprintln(errOut, skippedLine(all.Skipped, all.Scratch))
 	}
 	if statusOut != "" {
 		return writeOutput(expandHome(statusOut), out, statusForce)

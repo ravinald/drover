@@ -270,7 +270,7 @@ func (s *session) launch(ctx context.Context, it backlog.Item, stage, name, logB
 	// say nothing about the second round, which is the one whose prompt differs.
 	banner.Log = displayPath(s.cfg.Root, logPath)
 	events.session(it.ID.Bare(), stage, banner.Log)
-	banner.from(name, spec, runner.Headless).write(os.Stderr)
+	banner.from(name, spec, runner.Headless).write(errOut)
 	// Linked again before every session, not only when the tree opens: a branch
 	// update that merges a trunk which stopped tracking a linked path (a
 	// CLAUDE.md moved out of git) deletes the branch's copy, and the next session
@@ -328,7 +328,7 @@ func (s *session) launchOrWait(ctx context.Context, it backlog.Item, stage, name
 		if wait <= 0 {
 			return oc, err
 		}
-		fmt.Fprintf(os.Stderr, "  · %s: %s reported %s, not a failure of the work; %s\n",
+		fmt.Fprintf(errOut, "  · %s: %s reported %s, not a failure of the work; %s\n",
 			it.ID.Bare(), name, oc.Result.Fault, why)
 		if !sleepFor(ctx, wait) {
 			return oc, err
@@ -996,11 +996,11 @@ drive with exit 0 and each item it held reports held. At usage_admission =
 				return eerr
 			}
 			if !res.free {
-				res.report(os.Stdout, os.Stderr)
+				res.report(os.Stdout, errOut)
 				return res.refusal()
 			}
 			// No drive is running, so this one is it, over the ids that passed.
-			res.report(os.Stdout, os.Stderr)
+			res.report(os.Stdout, errOut)
 			if len(res.ready) == 0 {
 				return res.refusal()
 			}
@@ -1329,7 +1329,7 @@ func (s *session) drive(ctx context.Context, ids []string, reviewer string, dead
 			return err
 		}
 		if len(items) == 0 {
-			fmt.Fprintln(os.Stderr, "queue empty")
+			fmt.Fprintln(errOut, "queue empty")
 			return nil
 		}
 		s.driveHeader(os.Stdout, items, reviewer, deadline)
@@ -1346,7 +1346,7 @@ func (s *session) drive(ctx context.Context, ids []string, reviewer string, dead
 		return err
 	}
 	if len(entry) > 0 {
-		fmt.Fprintf(os.Stderr, "· your checkout holds uncommitted work (%s); not reconciling what merged. "+
+		fmt.Fprintf(errOut, "· your checkout holds uncommitted work (%s); not reconciling what merged. "+
 			"The queue runs in worktrees of its own\n", pathList(entry))
 	} else {
 		// Before the queue is read, not after. Reconciling changes which items are
@@ -1354,24 +1354,24 @@ func (s *session) drive(ctx context.Context, ids []string, reviewer string, dead
 		// skipped, which reads as a drive that tried and failed to work.
 		landed, left, err := s.reconcile()
 		if landed+left > 0 || err != nil {
-			fmt.Fprintf(os.Stderr, "· reconciled: %d finished, %d merged without a drover launch\n", landed, left)
+			fmt.Fprintf(errOut, "· reconciled: %d finished, %d merged without a drover launch\n", landed, left)
 		}
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "· reconciliation stopped; not driving\n")
+			fmt.Fprintf(errOut, "· reconciliation stopped; not driving\n")
 			return err
 		}
 		if landed > 0 {
 			if err := s.catchUpAfter(ctx, ""); err != nil {
-				fmt.Fprintf(os.Stderr, "· %v; not driving\n", err)
+				fmt.Fprintf(errOut, "· %v; not driving\n", err)
 				return err
 			}
 		}
 	}
 	if p, _ := s.cfg.Policy("cleanup_interrupted_drive"); p == polAuto {
 		if l, err := s.findLeftovers(); err != nil {
-			fmt.Fprintf(os.Stderr, "· cleanup_interrupted_drive: what earlier drives left would not list: %v\n", err)
-		} else if err := l.apply(s, os.Stderr); err != nil {
-			fmt.Fprintf(os.Stderr, "· cleanup_interrupted_drive: %v\n", err)
+			fmt.Fprintf(errOut, "· cleanup_interrupted_drive: what earlier drives left would not list: %v\n", err)
+		} else if err := l.apply(s, errOut); err != nil {
+			fmt.Fprintf(errOut, "· cleanup_interrupted_drive: %v\n", err)
 		}
 	}
 	if driveHoldBeforeQueue != nil {
@@ -1392,7 +1392,7 @@ func (s *session) drive(ctx context.Context, ids []string, reviewer string, dead
 		}
 	}
 	if len(items) == 0 {
-		fmt.Fprintln(os.Stderr, "queue empty")
+		fmt.Fprintln(errOut, "queue empty")
 		return nil
 	}
 	if err := s.startDrive(items); err != nil {
@@ -1406,8 +1406,8 @@ func (s *session) drive(ctx context.Context, ids []string, reviewer string, dead
 		started.Deadline = deadline.Format(time.RFC3339)
 	}
 	events.emit(started)
-	s.driveHeader(os.Stderr, items, reviewer, deadline)
-	s.checkTreeLinks(os.Stderr, items, false)
+	s.driveHeader(errOut, items, reviewer, deadline)
+	s.checkTreeLinks(errOut, items, false)
 
 	pending := make([]queued, 0, len(items))
 	for _, it := range items {
@@ -1507,14 +1507,14 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			operator[d.ID] = d.Park
 			for _, q := range pending {
 				if operatorDep(q, operator) == d.ID {
-					fmt.Fprintf(os.Stderr, "· %s waits for %s, which parked %s for the operator; it dispatches once %s is recorded merged\n",
+					fmt.Fprintf(errOut, "· %s waits for %s, which parked %s for the operator; it dispatches once %s is recorded merged\n",
 						q.it.ID.Bare(), d.ID, d.Park, d.ID)
 				}
 			}
 		}
 		if driveFollow && d.Finished && stop == nil {
 			for _, next := range s.unblockedBy(d.ID, seen) {
-				fmt.Fprintf(os.Stderr, "· --follow: %s finished, so %s is ready; appended\n", d.ID, next.ID.Bare())
+				fmt.Fprintf(errOut, "· --follow: %s finished, so %s is ready; appended\n", d.ID, next.ID.Bare())
 				pending = append(pending, newQueued(next, false))
 			}
 		}
@@ -1524,7 +1524,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			}
 		}
 		if d.stop != nil && stop == nil {
-			fmt.Fprintf(os.Stderr, "· %v; stopping the drive\n", d.stop)
+			fmt.Fprintf(errOut, "· %v; stopping the drive\n", d.stop)
 			stop, stopped = d.stop, true
 			end(endedFault)
 			sched.drain(d.stop)
@@ -1552,7 +1552,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			case !deadline.IsZero() && !now.Before(deadline):
 				// Exit 0: the drive did what its bound allowed, and every item it
 				// did not reach is held rather than failed.
-				fmt.Fprintln(os.Stderr, "· the deadline arrived while the drive was held on usage; stopping, and each item it holds reports held")
+				fmt.Fprintln(errOut, "· the deadline arrived while the drive was held on usage; stopping, and each item it holds reports held")
 				stopped = true
 				end(endedDeadline)
 				sched.drain(errUsageDeadline)
@@ -1571,7 +1571,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		}
 		paused := sched.isPaused()
 		if paused && !stopped && ctx.Err() != nil {
-			fmt.Fprintln(os.Stderr, "· interrupted while paused; stopping")
+			fmt.Fprintln(errOut, "· interrupted while paused; stopping")
 			stopped = true
 			end(endedInterrupted)
 		}
@@ -1588,19 +1588,19 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			// already, and the process it ran in would have let it finish.
 			carried := i >= 0 && pending[i].hold != nil
 			if !carried && driveMax > 0 && dispatched >= driveMax {
-				fmt.Fprintf(os.Stderr, "· stopping at --max-items %d\n", driveMax)
+				fmt.Fprintf(errOut, "· stopping at --max-items %d\n", driveMax)
 				stopped = true
 				end(endedMaxItems)
 				break
 			}
 			if !carried && !deadline.IsZero() && !time.Now().Before(deadline) {
-				fmt.Fprintf(os.Stderr, "· stopping at the deadline\n")
+				fmt.Fprintf(errOut, "· stopping at the deadline\n")
 				stopped = true
 				end(endedDeadline)
 				break
 			}
 			if ctx.Err() != nil {
-				fmt.Fprintln(os.Stderr, "· interrupted; stopping at the item boundary")
+				fmt.Fprintln(errOut, "· interrupted; stopping at the item boundary")
 				stopped = true
 				end(endedInterrupted)
 				break
@@ -1705,7 +1705,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 		// Each item ran on a session of its own, so what it recorded reaches this
 		// one only through the files.
 		if err := s.reload(); err != nil {
-			fmt.Fprintf(os.Stderr, "· the backlog and ledger would not reload after %s: %v\n", d.ID, err)
+			fmt.Fprintf(errOut, "· the backlog and ledger would not reload after %s: %v\n", d.ID, err)
 		}
 		if d.requeue != nil && !stopped {
 			back := newQueued(from.it, true)
@@ -1714,7 +1714,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			}
 			back.hold = d.requeue
 			pending = append([]queued{back}, pending...)
-			fmt.Fprintf(os.Stderr, "· %s: %s; it goes back to the head of the queue at its %s stage\n", d.ID, d.Reason, d.requeue.At)
+			fmt.Fprintf(errOut, "· %s: %s; it goes back to the head of the queue at its %s stage\n", d.ID, d.Reason, d.requeue.At)
 			events.emit(DriveEvent{Event: evQueued, ID: d.ID, Action: "usage_admission", Stage: d.requeue.At, Position: 1})
 			s.holdForUsage(sched, *d.refusal)
 			continue
@@ -1756,13 +1756,13 @@ func (s *session) releaseMerged(pending []queued, operator map[string]string) {
 		return
 	}
 	if err := s.reload(); err != nil {
-		fmt.Fprintf(os.Stderr, "· the ledger would not reload to read the deps held for the operator: %v\n", err)
+		fmt.Fprintf(errOut, "· the ledger would not reload to read the deps held for the operator: %v\n", err)
 		return
 	}
 	for dep := range operator {
 		if s.ledger.State(dep).Merged {
 			delete(operator, dep)
-			fmt.Fprintf(os.Stderr, "· %s is recorded merged, so what waited for it dispatches\n", dep)
+			fmt.Fprintf(errOut, "· %s is recorded merged, so what waited for it dispatches\n", dep)
 		}
 	}
 }
@@ -1781,7 +1781,7 @@ func (s *session) skipHeld(pending *[]queued, operator map[string]string, accoun
 		*pending = append((*pending)[:i:i], (*pending)[i+1:]...)
 		now := time.Now().Format(time.RFC3339)
 		why := fmt.Sprintf("blocked by %s, which parked %s for the operator", dep, operator[dep])
-		fmt.Fprintf(os.Stderr, "· %s: %s, and nothing else is left to run, so it is skipped\n", q.it.ID.Bare(), why)
+		fmt.Fprintf(errOut, "· %s: %s, and nothing else is left to run, so it is skipped\n", q.it.ID.Bare(), why)
 		d := DriveItem{ID: q.it.ID.Bare(), Title: q.it.Title(), Outcome: outcomeSkipped, Park: stateBlocked,
 			Reason: why, Started: now, Ended: now, blockedBy: []string{dep}}
 		if err := account(d); err != nil {
@@ -2024,7 +2024,7 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 	// and only the operator knows. audit's same-runner warning draws the same line.
 	if implementer == reviewer {
 		d.SameRunner = true
-		fmt.Fprintf(os.Stderr, "  ! %s implements and reviews with one runner (%s). Driving anyway.\n",
+		fmt.Fprintf(errOut, "  ! %s implements and reviews with one runner (%s). Driving anyway.\n",
 			d.ID, implementer)
 	}
 	// The item's own checkout, never the operator's. Nothing here checks the
@@ -2179,7 +2179,7 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 		if pd := sessionDetail(oc, rerr); lostReview(v, pd.Detail) && !rerun && ctx.Err() == nil {
 			if p, _ := s.cfg.Policy("rerun_lost_review"); p == polAuto {
 				rerun, reviewOnly = true, true
-				fmt.Fprintf(os.Stderr, "  · %s: the review was lost (%s, %s: %s); rerunning it once on the same head\n",
+				fmt.Fprintf(errOut, "  · %s: the review was lost (%s, %s: %s); rerunning it once on the same head\n",
 					d.ID, v, pd.Detail, firstLine(pd.Evidence))
 				continue
 			}
@@ -2265,7 +2265,7 @@ func (s *session) implementRound(ctx context.Context, it backlog.Item, d *DriveI
 		return faulted(implementer, ledger.StageImplement, ic), true
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  · %s: run exited %d (%v); asking the ledger anyway\n", d.ID, ic.Exit, err)
+		fmt.Fprintf(errOut, "  · %s: run exited %d (%v); asking the ledger anyway\n", d.ID, ic.Exit, err)
 	}
 	// A faulted run never reaches this, deliberately: the report file is
 	// the item's saved self-report, and "API Error: 529 Overloaded" saved
@@ -2758,30 +2758,43 @@ func (s *session) driveSummary(done []DriveItem, totals DriveTotals) {
 		}
 	}
 	if !driveJSON {
+		tint := colorFor(os.Stdout)
 		for _, d := range done {
 			note := d.Park
 			if d.Reason != "" {
 				note = d.Park + ": " + d.Reason
 			}
-			fmt.Printf("%-6s %-9s rounds %d  reviews %d  %s\n", d.ID, d.Outcome, d.Rounds, d.Reviews, note)
+			fmt.Printf("%s %s rounds %d  reviews %d  %s\n", sgr(fmt.Sprintf("%-6s", d.ID), pal.ID, tint),
+				sgr(fmt.Sprintf("%-9s", d.Outcome), pal.state(d.Outcome), tint), d.Rounds, d.Reviews, note)
 		}
+	}
+	// Each count in its own role, and only when it is not zero: one role for
+	// the whole line would paint a clean drive red for reporting "0 parked".
+	tint := colorFor(os.Stderr)
+	count := func(n int, what, role string) string {
+		text := fmt.Sprintf("%d %s", n, what)
+		if n == 0 {
+			return text
+		}
+		return sgr(text, role, tint)
 	}
 	merged := ""
 	if byGate > 0 {
-		merged = fmt.Sprintf(" · %d merged by drover", byGate)
+		merged = " · " + count(byGate, "merged by drover", pal.OK)
 	}
 	if atForge > 0 {
-		merged += fmt.Sprintf(" · %d merged immediately", atForge)
+		merged += " · " + count(atForge, "merged immediately", pal.OK)
 	}
 	if heldBack > 0 {
-		merged += fmt.Sprintf(" · %d held on usage", heldBack)
+		merged += " · " + count(heldBack, "held on usage", pal.Warn)
 	}
-	fmt.Fprintf(os.Stderr, "\n%d attempted · %d ready to merge%s · %d parked · %d skipped\n",
-		len(done), reviewed, merged, parked, skipped)
+	fmt.Fprintf(errOut, "\n%d attempted · %s%s · %s · %s\n",
+		len(done), count(reviewed, "ready to merge", pal.OK), merged,
+		count(parked, "parked", pal.Fail), count(skipped, "skipped", pal.Warn))
 	if line := findingsTally(totals); line != "" {
-		fmt.Fprintf(os.Stderr, "%s\n", line)
+		fmt.Fprintf(errOut, "%s\n", line)
 		for _, f := range totals.FindingsNeedingTriage {
-			fmt.Fprintf(os.Stderr, "  not covered: %s\n", findingLine(f))
+			fmt.Fprintf(errOut, "  not covered: %s\n", findingLine(f))
 		}
 	}
 	for _, d := range done {
@@ -2790,7 +2803,7 @@ func (s *session) driveSummary(done []DriveItem, totals DriveTotals) {
 			path = rel(s.cfg.Root, it.Path)
 			drafted = writtenRequirements(it) > 0
 		}
-		fmt.Fprintf(os.Stderr, "\n%s\n", d.ID)
+		fmt.Fprintf(errOut, "\n%s\n", d.ID)
 		deny, _ := s.cfg.Policy("merge_protected_paths")
 		f := driveFollowUp(d, path, drafted, s.cfg.Review.MaxReviewRounds, deny)
 		if d.PR > 0 {
@@ -2804,7 +2817,7 @@ func (s *session) driveSummary(done []DriveItem, totals DriveTotals) {
 		if d.CatchUp != nil {
 			f.Outcome += "; " + catchUpClause(s.trunk(), d.CatchUp)
 		}
-		f.write(os.Stderr, "  ")
+		f.write(errOut, "  ")
 	}
 }
 
@@ -3499,8 +3512,8 @@ func (s *session) reconcile() (landed, left int, err error) {
 		// it.
 		if answer == mergeUnvouched {
 			left++
-			fmt.Fprintf(os.Stderr, "· %s is merged only because nothing shows its branch holding a commit; leaving it alone\n", id)
-			fmt.Fprintf(os.Stderr, "    check whether %s is on %s, then drover finish %s --force\n", id, trunk, id)
+			fmt.Fprintf(errOut, "· %s is merged only because nothing shows its branch holding a commit; leaving it alone\n", id)
+			fmt.Fprintf(errOut, "    check whether %s is on %s, then drover finish %s --force\n", id, trunk, id)
 			continue
 		}
 		// A branch that carried no commit is an ancestor of the trunk by
@@ -3519,14 +3532,14 @@ func (s *session) reconcile() (landed, left int, err error) {
 		// `drover finish` and never a false completion.
 		if same, err := sameCommit(s.cfg.Root, branch, trunk); err == nil && same {
 			left++
-			fmt.Fprintf(os.Stderr, "· %s is merged only because its branch has no commits; leaving it alone\n", id)
-			fmt.Fprintf(os.Stderr, "    %s is the trunk's own tip, so nothing shipped\n", branch)
+			fmt.Fprintf(errOut, "· %s is merged only because its branch has no commits; leaving it alone\n", id)
+			fmt.Fprintf(errOut, "    %s is the trunk's own tip, so nothing shipped\n", branch)
 			continue
 		}
 		if s.ledger.Counts(id).Launches() == 0 {
 			left++
-			fmt.Fprintf(os.Stderr, "· %s is merged, but drover never launched it; leaving it alone\n", id)
-			fmt.Fprintf(os.Stderr, "    drover finish %s\n", id)
+			fmt.Fprintf(errOut, "· %s is merged, but drover never launched it; leaving it alone\n", id)
+			fmt.Fprintf(errOut, "    drover finish %s\n", id)
 			continue
 		}
 		// Asked before every finish rather than once at the top: a finish writes
@@ -3536,12 +3549,12 @@ func (s *session) reconcile() (landed, left int, err error) {
 		if err := s.cleanForFinish(it); err != nil {
 			return landed, left, err
 		}
-		fmt.Fprintf(os.Stderr, "· %s merged since the last drive; finishing it\n", id)
+		fmt.Fprintf(errOut, "· %s merged since the last drive; finishing it\n", id)
 		finishInDrive = true
 		lerr := finishCmd.RunE(finishCmd, []string{id})
 		finishInDrive = false
 		if lerr != nil {
-			fmt.Fprintf(os.Stderr, "  ! finish %s: %v\n", id, lerr)
+			fmt.Fprintf(errOut, "  ! finish %s: %v\n", id, lerr)
 			continue
 		}
 		landed++
@@ -3574,7 +3587,7 @@ func (s *session) leaveItem(d *DriveItem) {
 		return
 	}
 	if err := gitAt(s.cfg.Root, "worktree", "remove", s.tree); err != nil {
-		fmt.Fprintf(os.Stderr, "  · %s: worktree kept at %s: %v\n", d.ID, s.tree, err)
+		fmt.Fprintf(errOut, "  · %s: worktree kept at %s: %v\n", d.ID, s.tree, err)
 		return
 	}
 	d.Tree = ""
@@ -4114,7 +4127,7 @@ func (s *session) driveMerge(ctx context.Context, it backlog.Item, d *DriveItem,
 	gate := len(s.cfg.Loop.MergeGate) > 0
 	if gate {
 		if why := s.nothingWaits(trunk); why != "" {
-			fmt.Fprintf(os.Stderr, "  · %s: %s; [drive] merge_gate decides at the head\n", d.ID, why)
+			fmt.Fprintf(errOut, "  · %s: %s; [drive] merge_gate decides at the head\n", d.ID, why)
 			return s.mergeByGate(ctx, it, d, park, trunk, deadline)
 		}
 	}
@@ -4124,7 +4137,7 @@ func (s *session) driveMerge(ctx context.Context, it backlog.Item, d *DriveItem,
 	case err == nil:
 		return s.afterAutoMerge(ctx, it, d, trunk, deadline)
 	case errors.Is(err, errNoAutoMerge) && gate:
-		fmt.Fprintf(os.Stderr, "  · %s: the forge will not queue an auto-merge; [drive] merge_gate decides at the head\n", d.ID)
+		fmt.Fprintf(errOut, "  · %s: the forge will not queue an auto-merge; [drive] merge_gate decides at the head\n", d.ID)
 		return s.mergeByGate(ctx, it, d, park, trunk, deadline)
 	}
 	return park("merge_failed", err.Error())
@@ -4168,13 +4181,13 @@ func (s *session) afterAutoMerge(ctx context.Context, it backlog.Item, d *DriveI
 	case err != nil:
 		d.Outcome = outcomeReviewed
 		d.Reason = "merge requested, and its state could not be read (" + err.Error() + "); the next drive's reconciliation decides it"
-		fmt.Fprintf(os.Stderr, "  · %s: %s\n", d.ID, d.Reason)
+		fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
 		s.leaveItem(d)
 		return *d
 	case !merged:
 		d.Outcome = outcomeReviewed
 		d.Reason = "merge queued at the forge; the next drive finishes it"
-		fmt.Fprintf(os.Stderr, "  · %s: %s\n", d.ID, d.Reason)
+		fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
 		s.leaveItem(d)
 		return *d
 	}
@@ -4369,7 +4382,7 @@ func (s *session) unblockedBy(id string, seen map[string]bool) []backlog.Item {
 func (s *session) catchUp(ctx context.Context, it backlog.Item, d *DriveItem, trunk string) (c caughtUp, park, reason string) {
 	remote := "origin/" + trunk
 	if err := gitAt(s.cfg.Root, "fetch", "--quiet", "origin", trunk); err != nil {
-		fmt.Fprintf(os.Stderr, "  · %s: %s not fetched, so the branch update reads the last one fetched: %v\n", d.ID, trunk, err)
+		fmt.Fprintf(errOut, "  · %s: %s not fetched, so the branch update reads the last one fetched: %v\n", d.ID, trunk, err)
 	}
 	if gitAt(s.cfg.Root, "rev-parse", "--verify", "--quiet", remote) != nil {
 		return c, "", ""
@@ -4393,7 +4406,7 @@ func (s *session) catchUp(ctx context.Context, it backlog.Item, d *DriveItem, tr
 	if err != nil {
 		return c, "branch_failed", err.Error()
 	}
-	fmt.Fprintf(os.Stderr, "  · %s: %s moved since %s was pushed; merging it in\n", d.ID, trunk, d.Branch)
+	fmt.Fprintf(errOut, "  · %s: %s moved since %s was pushed; merging it in\n", d.ID, trunk, d.Branch)
 	if err := gitAt(dir, "merge", "--no-edit", remote); err != nil {
 		conflicted, _ := gitNames(dir, "diff", "-z", "--name-only", "--diff-filter=U")
 		_ = gitAt(dir, "merge", "--abort")
@@ -4466,7 +4479,7 @@ func (s *session) dispatchCatchUp(d *DriveItem, park func(cause, why string) Dri
 	}
 	release := s.holdTrunk()
 	if err := gitAt(s.cfg.Root, "fetch", "--quiet", "origin", trunk); err != nil {
-		fmt.Fprintf(os.Stderr, "  · %s: %s not fetched, so the branch update reads the last one fetched: %v\n", d.ID, trunk, err)
+		fmt.Fprintf(errOut, "  · %s: %s not fetched, so the branch update reads the last one fetched: %v\n", d.ID, trunk, err)
 	}
 	to, err := revParse(s.cfg.Root, remote)
 	release()
@@ -4499,7 +4512,7 @@ func (s *session) dispatchCatchUp(d *DriveItem, park func(cause, why string) Dri
 		report(catchUpParked, d.Reason, nil)
 		return *d, true
 	}
-	fmt.Fprintf(os.Stderr, "  · %s: %s moved since %s last took it; merging it in before the session starts\n", d.ID, trunk, d.Branch)
+	fmt.Fprintf(errOut, "  · %s: %s moved since %s last took it; merging it in before the session starts\n", d.ID, trunk, d.Branch)
 	msg := "Merge " + remote + " into " + d.Branch
 	err = gitAt(dir, "merge", "--no-edit", "-m", msg, to)
 	if err == nil {
@@ -4739,11 +4752,11 @@ func (s *session) verifyCatchUp(ctx context.Context, it backlog.Item, d *DriveIt
 	}
 	gate := prompts.SelectVerify(s.cfg.Verify, it.Meta)
 	if strings.TrimSpace(gate) == "" {
-		fmt.Fprintf(os.Stderr, "  · %s: the updated head of %s was merged with %s and no verify command exists to verify it\n",
+		fmt.Fprintf(errOut, "  · %s: the updated head of %s was merged with %s and no verify command exists to verify it\n",
 			d.ID, d.Branch, trunk)
 		return catchUpSkipped, "", "", ""
 	}
-	fmt.Fprintf(os.Stderr, "  · %s: running its verify command on %s merged with %s (%s..%s): %s\n",
+	fmt.Fprintf(errOut, "  · %s: running its verify command on %s merged with %s (%s..%s): %s\n",
 		d.ID, d.Branch, trunk, shortSHA(c.From), shortSHA(c.To), gate)
 	code, out, err := s.runItemVerify(ctx, d.ID, s.workDir(), gate)
 	interrupted := "interrupted while the verify command ran on " + d.Branch + " merged with " + trunk + "; the merge was undone and nothing was pushed"
@@ -4780,7 +4793,7 @@ func (s *session) trunkVerify(ctx context.Context, id, gate, trunk, sha string) 
 		if v.passed {
 			said = "passed"
 		}
-		fmt.Fprintf(os.Stderr, "  · %s: %s@%s already %s this verify command on its own in this drive\n", id, trunk, shortSHA(sha), said)
+		fmt.Fprintf(errOut, "  · %s: %s@%s already %s this verify command on its own in this drive\n", id, trunk, shortSHA(sha), said)
 		return v.passed, v.out, nil
 	}
 	tmp, err := os.MkdirTemp("", "drover-trunk-*")
@@ -4801,7 +4814,7 @@ func (s *session) trunkVerify(ctx context.Context, id, gate, trunk, sha string) 
 			return false, "", err
 		}
 	}
-	fmt.Fprintf(os.Stderr, "  · %s: running the same verify command on %s@%s alone, to see whose failure it is\n", id, trunk, shortSHA(sha))
+	fmt.Fprintf(errOut, "  · %s: running the same verify command on %s@%s alone, to see whose failure it is\n", id, trunk, shortSHA(sha))
 	code, out, err := s.runItemVerify(ctx, id, tree, gate)
 	if err != nil || ctx.Err() != nil {
 		return false, out, err
@@ -4840,7 +4853,7 @@ func (s *session) runItemVerify(ctx context.Context, id, dir, gate string) (code
 	if err == nil && ctx.Err() == nil && s.verifyID != id {
 		s.verifyID, s.verifyMS = id, max(took.Milliseconds(), 1)
 	}
-	fmt.Fprintf(os.Stderr, "  · %s: the verify command exited %d after %s\n", id, code, took.Round(time.Millisecond))
+	fmt.Fprintf(errOut, "  · %s: the verify command exited %d after %s\n", id, code, took.Round(time.Millisecond))
 	return code, string(b), err
 }
 
@@ -5002,7 +5015,7 @@ func (s *session) waitChecks(ctx context.Context, id, sha string, deadline time.
 		}
 		switch {
 		case err != nil:
-			fmt.Fprintf(os.Stderr, "  · %s: could not read the checks on %s, so the merge gate reads them as they are: %v\n",
+			fmt.Fprintf(errOut, "  · %s: could not read the checks on %s, so the merge gate reads them as they are: %v\n",
 				id, shortSHA(sha), err)
 			return nil, err
 		case len(runs) > 0 && pending == 0:
@@ -5010,7 +5023,7 @@ func (s *session) waitChecks(ctx context.Context, id, sha string, deadline time.
 		case len(runs) == 0 && time.Since(start) >= s.cfg.ForgeChecksWait():
 			return runs, nil
 		case !time.Now().Before(limit):
-			fmt.Fprintf(os.Stderr, "  · %s: %d of %d checks on %s still running; the merge gate reads them as they are\n",
+			fmt.Fprintf(errOut, "  · %s: %d of %d checks on %s still running; the merge gate reads them as they are\n",
 				id, pending, len(runs), shortSHA(sha))
 			return runs, nil
 		}
@@ -5106,7 +5119,7 @@ func (s *session) gateAtHead(ctx context.Context, it backlog.Item, d *DriveItem,
 		r := park(parkGateRefused, why)
 		return code, out, &r, nil
 	}
-	fmt.Fprintf(os.Stderr, "  · %s: [drive] merge_gate says %s is behind %s (exit 4); catching it up and asking once more\n",
+	fmt.Fprintf(errOut, "  · %s: [drive] merge_gate says %s is behind %s (exit 4); catching it up and asking once more\n",
 		d.ID, d.Branch, trunk)
 	events.stage(d.ID, stageCatchUp)
 	c, p, why := s.catchUp(ctx, it, d, trunk)
@@ -5188,7 +5201,7 @@ func (s *session) catchUpAfter(ctx context.Context, merged string) error {
 // branch can pass a gate its trunk fails, so the rest would each find the same.
 func (s *session) catchUpOpen(ctx context.Context, skip string) error {
 	if !gh.Available() {
-		fmt.Fprintln(os.Stderr, "  · the open pull requests were not updated: gh cannot be reached to say which are open")
+		fmt.Fprintln(errOut, "  · the open pull requests were not updated: gh cannot be reached to say which are open")
 		return nil
 	}
 	trunk := s.trunk()
@@ -5227,7 +5240,7 @@ func (s *session) openPRs(skip string) []openPR {
 		open, ok, err := gh.OpenPR(labels, branch)
 		switch {
 		case err != nil:
-			fmt.Fprintf(os.Stderr, "  · %s: the forge would not say whether #%d is open, so it is not updated: %v\n", id, n, err)
+			fmt.Fprintf(errOut, "  · %s: the forge would not say whether #%d is open, so it is not updated: %v\n", id, n, err)
 			continue
 		case !ok:
 			continue
@@ -5256,7 +5269,7 @@ func (s *session) catchUpPR(ctx context.Context, o openPR, trunk string) error {
 		if why == "" {
 			why = result
 		}
-		fmt.Fprintf(os.Stderr, "  · %s: updated #%d (%s): %s\n", id, o.pr, o.branch, why)
+		fmt.Fprintf(errOut, "  · %s: updated #%d (%s): %s\n", id, o.pr, o.branch, why)
 	}
 	remote := "origin/" + trunk
 	if why := w.branchAtOrigin(o.branch); why != "" {
@@ -5346,7 +5359,7 @@ func (s *session) catchUpPR(ctx context.Context, o openPR, trunk string) error {
 func (s *session) conflicted(d *DriveItem, ev DriveEvent, paths []string, why string) {
 	ev.Result, ev.Reason, ev.Paths = catchUpConflict, why, paths
 	events.emit(ev)
-	fmt.Fprintf(os.Stderr, "  · %s: updated #%d (%s): %s\n", d.ID, d.PR, d.Branch, why)
+	fmt.Fprintf(errOut, "  · %s: updated #%d (%s): %s\n", d.ID, d.PR, d.Branch, why)
 
 	const key = "resolve_conflict"
 	p, _ := s.cfg.Policy(key)

@@ -174,14 +174,14 @@ func (s *session) endDrive(err error) {
 			return
 		}
 		if werr := s.startDrive(nil); werr != nil {
-			fmt.Fprintf(os.Stderr, "· drive %s: the start row would not write: %v\n", d.id, werr)
+			fmt.Fprintf(errOut, "· drive %s: the start row would not write: %v\n", d.id, werr)
 		}
 	}
 	d.mu.Lock()
 	out := slices.Clone(d.outcomes)
 	d.mu.Unlock()
 	if werr := s.record(ledger.Row{ID: ledger.DriveRowID, Exit: &code, Outcomes: out}); werr != nil {
-		fmt.Fprintf(os.Stderr, "· drive %s: the end row would not write: %v\n", d.id, werr)
+		fmt.Fprintf(errOut, "· drive %s: the end row would not write: %v\n", d.id, werr)
 	}
 }
 
@@ -352,28 +352,34 @@ func printDrives(w io.Writer, ds []ledger.Drive, indent string) {
 		fmt.Fprintf(w, "%sno drives recorded\n", indent)
 		return
 	}
+	tint := colorTo(w)
 	for _, d := range ds {
-		state := "interrupted"
+		state, role := "interrupted", pal.Fail
 		switch {
 		case d.Exit != nil:
-			state = fmt.Sprintf("ended %s  exit %d", d.Ended, *d.Exit)
+			state, role = fmt.Sprintf("ended %s  exit %d", d.Ended, *d.Exit), pal.OK
+			if *d.Exit != 0 {
+				role = pal.Fail
+			}
 		case d.Paused:
-			state = "running, paused"
+			state, role = "running, paused", pal.Warn
 		case d.Running:
-			state = "running"
+			state, role = "running", pal.OK
 		}
 		label := ""
 		if d.Label != "" {
 			label = fmt.Sprintf("  %q", d.Label)
 		}
-		fmt.Fprintf(w, "%s%-4s started %s  %s%s\n", indent, d.ID, d.Started, state, label)
+		fmt.Fprintf(w, "%s%s started %s  %s%s\n", indent, sgr(fmt.Sprintf("%-4s", d.ID), pal.ID, tint),
+			sgr(d.Started, pal.Muted, tint), sgr(state, role, tint), label)
 		items := make([]string, 0, len(d.Items))
 		for _, it := range d.Items {
+			id := sgr(it.ID, pal.ID, tint)
 			if it.Outcome == "" {
-				items = append(items, it.ID)
+				items = append(items, id)
 				continue
 			}
-			items = append(items, it.ID+" "+it.Outcome)
+			items = append(items, id+" "+sgr(it.Outcome, pal.state(it.Outcome), tint))
 		}
 		if len(items) > 0 {
 			fmt.Fprintf(w, "%s     %s\n", indent, strings.Join(items, ", "))

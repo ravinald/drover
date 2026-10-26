@@ -247,7 +247,7 @@ func (s *session) recordPark(d *DriveItem, last *runner.Outcome, lastErr error) 
 	}
 	row := ledger.Row{ID: d.ID, Park: d.Park, Detail: d.Detail, Evidence: d.Evidence, Log: d.Log, Date: ledger.Today()}
 	if err := s.record(row); err != nil {
-		fmt.Fprintf(os.Stderr, "  · %s: the ledger refused the park row (%v); status will read the item as implemented\n", d.ID, err)
+		fmt.Fprintf(errOut, "  · %s: the ledger refused the park row (%v); status will read the item as implemented\n", d.ID, err)
 	}
 }
 
@@ -263,7 +263,7 @@ func (s *session) announcePark(d DriveItem) {
 		}
 	}
 	why, _, _ := strings.Cut(d.Reason, "\n")
-	fmt.Fprintf(os.Stderr, "  ! %s parked %s at %s: %s\n", d.ID, d.Park, at, why)
+	fmt.Fprintf(errOut, "  ! %s parked %s at %s: %s\n", d.ID, d.Park, at, why)
 }
 
 // blankDetail is a park row's detail for display; a row written by hand may

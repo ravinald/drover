@@ -347,7 +347,7 @@ func (es *eventSink) toFile(line []byte) {
 func (es *eventSink) fileFailed(err error) {
 	es.broken = true
 	es.closeFile()
-	fmt.Fprintf(os.Stderr, "· the drive's event file would not write (%v); the drive goes on, attach and watch see nothing more from it, and later failures are not reported\n", err)
+	fmt.Fprintf(errOut, "· the drive's event file would not write (%v); the drive goes on, attach and watch see nothing more from it, and later failures are not reported\n", err)
 }
 
 func (es *eventSink) closeFile() {
