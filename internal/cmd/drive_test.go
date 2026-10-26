@@ -4120,15 +4120,6 @@ func TestRecordHeadWritesOnlyForABranchOffTheTrunk(t *testing.T) {
 	}
 }
 
-// resetDrive restores every flag a drive test can set.
-func resetDrive(t *testing.T) {
-	t.Helper()
-	t.Cleanup(func() {
-		driveJSON, driveNoMerge, driveFor, driveUntil, driveMax, driveFollow = false, false, 0, "", 0, false
-		driveJobs, driveDry, driveCatchUp = 1, false, false
-	})
-}
-
 // forge rewrites mergeProject's gh and gate as a forge that can actually merge:
 // a merge without --auto merges the branch into origin's main and is reported
 // merged from then on, as GitHub does once `gh pr merge` returns.
@@ -4315,7 +4306,6 @@ func mergeCalls(t *testing.T, ghLog string) []string {
 // and finishes the item in the same drive, rather than parking it merge_failed
 // for a person to merge by hand.
 func TestAForgeWithoutAutoMergeMergesOnTheGatesWord(t *testing.T) {
-	resetDrive(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
 	t.Setenv("DROVER_TEST_NO_AUTO", "1")
@@ -4391,7 +4381,6 @@ func TestNoRequiredChecksMergesOnTheGateWithoutAuto(t *testing.T) {
 		{"lookup fails", "500", "the required checks on main could not be read"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			resetDrive(t)
 			ghLog := mergeProject(t)
 			dir, _ := forge(t, ghLog)
 			t.Setenv("DROVER_TEST_REQUIRED", c.status)
@@ -4437,7 +4426,6 @@ func TestNoRequiredChecksMergesOnTheGateWithoutAuto(t *testing.T) {
 // reads merged_immediately, the gate reads the merged head, and it finishes.
 func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
 	t.Run("queued", func(t *testing.T) {
-		resetDrive(t)
 		ghLog := mergeProject(t)
 		forge(t, ghLog)
 
@@ -4456,7 +4444,6 @@ func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
 		}
 	})
 	t.Run("merged at once", func(t *testing.T) {
-		resetDrive(t)
 		ghLog := mergeProject(t)
 		dir, _ := forge(t, ghLog)
 		t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
@@ -4485,7 +4472,6 @@ func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
 		}
 	})
 	t.Run("merged at once and the merge gate refuses", func(t *testing.T) {
-		resetDrive(t)
 		ghLog := mergeProject(t)
 		forge(t, ghLog)
 		t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
@@ -4512,7 +4498,6 @@ func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
 	// running the ancestry check as merge-gate.sh does refuses every such head
 	// with exit 4 unless drive says the head was merged.
 	t.Run("merged at once and the merge gate checks ancestry", func(t *testing.T) {
-		resetDrive(t)
 		ghLog := mergeProject(t)
 		dir, _ := forge(t, ghLog)
 		t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
@@ -4536,7 +4521,6 @@ func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
 		}
 	})
 	t.Run("merged at once and the merge gate ignores the merged flag", func(t *testing.T) {
-		resetDrive(t)
 		ghLog := mergeProject(t)
 		forge(t, ghLog)
 		t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
@@ -4555,7 +4539,6 @@ func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
 		}
 	})
 	t.Run("state unreadable", func(t *testing.T) {
-		resetDrive(t)
 		ghLog := mergeProject(t)
 		forge(t, ghLog)
 		t.Setenv("DROVER_TEST_MERGED_FAIL", "1")
@@ -4575,7 +4558,6 @@ func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
 // the spot still finishes. drive refuses to merge with no gate declared, so the arm
 // is reached here directly.
 func TestAnAutoMergeWithoutAGateFinishesWhatTheForgeMerged(t *testing.T) {
-	resetDrive(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
 	t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
@@ -4626,7 +4608,6 @@ func TestADependentRunsBehindAMergeTheForgeMadeAtOnce(t *testing.T) {
 		{"follow", []string{"--follow"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			resetDrive(t)
 			ghLog := mergeProject(t)
 			dir, _ := forge(t, ghLog)
 			t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
@@ -4650,7 +4631,6 @@ func TestADependentRunsBehindAMergeTheForgeMadeAtOnce(t *testing.T) {
 // A gate that refuses at the merge parks the item with the pull request open
 // and the gate's own last lines in the reason, and nothing merges.
 func TestAGateRefusalAtTheMergeParksWithThePullRequestOpen(t *testing.T) {
-	resetDrive(t)
 	ghLog := mergeProject(t)
 	forge(t, ghLog)
 	t.Setenv("DROVER_TEST_NO_AUTO", "1")
@@ -4734,7 +4714,6 @@ func TestAnAutoMergeRefusalWithoutAGateStaysMergeFailed(t *testing.T) {
 // result, waits for that head's checks, and only then runs the gate, so the gate and
 // the merge both read a branch level with the trunk.
 func TestATrunkThatMovedIsMergedInBeforeTheGate(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -4789,7 +4768,6 @@ func TestATrunkThatMovedIsMergedInBeforeTheGate(t *testing.T) {
 // and again before the gate's merge. The second finds it level and merges
 // nothing, and the row still reports the first.
 func TestACatchUpSurvivesTheMergeByGatesSecondLook(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -4845,7 +4823,6 @@ func TestEveryRowCarriesWhenItEnded(t *testing.T) {
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			resetDrive(t)
 			ghLog := mergeProject(t)
 			forge(t, ghLog)
 			c.setup(t)
@@ -4933,7 +4910,6 @@ func useVerifyCommands(t *testing.T, dir, body string) {
 // A branch already level with the trunk was verified by its own sessions, and
 // drive spends nothing re-running that.
 func TestAnUnmovedTrunkRerunsNoVerify(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
@@ -4953,7 +4929,6 @@ func TestAnUnmovedTrunkRerunsNoVerify(t *testing.T) {
 // An item whose frontmatter selects a verify command gets that command on the
 // caught-up tree, the one its own run was told to pass, and not default.
 func TestACatchUpRerunsTheVerifyCommandTheItemsFrontmatterSelects(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -4978,7 +4953,6 @@ func TestACatchUpRerunsTheVerifyCommandTheItemsFrontmatterSelects(t *testing.T) 
 // goes back to its branch with the verify command's output and the trunk's
 // range, and nothing reaches the forge as mergeable.
 func TestACatchUpTheVerifyCommandFailsGoesBackToTheBranch(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -5039,7 +5013,6 @@ func TestACatchUpTheVerifyCommandFailsGoesBackToTheBranch(t *testing.T) {
 // stops, sends nothing back and pushes nothing, and the local branch loses the merge so
 // the next drive does not push it either.
 func TestATrunkThatFailsTheVerifyCommandAloneStopsTheDrive(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -5079,7 +5052,6 @@ func TestATrunkThatFailsTheVerifyCommandAloneStopsTheDrive(t *testing.T) {
 // the trunk alone is verified once per drive. Item 2's branch exists before the
 // trunk moves, which is a branch a previous drive pushed, and its review passes.
 func TestTheTrunkAloneIsVerifiedOncePerCommit(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -5143,7 +5115,6 @@ exit $rc
 // A project with no verify command has chosen no local check, so the catch-up
 // says it went unchecked and merges.
 func TestACatchUpWithNoVerifyCommandSaysSoAndMerges(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -5172,7 +5143,6 @@ func TestACatchUpWithNoVerifyCommandSaysSoAndMerges(t *testing.T) {
 // that merges it is mergeByGate's, with the pull request already open: it stays
 // open and unmerged, and --match-head-commit never sees the failed head.
 func TestARedCatchUpAtTheMergeKeepsThePullRequestOpen(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -5198,7 +5168,6 @@ func TestARedCatchUpAtTheMergeKeepsThePullRequestOpen(t *testing.T) {
 // At [review] max_review_rounds the catch-up's finding is refused like any other, and
 // the park says so.
 func TestARedCatchUpAtTheCapParksWithTheRefusal(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -5228,7 +5197,6 @@ func TestARedCatchUpAtTheCapParksWithTheRefusal(t *testing.T) {
 // item parks gate_unrunnable, nothing is pushed, and the worktree is gone. The
 // setup refuses a detached head, which only the trunk's worktree has.
 func TestATrunkTreeThatWillNotSetUpParksUnrunnable(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -5264,7 +5232,6 @@ func TestATrunkTreeThatWillNotSetUpParksUnrunnable(t *testing.T) {
 // An interrupt while the verify command runs on the caught-up tree parks the item where
 // it stands: the worktree stays, and the merge is neither kept nor pushed.
 func TestAnInterruptDuringTheCatchUpVerifyParks(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -5328,7 +5295,6 @@ func TestACatchUpDoesNotChargeTheItemWithTheTrunksFiles(t *testing.T) {
 		{"the item touched it", "implemented.txt", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			resetDrive(t)
 			isolate(t)
 			ghLog := mergeProject(t)
 			dir, remote := forge(t, ghLog)
@@ -5417,7 +5383,6 @@ func denyPaths(t *testing.T, dir string, globs ...string) {
 // A trunk that will not merge into the branch parks it, names the files, and
 // leaves the remote exactly where the last push put it.
 func TestATrunkConflictParksAndForcesNothing(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -5455,7 +5420,6 @@ func TestATrunkConflictParksAndForcesNothing(t *testing.T) {
 func TestFollowPicksUpWhatAFinishUnblocked(t *testing.T) {
 	for _, follow := range []bool{true, false} {
 		t.Run(fmt.Sprintf("follow=%v", follow), func(t *testing.T) {
-			resetDrive(t)
 			ghLog := mergeProject(t)
 			dir, _ := forge(t, ghLog)
 			t.Setenv("DROVER_TEST_NO_AUTO", "1")
@@ -5536,7 +5500,6 @@ func TestAutoMergeRefusedMatchesTheRefusalAndNothingElse(t *testing.T) {
 // round sent back, which nothing in the coming pass rewrites.
 func standingProject(t *testing.T) (dir, ghLog string) {
 	t.Helper()
-	resetDrive(t)
 	ghLog = mergeProject(t)
 	dir, err := os.Getwd()
 	if err != nil {
@@ -5784,7 +5747,6 @@ func normalizeDrive(s string) string {
 // the file, which is only ever right on a change that means to alter what a
 // sequential drive prints.
 func TestDriveJobsOneMatchesTheGolden(t *testing.T) {
-	resetDrive(t)
 	mergeProject(t)
 	got := goldenDrive(t, "--jobs", "1")
 	path := filepath.Join(goldenDir(t), "drive-jobs-1.golden")
@@ -5899,7 +5861,6 @@ func treeName(t *testing.T, id string) string {
 // beside the first, which is what shows the slots were really there. The
 // preview names the pair and the path before anything runs.
 func TestPathOverlappingItemsNeverRunAtOnce(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	mergeProject(t)
 	dir, err := os.Getwd()
@@ -5921,7 +5882,6 @@ func TestPathOverlappingItemsNeverRunAtOnce(t *testing.T) {
 			t.Errorf("the preview does not say %q:\n%s", want, plan)
 		}
 	}
-	driveDry = false
 
 	rows := driveAll(t, "--jobs", "3")
 	if len(rows) != 3 {
@@ -5950,7 +5910,6 @@ func TestPathOverlappingItemsNeverRunAtOnce(t *testing.T) {
 // Two items the planned waves split still meet when a slot frees early, so the
 // preview names their hold rather than judging only pairs inside one wave.
 func TestPreviewNamesAHoldTheWavesSplit(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	mergeProject(t)
 	dir, err := os.Getwd()
@@ -5981,7 +5940,6 @@ func TestPreviewNamesAHoldTheWavesSplit(t *testing.T) {
 // already running finish the stage they are in and park drained, and the item
 // still waiting for a slot is never launched.
 func TestATrunkRedDrainsTheRunningItemsAndDispatchesNoMore(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -6054,7 +6012,6 @@ exit $rc
 // as it does at --jobs 1, rather than starting beside it and skipping as
 // blocked. The preview puts the two in separate waves and names the hold.
 func TestAnItemWaitsForItsDepInTheSameDrive(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
@@ -6070,7 +6027,6 @@ func TestAnItemWaitsForItsDepInTheSameDrive(t *testing.T) {
 			t.Errorf("the preview does not say %q:\n%s", want, plan)
 		}
 	}
-	driveDry = false
 
 	rows := driveAll(t, "1", "2", "--jobs", "2")
 	if len(rows) != 2 {
@@ -6094,7 +6050,6 @@ func TestAnItemWaitsForItsDepInTheSameDrive(t *testing.T) {
 // rows are whole, carry the right id, and the two that passed finish one after
 // the other through the trunk stage while the silent one stays ran.
 func TestConcurrentItemsFoldToTheirOwnStates(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
@@ -6306,7 +6261,6 @@ func siblingCatchUp(t *testing.T, evs []DriveEvent) DriveEvent {
 // so no supervisor has to loop git merge-tree over the open pull requests after
 // each sibling merges.
 func TestAMergeCatchesUpTheOtherOpenPullRequests(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
@@ -6355,7 +6309,6 @@ func TestAMergeCatchesUpTheOtherOpenPullRequests(t *testing.T) {
 // the branch, the files and the worktree, at resolve_conflict's default of
 // supervisor.
 func TestAConflictingSiblingIsReportedAndNotPushed(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
@@ -6412,7 +6365,6 @@ func TestAGateSayingBehindIsRetriedOnceAfterACatchUp(t *testing.T) {
 		{"two 4s park", "2", parkGateRefused},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			resetDrive(t)
 			isolate(t)
 			ghLog := mergeProject(t)
 			dir, remote := forge(t, ghLog)
@@ -6471,7 +6423,6 @@ func TestAGateSayingBehindIsRetriedOnceAfterACatchUp(t *testing.T) {
 // A merge made outside drive moves the trunk just the same, and --update-branches
 // brings every open drive pull request level with it, launching nothing.
 func TestCatchUpByHandFollowsAMergeMadeElsewhere(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -6505,7 +6456,6 @@ func TestCatchUpByHandFollowsAMergeMadeElsewhere(t *testing.T) {
 // --update-branches launches no item, so a deps line deps_lint would refuse in an
 // item it never reads does not stand between a hand merge and its catch-up.
 func TestCatchUpByHandIgnoresADepsLineNoItemLaunches(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -6532,9 +6482,6 @@ func TestCatchUpByHandIgnoresADepsLineNoItemLaunches(t *testing.T) {
 // drive here queues, so --enqueue has a not-ready id to refuse.
 func enqueueFixture(t *testing.T) {
 	t.Helper()
-	t.Cleanup(func() {
-		driveJSON, driveEvents, driveFor, driveUntil, driveMax, driveEnqueue = false, false, 0, "", 0, false
-	})
 	mergeProject(t)
 	write(t, filepath.Join("work", "03-third.md"), "---\ntitle: Third\ndeps: 4\n---\n\n1. Do it after 4.\n")
 	write(t, filepath.Join("work", "04-fourth.md"), "---\ntitle: Fourth\ndeps:\n---\n\n1. Do it first.\n")
@@ -6788,7 +6735,6 @@ func mustLeasePath(t *testing.T) string {
 // is refused before the pause is written, rather than accepted and dropped.
 func TestALabelBesidePauseIsRefusedAndPausesNothing(t *testing.T) {
 	enqueueFixture(t)
-	t.Cleanup(func() { driveLabel = "" })
 	s, err := open()
 	if err != nil {
 		t.Fatal(err)
@@ -6804,11 +6750,23 @@ func TestALabelBesidePauseIsRefusedAndPausesNothing(t *testing.T) {
 	}
 }
 
+// A flag a refused call parsed is not set for the next call: cobra never
+// resets one, so a leaked --pause refuses every later drive.
+func TestARefusedPauseLeavesNoFlagForTheNextCall(t *testing.T) {
+	enqueueFixture(t)
+	if _, err := driveOut(t, "--pause", "1"); Code(err) != ExitRefused {
+		t.Fatalf("--pause 1 exited %d (%v), want %d", Code(err), err, ExitRefused)
+	}
+	_ = capture(t, func() { _ = execute(t, "version") })
+	if drivePause || driveCmd.Flags().Lookup("pause").Changed {
+		t.Errorf("after the next call drivePause=%v, Changed=%v; want both false", drivePause, driveCmd.Flags().Lookup("pause").Changed)
+	}
+}
+
 // An --enqueue that joins a running drive cannot rename it, so --label refuses
 // the whole list and queues none of it.
 func TestAnEnqueueWithALabelIsRefusedByARunningDrive(t *testing.T) {
 	enqueueFixture(t)
-	t.Cleanup(func() { driveLabel = "" })
 	s, err := open()
 	if err != nil {
 		t.Fatal(err)
@@ -6827,7 +6785,6 @@ func TestAnEnqueueWithALabelIsRefusedByARunningDrive(t *testing.T) {
 // lease's from the moment that drive holds it.
 func TestAnEnqueueWithALabelAndNoDriveStartsALabeledDrive(t *testing.T) {
 	enqueueFixture(t)
-	t.Cleanup(func() { driveLabel = "" })
 	s, err := open()
 	if err != nil {
 		t.Fatal(err)
@@ -7013,7 +6970,6 @@ func TestTheTrunkIsMergedBeforeTheImplementSession(t *testing.T) {
 		{"already holding the trunk", catchUpLevel, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			resetDrive(t)
 			isolate(t)
 			ghLog := mergeProject(t)
 			dir, remote := forge(t, ghLog)
@@ -7054,7 +7010,6 @@ func TestTheTrunkIsMergedBeforeTheImplementSession(t *testing.T) {
 // its implement session with the merge in the worktree, and the brief names the
 // item whose merged work touched the file, with its requirements.
 func TestAConflictAtDispatchGoesToTheSessionAtAuto(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
@@ -7104,7 +7059,6 @@ func TestAConflictAtDispatchGoesToTheSessionAtAuto(t *testing.T) {
 // the trunk moves onto the same file again, so its next dispatch conflicts a
 // second time, and that one parks for a person.
 func TestASecondConflictInOneDriveParksForTheOperator(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
@@ -7167,7 +7121,6 @@ exit $rc
 // merge is aborted, the item parks, and the hand-off names the files and the
 // worktree they are to be resolved in.
 func TestAConflictAtDispatchParksAtSupervisor(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
@@ -7196,7 +7149,6 @@ func TestAConflictAtDispatchParksAtSupervisor(t *testing.T) {
 // A conflict round counts against max_review_rounds, so an item already at the cap
 // parks rather than starting one.
 func TestAConflictAtTheReviewRoundLimitParks(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
@@ -7230,7 +7182,6 @@ func TestAConflictAtTheReviewRoundLimitParks(t *testing.T) {
 // left as it was: nothing pushed, no session, since the trunk stage cannot
 // launch one. Its next dispatch takes the conflict to its session.
 func TestAnOpenPullRequestsConflictWaitsForItsNextDispatch(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
@@ -7315,7 +7266,6 @@ func reviewBriefs(t *testing.T, dir string) []string {
 // starts on a branch already holding the trunk.
 func TestTheReviewOfAConflictRoundReadsTheConflict(t *testing.T) {
 	t.Run("a lost review's rerun", func(t *testing.T) {
-		resetDrive(t)
 		isolate(t)
 		ghLog := mergeProject(t)
 		dir, _ := forge(t, ghLog)
@@ -7339,7 +7289,6 @@ func TestTheReviewOfAConflictRoundReadsTheConflict(t *testing.T) {
 		}
 	})
 	t.Run("a re-drive after a drain before the review", func(t *testing.T) {
-		resetDrive(t)
 		isolate(t)
 		ghLog := mergeProject(t)
 		dir, _ := forge(t, ghLog)
@@ -7396,7 +7345,6 @@ func TestACatchUpAtDispatchLeavesAMergeInProgress(t *testing.T) {
 		{"partly resolved", []string{"shared.txt"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			resetDrive(t)
 			isolate(t)
 			ghLog := mergeProject(t)
 			dir, remote := forge(t, ghLog)

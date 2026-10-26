@@ -33,7 +33,6 @@ import (
 // gh run rerun counts into reruns.
 func checksForge(t *testing.T, scenario string) string {
 	t.Helper()
-	resetDrive(t)
 	ghLog := mergeProject(t)
 	forge(t, ghLog)
 	t.Setenv("DROVER_TEST_NO_AUTO", "1")

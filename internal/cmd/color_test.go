@@ -182,7 +182,6 @@ func TestStyleLineRoles(t *testing.T) {
 
 // Requirement 3: none of these carries an escape byte, whatever the flag says.
 func TestNeverColoredUnderColorAlways(t *testing.T) {
-	resetDrive(t)
 	resetStatusFlags(t)
 	forceColor(t, colorAlways)
 	root, events := twoDrives(t)
@@ -198,9 +197,7 @@ func TestNeverColoredUnderColorAlways(t *testing.T) {
 		{"--color=always", "attach", "D2", "--json"},
 	} {
 		resetStatusFlags(t)
-		t.Cleanup(func() { drivesJSON, checkJSON, attachJSON = false, false, false })
 		out := capture(t, func() { _ = execute(t, args...) })
-		drivesJSON, checkJSON, attachJSON = false, false, false
 		if out == "" || strings.Contains(out, "\x1b[") {
 			t.Errorf("%v printed %q, want JSON with no escape", args, out)
 		}
@@ -217,8 +214,6 @@ func TestNeverColoredUnderColorAlways(t *testing.T) {
 	agents := filepath.Join(t.TempDir(), "AGENTS.md")
 	write(t, agents, agentsBegin+"\n"+agentsEnd+"\n")
 	_ = capture(t, func() { _ = execute(t, "--color=always", "agents", "--write", agents) })
-	t.Cleanup(func() { agentsWrite = "" })
-	agentsWrite = ""
 
 	files := []string{outFile, agents, filepath.Join(root, "ledger.jsonl")}
 	reports, _ := filepath.Glob(filepath.Join(root, "reports", "*"))
@@ -248,12 +243,10 @@ func TestNeverColoredUnderColorAlways(t *testing.T) {
 // DROVER_UPDATE_GOLDEN=1 rewrites them. Named for drive so normalizeDrive
 // masks its temporary paths.
 func TestDriveColorGoldens(t *testing.T) {
-	resetDrive(t)
 	resetStatusFlags(t)
 	t.Setenv("COLUMNS", "100")
 	mergeProject(t)
 	plainDrive := goldenDrive(t, "--jobs", "1", "--color=never")
-	resetDrive(t)
 	mergeProject(t)
 	coloredDrive := coloredGoldenDrive(t, "--jobs", "1", "--color=always")
 	forceColor(t, colorAuto)

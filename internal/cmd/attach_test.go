@@ -27,11 +27,7 @@ func ownState(t *testing.T) string {
 	t.Setenv("XDG_STATE_HOME", dir)
 	poll := followPoll
 	followPoll = 20 * time.Millisecond
-	t.Cleanup(func() {
-		followPoll = poll
-		attachJSON, attachSession, attachItem, attachSince, watchUntil, watchSince, watchAfter = false, false, "", "", nil, "", -1
-		driveStop, driveDetach = false, false
-	})
+	t.Cleanup(func() { followPoll = poll })
 	return dir
 }
 
@@ -160,7 +156,6 @@ func TestAttachReplaysAFinishedDrivesEventsAndExitsZero(t *testing.T) {
 		t.Errorf("attach replayed\n%v\nwant what --events streamed\n%v", got, want)
 	}
 
-	attachJSON = false
 	out = capture(t, func() { aerr = execute(t, "attach", "D1") })
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if aerr != nil || len(lines) != len(want) || !strings.Contains(lines[len(lines)-1], "exit") || !strings.Contains(lines[len(lines)-1], "code=0") {
@@ -330,7 +325,6 @@ func TestADriveWhoseEventFileWillNotWriteFinishesItsQueue(t *testing.T) {
 // printed with the error it returned.
 func watchFrom(t *testing.T, until string, seq int) (DriveEvent, error) {
 	t.Helper()
-	watchUntil, watchAfter = nil, -1
 	var werr error
 	out := capture(t, func() { werr = execute(t, "watch", "D1", "--until", until, "--after", strconv.Itoa(seq)) })
 	var e DriveEvent

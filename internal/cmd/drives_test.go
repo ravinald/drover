@@ -18,9 +18,6 @@ import (
 // one park row each.
 func twoDrives(t *testing.T) (root string, events string) {
 	t.Helper()
-	t.Cleanup(func() {
-		driveJSON, driveEvents, driveLabel, driveFor, driveUntil, driveMax = false, false, "", 0, "", 0
-	})
 	mergeProject(t)
 	root, err := os.Getwd()
 	if err != nil {

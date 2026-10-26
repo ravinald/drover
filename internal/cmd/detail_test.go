@@ -193,7 +193,6 @@ func TestTheDetailPicksTheActionThatOwnsThePark(t *testing.T) {
 // launches are cut before it passes; past one, the second loss parks.
 func driveCutReview(t *testing.T, lossesBefore int) DriveItem {
 	t.Helper()
-	resetDrive(t)
 	mergeProject(t)
 	rev, err := exec.LookPath("rev")
 	if err != nil {
@@ -315,7 +314,6 @@ func mustItem(t *testing.T, s *session, id string) backlog.Item {
 // stands reviewed, then the gate, the pull request and the merge a clean pass
 // gets.
 func TestReviewOnlyReachesTheMerge(t *testing.T) {
-	resetDrive(t)
 	t.Cleanup(func() { driveReviewOnly, reviewOnlyID = false, "" })
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)

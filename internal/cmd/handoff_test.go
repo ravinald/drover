@@ -274,7 +274,6 @@ func reviewCount(t *testing.T, reviews, id string) int {
 // re-exec item 2 goes on from its trunk stage, unreviewed again, and takes its
 // turn after item 1.
 func TestAReexecAdoptsAnItemWaitingForItsTrunkTurn(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)

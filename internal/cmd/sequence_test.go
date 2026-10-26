@@ -14,7 +14,6 @@ import (
 // a sequence, with the trunk holding the migrations named and pushed.
 func sequenceProject(t *testing.T, trunk ...string) (dir, remote, ghLog string) {
 	t.Helper()
-	resetDrive(t)
 	isolate(t)
 	ghLog = mergeProject(t)
 	dir, remote = forge(t, ghLog)

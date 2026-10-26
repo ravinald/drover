@@ -13,6 +13,8 @@ import (
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/runner"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // stubPATH replaces PATH with a directory holding nothing but a link to the
@@ -76,18 +78,50 @@ func offRepo(t *testing.T) {
 
 // execute drives one command through the real root. The exit code lives in the
 // error RunE returns, so nothing short of this pins a refusal.
+//
+// The flags a call parsed are put back when the next call starts or the test
+// ends, not when Execute returns, because a test reads what a flag wrote after
+// the call it passed it to.
 func execute(t *testing.T, args ...string) error {
 	t.Helper()
 	offRepo(t)
 	install()
+	resetFlags(root)
 	root.SetArgs(args)
 	root.SetOut(io.Discard)
 	root.SetErr(io.Discard)
 	t.Cleanup(func() {
 		root.SetArgs(nil)
-		intakeList, intakeJSON, initUserFlag, initDefaults = false, false, false, false
+		resetFlags(root)
 	})
 	return root.Execute()
+}
+
+// resetFlags puts every flag Execute parsed under c back to its default. cobra
+// binds each flag to a package variable and never resets one between calls, so
+// without this a flag one test passes is set for every test after it.
+func resetFlags(c *cobra.Command) {
+	reset := func(f *pflag.Flag) {
+		if !f.Changed {
+			return
+		}
+		// Set appends to a slice flag rather than replacing it.
+		if s, ok := f.Value.(pflag.SliceValue); ok {
+			var def []string
+			if d := strings.Trim(f.DefValue, "[]"); d != "" {
+				def = strings.Split(d, ",")
+			}
+			_ = s.Replace(def)
+		} else {
+			_ = f.Value.Set(f.DefValue)
+		}
+		f.Changed = false
+	}
+	c.PersistentFlags().VisitAll(reset)
+	c.Flags().VisitAll(reset)
+	for _, sub := range c.Commands() {
+		resetFlags(sub)
+	}
 }
 
 func TestTrunkPrefersConfigThenOriginThenMain(t *testing.T) {

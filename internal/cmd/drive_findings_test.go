@@ -21,7 +21,6 @@ import (
 // supervise is a [supervise] block, empty for the catalog defaults.
 func findingsProject(t *testing.T, supervise string) string {
 	t.Helper()
-	resetDrive(t)
 	t.Cleanup(func() { driveEvents = false })
 	mergeProject(t)
 	dir, err := os.Getwd()

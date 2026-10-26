@@ -86,7 +86,6 @@ func driveWithEvents(t *testing.T, args ...string) (rows []DriveItem, evs []Driv
 // protected_paths, and points the stub at the lease and at B's worktree.
 func holdProject(t *testing.T) (log, state string) {
 	t.Helper()
-	resetDrive(t)
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, _ := forge(t, ghLog)
@@ -256,7 +255,6 @@ func TestAHeldDependentSkipsWhenNothingElseIsLeftToRun(t *testing.T) {
 // dependent to dispatch and skip as blocked, and the skip is an event that the
 // running drive's lease and drives --json both carry.
 func TestADependentOfAnOtherwiseParkedDepSkipsWithAnEvent(t *testing.T) {
-	resetDrive(t)
 	isolate(t)
 	mergeProject(t)
 	dir, err := os.Getwd()
