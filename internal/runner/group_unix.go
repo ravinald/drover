@@ -97,3 +97,10 @@ func groupMembers(pgid int) []string {
 	}
 	return procs
 }
+
+// processAlive asks the kernel whether pid exists. EPERM is a process that
+// exists and belongs to someone else, which is alive.
+func processAlive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || errors.Is(err, syscall.EPERM)
+}

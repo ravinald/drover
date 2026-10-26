@@ -15,6 +15,7 @@ import (
 
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/runner"
+	"github.com/ravinald/drover/internal/testenv"
 )
 
 // schemaLine opens every fixture config in this package. Rendered from the
@@ -45,6 +46,11 @@ var schemaLine = fmt.Sprintf("schema_version = %d\n", config.SchemaVersion)
 // there. runlog.Ran reads that directory to decide `ran` against `ready`, so a
 // test writing a log could move another test's answer and a status golden with
 // it.
+//
+// The session marker a launch leaves in its tree is the same defect in a file:
+// a suite run inside a drive's worktree reads it through every gate. The suite
+// runs from a temporary mirror of this directory instead, with no marker above
+// it, after the sweep has read the real module root.
 func TestMain(m *testing.M) {
 	// A test that needs drover as a process of its own, one an exec can
 	// replace, runs this binary as it. Before anything below, which would
@@ -62,6 +68,10 @@ func TestMain(m *testing.M) {
 		if err := os.Unsetenv(name); err != nil {
 			panic(err)
 		}
+	}
+	wd, err := testenv.Isolate()
+	if err != nil {
+		panic(err)
 	}
 	dir, err := os.MkdirTemp("", "drover-xdg")
 	if err != nil {
@@ -90,6 +100,9 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	sweep.stop()
 	if err := os.RemoveAll(dir); err != nil {
+		panic(err)
+	}
+	if err := wd.Close(); err != nil {
 		panic(err)
 	}
 	os.Exit(code)

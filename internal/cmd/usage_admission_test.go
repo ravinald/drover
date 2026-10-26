@@ -443,3 +443,151 @@ func TestAResumeOntoAReplacedBinaryKeepsTheUsageHoldReleased(t *testing.T) {
 		t.Errorf("usage_admission paused the drive %d times, want 1\n%s", paused, stdout.String())
 	}
 }
+
+// A reading past the weekly percent and on purchased credit under mode =
+// "pause" crosses two holds. The pause names both, each resume releases one
+// and says what still holds, drives shows the standing ones, and the second
+// resume lets the drive dispatch.
+func TestEachResumeReleasesOneOfTheHoldsAReadingCrosses(t *testing.T) {
+	enqueueFixture(t)
+	t.Cleanup(func() { drivesJSON = false })
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cfgPath := filepath.Join(".", config.FileName)
+	raw, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, cfgPath, string(raw)+"\n[usage.weekly]\npause_remaining = 5\n")
+	row := ledger.Row{Usage: &runlog.Usage{Input: 1}, SessionID: "earlier", Source: ledger.SourceHeadless,
+		RateLimit: reading("rejected", "seven_day", 1, 0.1, time.Now().Add(30*time.Hour), true, "")}
+	if err := ledger.Append("ledger.jsonl", row); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	c := asDroverCmd(t, "drive", "1", "--json", "--events")
+	c.Stdout, c.Stderr = &stdout, &stderr
+	if err := c.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- c.Wait() }()
+	t.Cleanup(func() {
+		_ = c.Process.Kill()
+		<-exited
+	})
+	windows := func(hs []lease.UsageHold) []string {
+		var out []string
+		for _, h := range hs {
+			out = append(out, h.Window)
+		}
+		return out
+	}
+
+	path := mustLeasePath(t)
+	waitLease(t, path, func(l lease.Lease) bool { return l.Paused && len(l.UsageHolds) == 2 })
+	out := capture(t, func() { _ = execute(t, "drives") })
+	if !strings.Contains(out, "paused on usage: weekly (resets ") || !strings.Contains(out, ", overage (resets ") {
+		t.Errorf("drives does not name both standing holds:\n%s", out)
+	}
+	out = capture(t, func() { _ = execute(t, "drives", "--json") })
+	var ds []ledger.Drive
+	if err := json.Unmarshal([]byte(out), &ds); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if len(ds) == 0 || !slices.Equal(windows(ds[0].UsageHolds), []string{stepWeekly, stepOverage}) || ds[0].UsageHolds[1].ResetsAt == "" {
+		t.Errorf("drives --json usage_holds = %+v, want weekly then overage, each with its reset", ds)
+	}
+
+	var first bytes.Buffer
+	if err := resumeDrive(&first); err != nil {
+		t.Fatalf("first --resume: %v\n%s", err, stderr.String())
+	}
+	if !strings.Contains(first.String(), "released the usage hold on weekly (resets ") ||
+		!strings.Contains(first.String(), "still holds on overage (resets ") {
+		t.Errorf("the first resume does not say overage still holds:\n%s", first.String())
+	}
+	waitLease(t, path, func(l lease.Lease) bool {
+		return l.Paused && slices.Equal(windows(l.UsageHolds), []string{stepOverage})
+	})
+	var second bytes.Buffer
+	if err := resumeDrive(&second); err != nil {
+		t.Fatalf("second --resume: %v\n%s", err, stderr.String())
+	}
+	if !strings.Contains(second.String(), "released the usage hold on overage") ||
+		!strings.Contains(second.String(), "nothing else the newest reading crosses holds the drive") {
+		t.Errorf("the second resume does not say nothing else holds:\n%s", second.String())
+	}
+	select {
+	case err := <-exited:
+		exited <- err
+		if err != nil {
+			t.Fatalf("drive: %v\n%s", err, stderr.String())
+		}
+	case <-time.After(time.Minute):
+		t.Fatalf("the drive never dispatched after the second resume\n%s", stderr.String())
+	}
+
+	var paused, needs []DriveEvent
+	for _, e := range usageEventsIn(stdout.String()) {
+		switch {
+		case e.Action != "usage_admission":
+		case e.Event == evPaused:
+			paused = append(paused, e)
+		case e.Event == evNeedsOperator:
+			needs = append(needs, e)
+		}
+	}
+	if len(paused) != 2 || len(needs) != 2 {
+		t.Fatalf("paused %d and needs_operator %d times, want 2 each\n%s", len(paused), len(needs), stdout.String())
+	}
+	if got := windows(paused[0].Holds); paused[0].Window != stepWeekly || !slices.Equal(got, []string{stepWeekly, stepOverage}) ||
+		paused[0].Holds[1].Reason == "" {
+		t.Errorf("first paused = %+v, want the weekly hold taken and holds naming weekly then overage", paused[0])
+	}
+	if want := "drover drive --resume (releases weekly; overage still holds and takes a second --resume)"; needs[0].Run != want {
+		t.Errorf("first needs_operator run = %q, want %q", needs[0].Run, want)
+	}
+	if got := windows(paused[1].Holds); paused[1].Window != stepOverage || !slices.Equal(got, []string{stepOverage}) {
+		t.Errorf("second paused = %+v, want overage with a one-entry holds", paused[1])
+	}
+	if needs[1].Run != "drover drive --resume" || len(needs[1].Holds) != 1 {
+		t.Errorf("second needs_operator = %+v, want today's run text and one hold", needs[1])
+	}
+	if !strings.Contains(stderr.String(), "the same reading also holds on overage (") {
+		t.Errorf("the pause line does not name the overage hold behind the weekly one:\n%s", stderr.String())
+	}
+}
+
+// --dry-run lists every hold the reading crosses, not only the first.
+func TestADryRunListsEveryHold(t *testing.T) {
+	t.Cleanup(func() { driveDry = false })
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s := driveProjectWith(t, "\n[drive]\nmerge_gate = [\"stub-gate\"]\n\n[usage.weekly]\npause_remaining = 5\n")
+	r := reading("rejected", "seven_day", 1, 0.1, time.Now().Add(30*time.Hour), true, "")
+	if err := ledger.Append(s.cfg.Abs(s.cfg.Paths.Ledger), ledger.Row{Usage: &runlog.Usage{}, Source: ledger.SourceHeadless, RateLimit: r}); err != nil {
+		t.Fatal(err)
+	}
+	out := capture(t, func() { _ = execute(t, "drive", "--dry-run") })
+	if !strings.Contains(out, "the run would hold now: the weekly window has 0% left") ||
+		!strings.Contains(out, "the same reading also holds on overage (the weekly allotment is spent") {
+		t.Errorf("the preflight does not name both holds:\n%s", out)
+	}
+}
+
+// One resume releases one hold, so the run text names what each releases once
+// a reading crosses more than one.
+func TestResumeRun(t *testing.T) {
+	w, o, f := usageStep{Window: stepWeekly}, usageStep{Window: stepOverage}, usageStep{Window: stepFiveHour}
+	for _, c := range []struct {
+		holds []usageStep
+		want  string
+	}{
+		{[]usageStep{w}, "drover drive --resume"},
+		{[]usageStep{w, o}, "drover drive --resume (releases weekly; overage still holds and takes a second --resume)"},
+		{[]usageStep{w, f, o}, "drover drive --resume (releases weekly; five_hour and overage still hold and take one more --resume each)"},
+	} {
+		if got := resumeRun(c.holds); got != c.want {
+			t.Errorf("resumeRun = %q, want %q", got, c.want)
+		}
+	}
+}

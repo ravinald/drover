@@ -291,10 +291,17 @@ func (s *session) answerControl(sched *driveSched) {
 		return
 	}
 	refused := ""
+	var released *lease.UsageHold
+	var standing []lease.UsageHold
+	// rewrite is whether the answer replaces the lease's standing usage holds:
+	// a resume that released one, and an operator's pause, which no usage hold
+	// is behind.
+	rewrite := false
 	switch verb, _, _ := strings.Cut(req, " "); verb {
 	case ctrlPause:
 		if !sched.isPaused() {
 			sched.pause()
+			rewrite = true
 			fmt.Fprintln(errOut, "· paused by drive --pause: nothing more is dispatched, and each running item holds at its next stage boundary until drive --resume")
 			events.emit(DriveEvent{Event: evPaused})
 		}
@@ -317,7 +324,7 @@ func (s *session) answerControl(sched *driveSched) {
 				fmt.Fprintf(errOut, "· drive --resume refused, and the drive stays paused: %v\n", err)
 				break
 			}
-			releaseUsage(sched)
+			released, standing = s.releaseUsage(sched)
 			sched.mu.Lock()
 			if sched.reexec == "" {
 				sched.reexecSince = time.Now()
@@ -340,7 +347,7 @@ func (s *session) answerControl(sched *driveSched) {
 		publishConfig(in)
 		s.backlog, s.ledger, s.shelf = next.backlog, next.ledger, next.shelf
 		events.reconfigure(in.cfg)
-		releaseUsage(sched)
+		released, standing = s.releaseUsage(sched)
 		sched.resume(in)
 		what := "nothing it reads had changed"
 		if len(changed) > 0 {
@@ -354,18 +361,62 @@ func (s *session) answerControl(sched *driveSched) {
 	sched.mu.Lock()
 	paused, reexec := sched.paused, sched.reexec
 	sched.mu.Unlock()
-	_ = held.Update(func(l *lease.Lease) { l.Paused, l.Answered, l.Refused, l.Reexec = paused, req, refused, reexec })
+	_ = held.Update(func(l *lease.Lease) {
+		l.Paused, l.Answered, l.Refused, l.Reexec, l.UsageReleased = paused, req, refused, reexec, released
+		if rewrite || released != nil {
+			l.UsageHolds = standing
+		}
+	})
 }
 
 // releaseUsage lifts a usage hold an operator resumed past, and waives it, so
-// the next admission does not take the same hold on the same reading.
-func releaseUsage(sched *driveSched) {
+// the next admission does not take the same hold on the same reading. It
+// reports the hold it released, nil for none, and every hold the newest
+// reading still crosses that no resume waived: the operator's resume prints
+// both, so one resume is not read as releasing them all.
+func (s *session) releaseUsage(sched *driveSched) (*lease.UsageHold, []lease.UsageHold) {
 	if sched.usage == nil {
-		return
+		return nil, nil
 	}
-	if u := sched.usage.release(true); u != nil {
-		fmt.Fprintf(errOut, "· drive --resume releases the usage hold on the %s window, which stays released until it resets\n", u.Window)
+	u := sched.usage.release(true)
+	if u == nil {
+		return nil, nil
 	}
+	v := judgeUsage(s.cfg, s.readAccount(), time.Now())
+	sched.usage.mu.Lock()
+	rest := v.unwaived(sched.usage.waived)
+	sched.usage.mu.Unlock()
+	fmt.Fprintf(errOut, "· drive --resume releases the usage hold on the %s window, which stays released until it resets%s\n",
+		u.Window, stillHolding(standingHolds(rest)))
+	r := u.standing()
+	return &r, standingHolds(rest)
+}
+
+// stillHolding is the clause naming the usage holds standing after a resume
+// released one.
+func stillHolding(rest []lease.UsageHold) string {
+	if len(rest) == 0 {
+		return "; nothing else the newest reading crosses holds the drive"
+	}
+	return "; the newest reading still holds on " + usageHoldList(rest) +
+		", each released by a drover drive --resume of its own"
+}
+
+// usageHoldList is standing usage holds as one line: each window and its reset.
+func usageHoldList(hs []lease.UsageHold) string {
+	var each []string
+	for _, h := range hs {
+		reset := h.ResetsAt
+		if t, err := time.Parse(time.RFC3339, h.ResetsAt); err == nil {
+			reset = localReset(t)
+		}
+		if reset == "" {
+			each = append(each, h.Window)
+			continue
+		}
+		each = append(each, h.Window+" (resets "+reset+")")
+	}
+	return strings.Join(each, ", ")
 }
 
 // errNoDrive is a control request with no drive to take it.
@@ -471,10 +522,14 @@ func pausedLine(l lease.Lease) string {
 
 // resumedLine is what --resume prints about a drive that took it.
 func resumedLine(l lease.Lease) string {
+	line := "resumed " + driveName(l)
 	if l.Reexec != "" {
-		return fmt.Sprintf("resumed %s onto %s: it re-executes once every running item holds at a boundary", driveName(l), l.Reexec)
+		line = fmt.Sprintf("resumed %s onto %s: it re-executes once every running item holds at a boundary", driveName(l), l.Reexec)
 	}
-	return "resumed " + driveName(l)
+	if h := l.UsageReleased; h != nil {
+		line += "; it released the usage hold on " + usageHoldList([]lease.UsageHold{*h}) + stillHolding(l.UsageHolds)
+	}
+	return line
 }
 
 // resumeVerb is the request --resume writes, under --keep-binary or not.

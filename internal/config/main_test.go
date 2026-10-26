@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/ravinald/drover/internal/runner"
+	"github.com/ravinald/drover/internal/testenv"
 )
 
 // Load now layers a per-user config under every project, so a test run on a
@@ -14,12 +15,18 @@ import (
 //
 // runner.SessionEnv is cleared because Find answers from DROVER_ROOT before
 // walking, so a suite run inside a session drive launched would resolve every
-// fixture to the project that launched it.
+// fixture to the project that launched it. Find reads a session marker's root
+// the same way, so the suite also runs from a temporary directory no marker
+// sits above.
 func TestMain(m *testing.M) {
 	for _, name := range runner.SessionEnv {
 		if err := os.Unsetenv(name); err != nil {
 			panic(err)
 		}
+	}
+	wd, err := testenv.Isolate()
+	if err != nil {
+		panic(err)
 	}
 	dir, err := os.MkdirTemp("", "drover-xdg")
 	if err != nil {
@@ -30,6 +37,9 @@ func TestMain(m *testing.M) {
 	}
 	code := m.Run()
 	if err := os.RemoveAll(dir); err != nil {
+		panic(err)
+	}
+	if err := wd.Close(); err != nil {
 		panic(err)
 	}
 	os.Exit(code)

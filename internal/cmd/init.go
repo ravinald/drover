@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/gitcmd"
+	"github.com/ravinald/drover/internal/runner"
 	"github.com/spf13/cobra"
 )
 
@@ -135,6 +137,15 @@ terminal.`,
 				return err
 			}
 			fmt.Printf("  ✓ %s/\n", dir)
+		}
+		if cfg.Git.On() {
+			added, err := ignoreMarker(wd)
+			if err != nil {
+				return err
+			}
+			if added {
+				fmt.Printf("  ✓ .gitignore ignores %s\n", markerIgnore)
+			}
 		}
 
 		// Recorded after the config loads, so the row names a project that exists.
@@ -540,4 +551,39 @@ func originRepo(root string) string {
 		return url
 	}
 	return ""
+}
+
+// markerIgnore is the .gitignore line for the session marker. The whole
+// directory rather than the marker alone: it is also where the backlog lives by
+// default, and the config init writes already advises keeping that out of the
+// published tree.
+var markerIgnore = runner.MarkerDir + "/"
+
+// ignoreMarker appends markerIgnore to dir's .gitignore unless a line there
+// already names the marker, and reports whether it wrote.
+func ignoreMarker(dir string) (bool, error) {
+	path := filepath.Join(dir, ".gitignore")
+	b, err := os.ReadFile(path) // #nosec G304 -- the project's own .gitignore
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return false, err
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		switch strings.TrimSpace(line) {
+		case markerIgnore, "/" + markerIgnore, runner.MarkerDir, "/" + runner.MarkerDir + "/" + runner.MarkerName, runner.MarkerDir + "/" + runner.MarkerName:
+			return false, nil
+		}
+	}
+	add := markerIgnore + "\n"
+	if len(b) > 0 && !strings.HasSuffix(string(b), "\n") {
+		add = "\n" + add
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644) // #nosec G302 G304 -- .gitignore is world-readable by convention
+	if err != nil {
+		return false, err
+	}
+	if _, err := f.WriteString(add); err != nil {
+		_ = f.Close()
+		return false, err
+	}
+	return true, f.Close()
 }

@@ -208,6 +208,9 @@ func (s *session) drivesRunning(ds []ledger.Drive, l lease.Lease, busy bool) {
 		ds[i].Running = busy && l.Drive != "" && ds[i].ID == l.Drive
 		ds[i].Paused = ds[i].Running && l.Paused
 		ds[i].ConfigChanged = ds[i].Running && drift
+		if ds[i].Paused {
+			ds[i].UsageHolds = l.UsageHolds
+		}
 		if !ds[i].Running || ds[i].Exit != nil {
 			continue
 		}
@@ -361,6 +364,8 @@ func printDrives(w io.Writer, ds []ledger.Drive, indent string) {
 			if *d.Exit != 0 {
 				role = pal.Fail
 			}
+		case d.Paused && len(d.UsageHolds) > 0:
+			state, role = "running, paused on usage: "+usageHoldList(d.UsageHolds), pal.Warn
 		case d.Paused:
 			state, role = "running, paused", pal.Warn
 		case d.Running:

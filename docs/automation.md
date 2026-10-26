@@ -106,6 +106,30 @@ Only drover sets the variable: to `agent` for every session a run, review, draft
 
 CI is unaffected: a job that never went through `drover run` has no `DROVER_ACTOR`, so `finish` there behaves as it does in a terminal.
 
+`DROVER_ACTOR=operator` is the one value that means a person: `accept`, `finish`, `open-pr`, `signoff`, `drive`, `supervise` and the rest run under it, `DROVER_SESSION` is ignored beside it, and it overrides a session marker. drover never writes it. Export it to steer by hand from inside a tree a marker seals, which is a deliberate act in the same way `env -u` is.
+
+### The session marker
+
+The variable reaches only a session drover execs. Every launch (`run`, `review --runner`, `draft --runner`, `drive`, `supervise`) also writes `.drover/session` in the directory the session works in, the item's worktree under `drive` and the checkout otherwise, before the session starts, and removes it when the session exits, a cancel or an interrupt to drover included:
+
+```json
+{
+  "actor": "agent",
+  "session": "3f9c2a1b7d04",
+  "root": "/home/sam/src/project",
+  "pid": 48213,
+  "started": "2026-10-25T14:02:11Z"
+}
+```
+
+`actor`, `session` and `root` are the values the launch exports as `DROVER_ACTOR`, `DROVER_SESSION` and `DROVER_ROOT`. `pid` is the drover process that wrote the file and will remove it, not the session's own, and `started` is RFC 3339 in UTC.
+
+A command that finds `DROVER_ACTOR` unset walks up from its working directory to the first `.drover/session` or `.drover.toml`, whichever is nearer, and treats a marker found as those three values exported: the operator commands refuse, `audit --code-by agent` resolves the session id, and config lookup takes `root` when `DROVER_ROOT` is unset, refusing with the marker's path when that root holds no `.drover.toml`. A marker with no `actor` reads as `agent`, and one that will not parse seals as `agent` with no session.
+
+A sandbox that starts sessions itself (a T3 Code thread, a hosted agent) and wants the seal to hold writes this file into the session's working directory before it starts and removes it afterward. drover reads nothing else from it, so the sandbox's own process is the right `pid` to name.
+
+A launch into a directory whose marker names a running `pid` refuses with exit `3`, naming the marker and its session, because two sessions in one tree write over each other. A marker whose `pid` is gone is replaced, with a line on stderr saying so; `drover check` reports one as `SESSION MARKER`, as it does a marker git tracks. The launch adds a `.drover/.gitignore` naming the marker and itself when the directory has none, so an agent staging everything does not commit the seal, and `drover init` adds `.drover/` to the project's `.gitignore`. `drover show <id>` prints the marker in the item's worktree and the stage row naming its session.
+
 ### The supervisor
 
 `drover supervise` launches one interactive session with `DROVER_ACTOR=supervisor`: the session that watches drives for the operator. It answers to every rule above, with one exception and one addition.
@@ -1259,7 +1283,7 @@ The branch update drive makes before an item's own implement session, or its `--
 }
 ```
 
-`paused`: `drive --pause` reached the drive, or [`usage_admission`](configuration.md#supervise) held it. It dispatches nothing more, and each running item holds at its next stage boundary. A usage hold carries `action` `usage_admission`, `policy`, and `window`, `remaining` and `resets_at` as `usage_warning` does, with `reason` naming the level crossed: `the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT`, a window entered on purchased credit under `[usage.overage] mode = "pause"`, a list-price sum at `max_usd`, or a refusal, `impl's review session was refused: the weekly window is spent and so is the purchased credit (out_of_credits), so the service refuses sessions; it resets …`. A `needs_operator` with the same fields and `run` `drover drive --resume` follows it at every policy, so a destination routing `needs_operator` reaches the operator.
+`paused`: `drive --pause` reached the drive, or [`usage_admission`](configuration.md#supervise) held it. It dispatches nothing more, and each running item holds at its next stage boundary. A usage hold carries `action` `usage_admission`, `policy`, and `window`, `remaining` and `resets_at` as `usage_warning` does, with `reason` naming the level crossed: `the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT`, a window entered on purchased credit under `[usage.overage] mode = "pause"`, a list-price sum at `max_usd`, or a refusal, `impl's review session was refused: the weekly window is spent and so is the purchased credit (out_of_credits), so the service refuses sessions; it resets …`. It also carries `holds`, every usage hold the same reading crosses that no resume released, each with `window`, `reason` and `resets_at`, the one taken first: `window` and `reason` stay those of that hold, and each `drover drive --resume` releases one entry. A `needs_operator` with the same fields follows it at every policy, so a destination routing `needs_operator` reaches the operator. Its `run` is `drover drive --resume` for one hold, and with more says what each resume releases: `drover drive --resume (releases weekly; overage still holds and takes a second --resume)`.
 
 ```json
 { "event": "paused", "ts": "2026-10-16T22:50:00Z" }
@@ -1271,7 +1295,14 @@ The branch update drive makes before an item's own implement session, or its `--
   "reason": "the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT",
   "window": "weekly",
   "remaining": 4,
-  "resets_at": "2026-10-25T20:00:00-07:00"
+  "resets_at": "2026-10-25T20:00:00-07:00",
+  "holds": [
+    {
+      "window": "weekly",
+      "reason": "the weekly window has 4% left, at or below [usage.weekly] pause_remaining 5; it resets Sun Oct 25 20:00 PDT",
+      "resets_at": "2026-10-25T20:00:00-07:00"
+    }
+  ]
 }
 ```
 
@@ -1429,7 +1460,7 @@ One object, not an array, because the counts are part of the answer.
 }
 ```
 
-`kind` is the stable token to key on: `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `BAD TEMPLATE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `PLACEHOLDER`, `HOLD MARKER`, `BROAD CITATION` and `HAND EDITED`. `message` is prose and will change wording. `path`, `line` and `id` are present where the finding has one.
+`kind` is the stable token to key on: `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `BAD TEMPLATE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `SESSION MARKER`, `PLACEHOLDER`, `HOLD MARKER`, `BROAD CITATION` and `HAND EDITED`. `message` is prose and will change wording. `path`, `line` and `id` are present where the finding has one.
 
 `register_state` is what the follow-up read amounted to, as a token rather than as prose. Only `read` says the count of orphaned rows is the whole answer:
 
@@ -1476,6 +1507,8 @@ A dep's `state` is what drover found behind the id, and it is the field to read 
 `pr` is the pull request from the item's branch, with `number`, `state` and `error` as `status --json` carries them, plus `url` and `checks`, the head's check conclusion: `"success"`, `"failure"`, `"pending"` or `"none"`. A check re-run on the same head counts once, at its latest run. A merged item keeps its recorded `number` and `"state":"merged"` through a failed read, and `error` then says the `url` and `checks` went unread. `drover status <id>` prints this same document.
 
 `body` is present only under `drover show <id> detail`: the item's text below the frontmatter fence, as it sits on disk. Absent means nobody asked for it, not an empty prompt, so a consumer wanting the prompt passes `detail` rather than reading `path`.
+
+`marker` is the [session marker](#the-session-marker) in the item's drive worktree, present only while the tree holds one: `path`, `session`, `actor`, `pid`, `alive` for whether that pid is running, `started`, and `stage` and `stage_date` from the stage row recording the same session, absent when no stage row names it. A park on an item whose marker is `alive` is a launch still in flight.
 
 `requirements` counts the top-level `N.` lines, which is what `report --save` turns into checkboxes. A zero there on an item that reads as fully specified means the requirements were written as prose and nothing will ever confirm them.
 

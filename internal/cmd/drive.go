@@ -1716,7 +1716,7 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			pending = append([]queued{back}, pending...)
 			fmt.Fprintf(errOut, "· %s: %s; it goes back to the head of the queue at its %s stage\n", d.ID, d.Reason, d.requeue.At)
 			events.emit(DriveEvent{Event: evQueued, ID: d.ID, Action: "usage_admission", Stage: d.requeue.At, Position: 1})
-			s.holdForUsage(sched, *d.refusal)
+			s.holdForUsage(sched, []usageStep{*d.refusal})
 			continue
 		}
 		if err := account(d); err != nil {

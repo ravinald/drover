@@ -227,6 +227,10 @@ wording, so never match on it.
                       holds no merge
   SEQUENCE CLASH      two tracked files share a number in a [numbered_files] glob, which
                       git merges without a conflict and drive refuses on a branch
+  SESSION MARKER      a .drover/session is tracked by git, or one in the checkout or a
+                      drive worktree names a drover process that is no longer
+                      running, so it seals that tree for a session that has ended.
+                      A marker whose session is alive is silent
 
 docs/concepts.md carries the same list with what to do about each.
 
@@ -568,6 +572,9 @@ func (s *session) checkReport() CheckReport {
 		}
 	}
 	for _, f := range s.sequenceClashes() {
+		add(f)
+	}
+	for _, f := range s.sessionMarkers() {
 		add(f)
 	}
 
@@ -1713,4 +1720,67 @@ func (s *session) sequenceClashes() []Finding {
 		}
 	}
 	return found
+}
+
+// sessionMarkers is a finding per session marker that seals nothing anyone is
+// running: one git tracks, which every clone inherits as a seal, and one whose
+// drover is gone, which a SIGKILL or a power cut leaves behind. It looks in the
+// checkout and in every worktree drive keeps for this project, the two places
+// runner.Run writes one. A live marker is a session in progress and says
+// nothing.
+func (s *session) sessionMarkers() []Finding {
+	var found []Finding
+	if s.cfg.Git.On() {
+		if files, err := s.trackedNames(); err == nil {
+			want := filepath.ToSlash(filepath.Join(runner.MarkerDir, runner.MarkerName))
+			for _, f := range files {
+				if f == want || strings.HasSuffix(f, "/"+want) {
+					found = append(found, Finding{
+						Kind:    "SESSION MARKER",
+						Message: fmt.Sprintf("%s is tracked, so every checkout of it reads as a launched session", f),
+						Detail:  fmt.Sprintf("git rm --cached %s, and add %s to .gitignore", f, want),
+						Path:    f,
+					})
+				}
+			}
+		}
+	}
+	dirs := []string{s.cfg.Root}
+	if trees, err := s.projectTrees(); err == nil {
+		if entries, err := os.ReadDir(trees); err == nil {
+			for _, e := range entries {
+				if e.IsDir() {
+					dirs = append(dirs, filepath.Join(trees, e.Name()))
+				}
+			}
+		}
+	}
+	for _, dir := range dirs {
+		path := runner.MarkerPath(dir)
+		if _, err := os.Stat(path); err != nil {
+			continue
+		}
+		m, err := runner.ReadMarker(path)
+		if err == nil && runner.Alive(m.PID) {
+			continue
+		}
+		why := fmt.Sprintf("names session %s, and drover pid %d is not running", blankSession(m.Session), m.PID)
+		if err != nil {
+			why = "will not parse, and seals the tree as an agent with no session"
+		}
+		found = append(found, Finding{
+			Kind:    "SESSION MARKER",
+			Message: fmt.Sprintf("%s %s", displayPath(s.cfg.Root, path), why),
+			Detail:  "rm " + path,
+			Path:    path,
+		})
+	}
+	return found
+}
+
+func blankSession(id string) string {
+	if id == "" {
+		return "(none)"
+	}
+	return id
 }

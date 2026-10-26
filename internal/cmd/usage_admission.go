@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -126,6 +127,65 @@ func (u usageStep) event(ev DriveEvent) DriveEvent {
 	return ev
 }
 
+// standing is the step as a lease and an event's holds carry it.
+func (u usageStep) standing() lease.UsageHold {
+	h := lease.UsageHold{Window: u.Window, Reason: u.Reason}
+	if !u.Resets.IsZero() {
+		h.ResetsAt = u.Resets.Local().Format(time.RFC3339)
+	}
+	return h
+}
+
+// label is the step as a sentence names it: a refusal apart from the level on
+// the same window, since each takes its own resume.
+func (u usageStep) label() string {
+	if u.refused {
+		return u.Window + " refusal"
+	}
+	return u.Window
+}
+
+// standingHolds is steps as a lease and an event's holds carry them.
+func standingHolds(steps []usageStep) []lease.UsageHold {
+	var out []lease.UsageHold
+	for _, u := range steps {
+		out = append(out, u.standing())
+	}
+	return out
+}
+
+// behind is the clause naming the holds that stand behind the one taken, empty
+// for none: each takes a resume of its own, so one resume is not the cure.
+func behind(rest []usageStep) string {
+	if len(rest) == 0 {
+		return ""
+	}
+	var each []string
+	for _, u := range rest {
+		each = append(each, u.label()+" ("+u.Reason+")")
+	}
+	return "; the same reading also holds on " + strings.Join(each, ", and on ") +
+		", each released by a drover drive --resume of its own"
+}
+
+// resumeRun is needs_operator's run text for holds, the one taken first: what
+// one resume releases, and what still holds after it.
+func resumeRun(holds []usageStep) string {
+	if len(holds) < 2 {
+		return "drover drive --resume"
+	}
+	var rest []string
+	for _, u := range holds[1:] {
+		rest = append(rest, u.label())
+	}
+	still := rest[0] + " still holds and takes a second --resume"
+	if len(rest) > 1 {
+		still = strings.Join(rest[:len(rest)-1], ", ") + " and " + rest[len(rest)-1] +
+			" still hold and take one more --resume each"
+	}
+	return "drover drive --resume (releases " + holds[0].label() + "; " + still + ")"
+}
+
 // usageVerdict is what one reading means under the config: the notices to send
 // and every hold the reading crosses, in the order admission takes them.
 //
@@ -139,12 +199,22 @@ type usageVerdict struct {
 
 // hold is the first hold whose key waived does not name, nil for none.
 func (v usageVerdict) hold(waived map[string]bool) *usageStep {
-	for i := range v.holds {
-		if !waived[v.holds[i].key()] {
-			return &v.holds[i]
-		}
+	if u := v.unwaived(waived); len(u) > 0 {
+		return &u[0]
 	}
 	return nil
+}
+
+// unwaived is every hold whose key waived does not name, in the order
+// admission takes them.
+func (v usageVerdict) unwaived(waived map[string]bool) []usageStep {
+	var out []usageStep
+	for _, u := range v.holds {
+		if !waived[u.key()] {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 // localReset is a reset instant as an operator reads it, on their own clock.
@@ -325,12 +395,12 @@ func (s *session) admitUsage(q *driveSched) bool {
 		return false
 	}
 	q.usage.mu.Lock()
-	h := v.hold(q.usage.waived)
+	holds := v.unwaived(q.usage.waived)
 	q.usage.mu.Unlock()
-	if h == nil {
+	if len(holds) == 0 {
 		return false
 	}
-	return s.holdForUsage(q, *h)
+	return s.holdForUsage(q, holds)
 }
 
 // sendUsageWarnings emits each warning no registered project already sent,
@@ -360,13 +430,15 @@ func (s *session) sendUsageWarnings(g *usageGate, warnings []usageStep, a accoun
 	}
 }
 
-// holdForUsage pauses the drive on one step through the state --pause writes,
+// holdForUsage pauses the drive on the first of holds through the state --pause writes,
 // and reports whether the drive is held. Sessions already running finish their
 // stage, since the work in flight is what the remaining percent was kept for,
 // and each item holds at its next boundary. A drive an operator already
 // paused is left to them: a hold taken on top of it would lift their pause at
-// the reset.
-func (s *session) holdForUsage(q *driveSched, u usageStep) bool {
+// the reset. The rest of holds are named beside it, because each takes a
+// resume of its own and one resume is not consent to the others.
+func (s *session) holdForUsage(q *driveSched, holds []usageStep) bool {
+	u := holds[0]
 	p, _ := s.cfg.Policy("usage_admission")
 	g := q.usage
 	g.mu.Lock()
@@ -387,11 +459,13 @@ func (s *session) holdForUsage(q *driveSched, u usageStep) bool {
 	g.mu.Unlock()
 	q.pause()
 	if held != nil {
-		_ = held.Update(func(l *lease.Lease) { l.Paused = true })
+		_ = held.Update(func(l *lease.Lease) { l.Paused, l.UsageHolds = true, standingHolds(holds) })
 	}
-	fmt.Fprintf(errOut, "· usage_admission: %s; nothing more is dispatched, each running item finishes its stage and holds, and %s\n", u.Reason, auto)
-	events.emit(u.event(DriveEvent{Event: evPaused, Action: "usage_admission", Policy: string(p)}))
-	events.emit(u.event(DriveEvent{Event: evNeedsOperator, Action: "usage_admission", Policy: string(p), Run: "drover drive --resume"}))
+	fmt.Fprintf(errOut, "· usage_admission: %s; nothing more is dispatched, each running item finishes its stage and holds, and %s%s\n",
+		u.Reason, auto, behind(holds[1:]))
+	all := standingHolds(holds)
+	events.emit(u.event(DriveEvent{Event: evPaused, Action: "usage_admission", Policy: string(p), Holds: all}))
+	events.emit(u.event(DriveEvent{Event: evNeedsOperator, Action: "usage_admission", Policy: string(p), Run: resumeRun(holds), Holds: all}))
 	return true
 }
 
@@ -405,7 +479,7 @@ func (s *session) resumeFromUsage(q *driveSched) {
 	}
 	q.resume(s.inputs)
 	if held != nil {
-		_ = held.Update(func(l *lease.Lease) { l.Paused = false })
+		_ = held.Update(func(l *lease.Lease) { l.Paused, l.UsageHolds = false, nil })
 	}
 	why := "the " + u.Window + " hold reached its reset at " + localReset(u.Resets) + ", so the drive dispatches again"
 	fmt.Fprintf(errOut, "· usage_admission: %s\n", why)
@@ -439,13 +513,13 @@ func (s *session) usagePlan() string {
 		return "no usage row in any registered project carries a rate_limit reading; the run dispatches"
 	}
 	now := time.Now()
-	h := judgeUsage(s.cfg, a, now).hold(nil)
+	holds := judgeUsage(s.cfg, a, now).holds
 	left := readingLine(a.Reading, now)
 	switch {
 	case p == polOff:
 		return left + "; not acted on"
-	case h != nil:
-		return left + "; the run would hold now: " + h.Reason
+	case len(holds) > 0:
+		return left + "; the run would hold now: " + holds[0].Reason + behind(holds[1:])
 	}
 	return left + " (" + a.Project + ", " + a.At.Local().Format("Jan 2 15:04") + "); the run dispatches"
 }
