@@ -5072,6 +5072,9 @@ func (s *session) requestChangesFromVerify(it backlog.Item, header, out string, 
 			continue
 		}
 		body += ". Its log:\n\n```\n" + strings.Join(j.failure, "\n") + "\n```\n"
+		if fix := toolchainFix(j.failure); fix != "" {
+			body += "\n" + fix
+		}
 	}
 	if _, err := f.WriteString(body); err != nil {
 		return err
