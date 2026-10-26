@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -185,7 +186,9 @@ change the numbered requirements, refuses evidence whose only findings are
 		// After the body write, never before. A row claiming a request whose body
 		// write failed is the one wrong direction; a body written whose row
 		// failed reports the error and leaves the body correct.
-		if err := s.record(ledger.Row{ID: it.ID.Bare(), Changes: digest(text), Date: ledger.Today()}); err != nil {
+		if err := s.record(ledger.Row{
+			ID: it.ID.Bare(), Changes: digest(text), Reqs: findingRequirements(it, text), Date: ledger.Today(),
+		}); err != nil {
 			return err
 		}
 		fmt.Printf("changes requested: %s -> %s (%d requirement(s) unchanged)\n",
@@ -221,33 +224,14 @@ var structuralHeadings = map[string]bool{
 // requirement lets the request through, except a heading whose leading word is
 // in structuralHeadings.
 func operatorOnlyFindings(it backlog.Item, text string) (ops []backlog.Requirement, structure []string) {
-	reqs := map[int]backlog.Requirement{}
-	for _, r := range it.Requirements() {
-		reqs[r.Num] = r
-	}
-	var findings []string
-	var f fence
-	for _, l := range strings.Split(text, "\n") {
-		if t := strings.TrimSpace(l); !f.skip(l) && strings.HasPrefix(t, "#") {
-			findings = append(findings, t)
-		}
-	}
-	headed := len(findings) > 0
-	if !headed {
-		findings = []string{text}
-	}
+	reqs := requirementsByNum(it)
+	findings, headed := findingTexts(text)
 	seen := map[int]bool{}
 	for _, f := range findings {
 		if strings.Contains(f, "BRANCH-") {
 			return nil, nil
 		}
-		var named []backlog.Requirement
-		for _, m := range requirementRef.FindAllStringSubmatch(f, -1) {
-			n, _ := strconv.Atoi(m[1])
-			if r, ok := reqs[n]; ok {
-				named = append(named, r)
-			}
-		}
+		named := namedRequirements(f, reqs)
 		if len(named) == 0 {
 			if headed && structuralHeadings[leadingWord(f)] {
 				structure = append(structure, f)
@@ -271,6 +255,64 @@ func operatorOnlyFindings(it backlog.Item, text string) (ops []backlog.Requireme
 		return nil, nil
 	}
 	return ops, structure
+}
+
+// findingTexts is each finding in evidence: a heading outside a code fence, or
+// the whole text when it has no heading.
+func findingTexts(text string) (findings []string, headed bool) {
+	var f fence
+	for _, l := range strings.Split(text, "\n") {
+		if t := strings.TrimSpace(l); !f.skip(l) && strings.HasPrefix(t, "#") {
+			findings = append(findings, t)
+		}
+	}
+	if len(findings) == 0 {
+		return []string{text}, false
+	}
+	return findings, true
+}
+
+// requirementsByNum is the body's requirements keyed by their number.
+func requirementsByNum(it backlog.Item) map[int]backlog.Requirement {
+	reqs := map[int]backlog.Requirement{}
+	for _, r := range it.Requirements() {
+		reqs[r.Num] = r
+	}
+	return reqs
+}
+
+// namedRequirements is each requirement of the body a finding names as R<n>. A
+// number the body lacks is not one: contractContradictions answers for it.
+func namedRequirements(finding string, reqs map[int]backlog.Requirement) []backlog.Requirement {
+	var named []backlog.Requirement
+	for _, m := range requirementRef.FindAllStringSubmatch(finding, -1) {
+		n, _ := strconv.Atoi(m[1])
+		if r, ok := reqs[n]; ok {
+			named = append(named, r)
+		}
+	}
+	return named
+}
+
+// findingRequirements is every requirement the evidence's findings name,
+// sorted and once each, traced as operatorOnlyFindings traces them. It is what
+// the changes row records as reqs, so two rounds naming the same unmet
+// requirements in different words read as one finding.
+func findingRequirements(it backlog.Item, text string) []int {
+	reqs := requirementsByNum(it)
+	findings, _ := findingTexts(text)
+	seen := map[int]bool{}
+	var out []int
+	for _, f := range findings {
+		for _, r := range namedRequirements(f, reqs) {
+			if !seen[r.Num] {
+				seen[r.Num] = true
+				out = append(out, r.Num)
+			}
+		}
+	}
+	sort.Ints(out)
+	return out
 }
 
 // requirementWord is a requirement named in prose, as "requirement 6".

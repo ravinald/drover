@@ -362,6 +362,37 @@ func TestCountsCountsRatherThanFolds(t *testing.T) {
 	}
 }
 
+// Two send-backs naming the same requirements are one finding however each is
+// worded, so only an equal pair of lists repeats. A row an older binary wrote
+// carries none and breaks the pair it sits between.
+func TestCountsRepeatedRequirementsWantsAnEqualPair(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		reqs [][]int
+		want bool
+	}{
+		{"equal", [][]int{{4, 7}, {4, 7}}, true},
+		{"overlap", [][]int{{4, 7}, {4}}, false},
+		{"an older row between", [][]int{{4, 7}, nil, {4, 7}}, false},
+		{"neither names one", [][]int{nil, nil}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			l := &Ledger{}
+			for i, r := range c.reqs {
+				l.Rows = append(l.Rows, Row{ID: "16", Changes: []string{"a", "b", "c"}[i], Reqs: r})
+			}
+			l.Rows = append(l.Rows, Row{ID: "17", Changes: "other", Reqs: []int{9}})
+			got := l.Counts("16")
+			if got.RepeatedRequirements != c.want {
+				t.Errorf("RepeatedRequirements = %v, want %v", got.RepeatedRequirements, c.want)
+			}
+			if got.RepeatedChanges {
+				t.Error("distinct digests read as RepeatedChanges")
+			}
+		})
+	}
+}
+
 func TestCountsIgnoresEveryOtherItem(t *testing.T) {
 	l := &Ledger{Rows: []Row{
 		{ID: "1", Stage: StageImplement},

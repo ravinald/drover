@@ -5,7 +5,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -207,6 +209,48 @@ func TestRequestChangesRowCarriesTheEvidenceDigest(t *testing.T) {
 	l, _ = ledger.Load(filepath.Join(dir, "ledger.jsonl"))
 	if l.Counts("1").RepeatedChanges {
 		t.Error("new evidence read as a repeat")
+	}
+}
+
+// sevenRequirements is an item body with requirements 1 to 7, so evidence can
+// name R4 and R7 without contractContradictions refusing it.
+const sevenRequirements = "---\ntitle: First\ndeps:\n---\n\n" +
+	"1. One.\n2. Two.\n3. Three.\n4. Four.\n5. Five.\n6. Six.\n7. Seven.\n"
+
+// The row records the requirements the findings name, traced through the
+// headings as the operator check traces them, and nothing for evidence whose
+// findings name none.
+func TestRequestChangesRowRecordsTheRequirementsItsFindingsName(t *testing.T) {
+	t.Cleanup(func() { requestChangesFile = "" })
+	dir, evidence := capProject(t, 0)
+	write(t, filepath.Join(dir, "work", "01-first.md"), sevenRequirements)
+	write(t, evidence, "### R7 refuses a non-place entity\n\nStill accepted.\n\n"+
+		"### R4: a brewery linked to its place is unmet\n\nNo link is written.\n")
+	requestChangesFile = ""
+	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
+		t.Fatal(err)
+	}
+	write(t, evidence, "The walk over-excludes on a nullable column.\n")
+	requestChangesFile = ""
+	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got [][]int
+	for _, r := range l.Rows {
+		if r.ID == "1" && r.Changes != "" {
+			got = append(got, r.Reqs)
+		}
+	}
+	if len(got) != 2 || !slices.Equal(got[0], []int{4, 7}) || got[1] != nil {
+		t.Errorf("reqs per changes row = %v, want [[4 7] []]", got)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "ledger.jsonl"))
+	if n := strings.Count(string(raw), `"reqs"`); n != 1 {
+		t.Errorf("%d rows carry a reqs key, want 1: evidence naming no requirement records none", n)
 	}
 }
 

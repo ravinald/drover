@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -92,6 +93,11 @@ type Row struct {
 	// hand-written "round": 3 beside three existing rows is a contradiction
 	// somebody has to resolve.
 	Changes string `json:"changes,omitempty"`
+	// Reqs is the requirement numbers the evidence's findings name, sorted, on a
+	// changes row. The digest compares wording, so a reviewer rewording one
+	// unmet requirement round after round writes a new digest every time; the
+	// numbers are the substance it misses. Absent where no finding names one.
+	Reqs []int `json:"reqs,omitempty"`
 	// Pass is the sixth shape: one row per review pass drive read a result
 	// from, carrying the token it computed. Every token is recorded and not
 	// only the one that merges, because a file holding passes alone cannot tell
@@ -809,9 +815,17 @@ type Counts struct {
 	// the date of the most recent. RepeatedChanges marks the last two carrying
 	// the same evidence digest, which is a review that has stopped finding
 	// anything new.
-	ChangesRequested int
-	LastChanges      string
-	RepeatedChanges  bool
+	//
+	// RepeatedRequirements marks the last two naming the same requirements,
+	// however the evidence is worded, and Reqs is the last one's list. An equal
+	// set and not an overlap: a second round finding a different gap in one
+	// shared requirement is progress. A row without reqs, which an older binary
+	// writes, matches nothing on either side.
+	ChangesRequested     int
+	LastChanges          string
+	RepeatedChanges      bool
+	RepeatedRequirements bool
+	Reqs                 []int
 	// Refusals is how many requests for changes the cap turned away over the item's history.
 	// A reader deciding about one pass wants RefusedSince instead.
 	Refusals int
@@ -862,6 +876,8 @@ func (l *Ledger) Counts(id string) Counts {
 		if r.Changes != "" {
 			c.ChangesRequested++
 			c.RepeatedChanges = last != "" && r.Changes == last
+			c.RepeatedRequirements = len(c.Reqs) > 0 && slices.Equal(r.Reqs, c.Reqs)
+			c.Reqs = r.Reqs
 			c.LastChanges, last = r.Date, r.Changes
 		}
 		if r.Refused != "" {

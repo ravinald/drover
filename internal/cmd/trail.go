@@ -66,6 +66,17 @@ func (s *session) roundPath(it backlog.Item, n int) string {
 		fmt.Sprintf("%s-%s.changes-%d.md", it.ID.Stem(), it.Slug, n)))
 }
 
+// sentBack is the paths of the last two kept rounds, oldest first, and nil
+// unless both are there to read.
+func (s *session) sentBack(it backlog.Item) []string {
+	rounds, err := s.rounds(it)
+	if err != nil || len(rounds) < 2 {
+		return nil
+	}
+	last := rounds[len(rounds)-2:]
+	return []string{last[0].Path, last[1].Path}
+}
+
 // rounds reads the kept rounds for one item, oldest first. A directory that is
 // not there is an item nobody has sent back, not an error.
 func (s *session) rounds(it backlog.Item) ([]prompts.Round, error) {

@@ -57,6 +57,9 @@ type pass struct {
 	// leftRunning is each process the session started and left running when
 	// it exited. Its report is about work that had not finished.
 	leftRunning []string
+	// sentBack is the kept evidence of the last two requests for changes, which
+	// a repeating park quotes so the operator reads both rounds side by side.
+	sentBack []string
 }
 
 // readBody fills body, exact and text from the item file as the pass ended. An
@@ -184,7 +187,7 @@ func rowResult(p pass) string {
 	// in for.
 	case p.cap > 0 && p.refused:
 		return passCapped
-	case changes >= 1 && p.after.RepeatedChanges:
+	case changes >= 1 && (p.after.RepeatedChanges || p.after.RepeatedRequirements):
 		return passRepeating
 	case changes >= 1:
 		return passChangesRequested
@@ -2424,6 +2427,10 @@ func passSentence(v, stage string, p pass, subject, runnerName, logPath string) 
 	case passCapped:
 		return fmt.Sprintf("%s wanted to send work back, and the item is at [review] max_review_rounds (%d)", subject, p.cap)
 	case passRepeating:
+		if !p.after.RepeatedChanges && p.after.RepeatedRequirements {
+			return subject + " sent back " + requirementList(p.after.Reqs) +
+				" unmet twice in a row; the contract may need narrowing, splitting or an override"
+		}
 		return subject + " sent back the same evidence as the request for changes before it, so the last run changed nothing it checks"
 	}
 	return subject + " ended as " + v
@@ -2810,13 +2817,20 @@ func (s *session) driveSummary(done []DriveItem, totals DriveTotals) {
 	}
 	for _, d := range done {
 		path, drafted := "", false
+		var sentBack []string
 		if it, err := s.item(d.ID); err == nil {
 			path = rel(s.cfg.Root, it.Path)
 			drafted = writtenRequirements(it) > 0
+			if d.Park == passRepeating {
+				sentBack = s.sentBack(it)
+			}
 		}
 		fmt.Fprintf(errOut, "\n%s\n", d.ID)
 		deny, _ := s.cfg.Policy("merge_protected_paths")
 		f := driveFollowUp(d, path, drafted, s.cfg.Review.MaxReviewRounds, deny)
+		if len(sentBack) > 0 {
+			f.Next = repeatingNext(d.ID, path, sentBack)
+		}
 		if d.PR > 0 {
 			// Linked here rather than in driveFollowUp, which builds the text
 			// without a session and is what the tests read.
@@ -2876,6 +2890,31 @@ func (f followUp) write(w io.Writer, indent string) {
 	fmt.Fprintf(w, "%sOutcome:    %s\n%sNext steps: %s\n", indent, f.Outcome, indent, f.Next)
 }
 
+// repeatingNext is the follow-up for a review that sent the same finding back
+// twice: the three ways out are the operator's, since another run meets the
+// same finding. sentBack names the two kept rounds when both are on disk.
+func repeatingNext(id, body string, sentBack []string) string {
+	if len(sentBack) == 2 {
+		return "drover show " + id + ", then read both send-backs, " + sentBack[0] + " and " + sentBack[1] +
+			", then narrow the contract with drover amend " + id + ", split it with drover split " + id +
+			", or override the review by hand; another drover run " + id + " meets the same finding"
+	}
+	return "read " + body + " and decide by hand; another drover run " + id + " meets the same finding"
+}
+
+// requirementList names requirement numbers as prose: R4, R4 and R7, R1, R4
+// and R7.
+func requirementList(nums []int) string {
+	names := make([]string, len(nums))
+	for i, n := range nums {
+		names[i] = "R" + strconv.Itoa(n)
+	}
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
 // reviewAgain is the command that relaunches a headless review with the runner
 // the last one used, so a copied next step reproduces the pass it follows. Only
 // a headless pass is reported, so it is the only mode this names.
@@ -2898,10 +2937,7 @@ func passFollowUp(token string, p pass, id, item, runnerName, logPath, again str
 			"drover run " + id + ", then " + again,
 		}
 	case passRepeating:
-		return followUp{
-			outcome,
-			"read " + body + " and decide by hand; another drover run " + id + " meets the same finding",
-		}
+		return followUp{outcome, repeatingNext(id, body, p.sentBack)}
 	case passCapped:
 		return followUp{
 			outcome,
