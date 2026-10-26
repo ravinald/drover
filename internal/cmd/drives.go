@@ -47,6 +47,10 @@ func (d *runningDrive) note(item DriveItem) {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if i := slices.IndexFunc(d.outcomes, func(x ledger.Outcome) bool { return x.ID == o.ID }); i >= 0 {
+		d.outcomes[i] = o
+		return
+	}
 	d.outcomes = append(d.outcomes, o)
 }
 

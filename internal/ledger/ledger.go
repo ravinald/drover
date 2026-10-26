@@ -291,6 +291,24 @@ type Outcome struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// Latest keeps one entry per id, the last one, at the position of that id's
+// first. A drive that parks an item and then takes it again from --enqueue
+// gives it one outcome, and an end row written before it held to that carries
+// both, so a reader counting entries would count the park that no longer stands.
+func Latest[T any](xs []T, id func(T) string) []T {
+	at := make(map[string]int, len(xs))
+	out := make([]T, 0, len(xs))
+	for _, x := range xs {
+		if i, ok := at[id(x)]; ok {
+			out[i] = x
+			continue
+		}
+		at[id(x)] = len(out)
+		out = append(out, x)
+	}
+	return out
+}
+
 // DriveRowID is the id a drive's start and end rows carry. It holds no digit,
 // so no namespace can mint an item under it, where the drive's own id would
 // collide with an item in a project that declares a D namespace.
@@ -363,7 +381,10 @@ func (l *Ledger) Drives() []Drive {
 			}
 			continue
 		}
-		d.Ended, d.Exit, d.Items = when, r.Exit, r.Outcomes
+		d.Ended, d.Exit, d.Items = when, r.Exit, nil
+		if r.Outcomes != nil {
+			d.Items = Latest(r.Outcomes, func(o Outcome) string { return o.ID })
+		}
 	}
 	sort.SliceStable(order, func(i, j int) bool { return driveNumber(order[i]) > driveNumber(order[j]) })
 	out := make([]Drive, 0, len(order))
