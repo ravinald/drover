@@ -69,6 +69,7 @@ type Config struct {
 	Run         Run                    `toml:"run"`
 	Runners     map[string]runner.Spec `toml:"runners"`
 	Notify      Notify                 `toml:"notify"`
+	T3          T3                     `toml:"t3"`
 	// Supervise maps supervised action keys to policies, beside template, the
 	// one key that is not an action. Read it through Policy and
 	// SuperviseTemplate.
@@ -1476,6 +1477,9 @@ func (c *Config) validate(path string) error {
 		return err
 	}
 	if err := c.validateUsage(path); err != nil {
+		return err
+	}
+	if err := c.validateT3(path); err != nil {
 		return err
 	}
 	if _, err := ParseZone(c.Status.Timezone); err != nil {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/config"
@@ -20,6 +22,7 @@ import (
 	"github.com/ravinald/drover/internal/register"
 	"github.com/ravinald/drover/internal/runlog"
 	"github.com/ravinald/drover/internal/runner"
+	"github.com/ravinald/drover/internal/t3"
 	"github.com/spf13/cobra"
 )
 
@@ -129,6 +132,14 @@ wording, so never match on it.
                       contradicts that binary: the prompt lands somewhere the
                       binary ignores, or the stream drover reads back is never asked
                       for. A binary drover ships no knowledge of is silent here
+  BRIDGE SIGNED OUT       a [runners] entry is the t3 bridge, this is the T3 Code host,
+                      and [t3] url is unset or the token file holds no grant the
+                      server accepts. Silent on a host without [t3] provider_logs
+  BRIDGE UNREACHABLE      the same, with a grant, and [t3] url did not answer initialize
+                      within 5s
+  BRIDGE VERSION          the T3 Code server reports a version other than [t3]
+                      tested_version, so the provider event log usage is read
+                      from may have moved
   BAD LEDGER          a ledger line is not the JSON object the reader expects
   ORPHAN ROW          a ledger row names an id with no body, or one that will not parse
   NO REQUIREMENTS     an accepted, unmerged item whose body has no top-level "N. "
@@ -639,6 +650,8 @@ func (s *session) checkReport() CheckReport {
 			})
 		}
 	}
+
+	s.addT3(add)
 
 	// The same mistake one table over, and it fails the same way: no item can
 	// carry the key, so nothing is ever checked against the shape.
@@ -1821,4 +1834,68 @@ func blankSession(id string) string {
 		return "(none)"
 	}
 	return id
+}
+
+// t3CheckWait bounds the one call check makes to a T3 Code server.
+const t3CheckWait = 5 * time.Second
+
+// addT3 judges the t3 bridge where it can run: a [runners] entry names it and
+// this host holds T3 Code's provider log directory, which the bridge reads and
+// only the T3 host has. CI declares the same runners and is not that host, and
+// a finding there would fail a gate over a sign-in nobody could make.
+//
+// The grant is read and not renewed: an expired one carrying a refresh token
+// renews at the next launch, and check writes nothing. The version is the one
+// call it makes, because the provider log the bridge reads usage from is T3's
+// internal format and a release can move it without the MCP server saying so.
+func (s *session) addT3(add func(Finding)) {
+	var names []string
+	for _, name := range keys(s.cfg.Runners) {
+		if runner.IsT3(s.cfg.Runners[name]) {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	if fi, err := os.Stat(s.cfg.T3ProviderLogs()); err != nil || !fi.IsDir() {
+		return
+	}
+	who := strings.Join(names, ", ")
+	if s.cfg.T3.URL == "" {
+		add(Finding{
+			Kind:    "BRIDGE SIGNED OUT",
+			Message: fmt.Sprintf("[runners] %s launch through drover t3, and [t3] url is not set", who),
+			Detail:  "name the T3 Code server's MCP endpoint in [t3] url, then run `" + runner.T3Login + "`",
+		})
+		return
+	}
+	path := s.cfg.T3TokenFile()
+	g, err := t3.ReadGrant(path)
+	switch {
+	case err != nil:
+		add(Finding{Kind: "BRIDGE SIGNED OUT", Message: fmt.Sprintf("[runners] %s: %v", who, err),
+			Detail: "run `" + runner.T3Login + "`, choosing Full access for drive stages"})
+		return
+	case g.Expired(time.Now()) && g.RefreshToken == "":
+		add(Finding{Kind: "BRIDGE SIGNED OUT",
+			Message: fmt.Sprintf("[runners] %s: the grant in %s expired at %s and carries no refresh token", who, path, g.ExpiresAt.Format(time.RFC3339)),
+			Detail:  "run `" + runner.T3Login + "`"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), t3CheckWait)
+	defer cancel()
+	info, err := t3.NewClient(s.cfg.T3.URL, func(context.Context) (string, error) { return g.AccessToken, nil }).Initialize(ctx)
+	switch {
+	case errors.Is(err, t3.ErrUnauthorized):
+		add(Finding{Kind: "BRIDGE SIGNED OUT", Message: fmt.Sprintf("[runners] %s: %s refused the grant in %s", who, s.cfg.T3.URL, path),
+			Detail: "run `" + runner.T3Login + "`"})
+	case err != nil:
+		add(Finding{Kind: "BRIDGE UNREACHABLE", Message: fmt.Sprintf("[runners] %s: %s did not answer initialize: %v", who, s.cfg.T3.URL, err),
+			Detail: "start the T3 Code server on this host, or correct [t3] url"})
+	case info.Version != s.cfg.T3TestedVersion():
+		add(Finding{Kind: "BRIDGE VERSION",
+			Message: fmt.Sprintf("the T3 Code server reports %s, and the bridge was tested against %s ([t3] tested_version)", info.Version, s.cfg.T3TestedVersion()),
+			Detail:  "the provider event log usage tracking reads is T3's internal format and may have moved: run one stage, look for usage_unavailable in its log, then set [t3] tested_version"})
+	}
 }

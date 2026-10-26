@@ -28,6 +28,11 @@ const (
 	FaultTransient = "transient" // the service was unreachable or overloaded
 	FaultQuota     = "quota"     // the account is out of budget until a reset
 	FaultAuth      = "auth"      // the runner has no credentials the service accepts
+	// FaultRunner is a runner that hands the session to a service of its own
+	// reporting that the session ended without completing: a T3 Code run
+	// interrupted, failed, or lost with its thread. No wait repairs it and the
+	// next item would meet the same service, so it is not retried.
+	FaultRunner = "runner"
 )
 
 // quotaSigns and transientSigns are matched against a lowercased failure

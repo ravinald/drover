@@ -509,13 +509,14 @@ A headless launch gets the null device on stdin unless `stdin` is set, and that 
 
 ### What drover reads back
 
-Starting a binary is half the contract. A headless runner must write a JSONL event stream to stdout, ending in a **terminal event** that says how the session finished, and drover has to recognize that event: it is the only thing separating a session that completed from one that stopped. drover reads three formats, matched against the event itself rather than declared in config:
+Starting a binary is half the contract. A headless runner must write a JSONL event stream to stdout, ending in a **terminal event** that says how the session finished, and drover has to recognize that event: it is the only thing separating a session that completed from one that stopped. drover reads four formats, matched against the event itself rather than declared in config:
 
 | Runner   | Terminal event                                                               | Success reported by           |
 | -------- | ---------------------------------------------------------------------------- | ----------------------------- |
 | `claude` | `{"type":"result","subtype":"success","is_error":false,...}`                 | `subtype` and `is_error`      |
 | `agy`    | `{"event":"result","result":{"status":"SUCCESS",...}}`                       | `status`                      |
 | `codex`  | `{"type":"turn.completed","usage":{...}}`, or `turn.failed` / `turn.aborted` | the terminal event's own name |
+| `t3`     | `{"t3":"result","subtype":"success","is_error":false,...}`                   | `subtype` and `is_error`      |
 
 Matching is on the event's kind, not on the key that names it. `claude` and `codex` both name their kinds under `type`, so a reader matching a line by its key alone hands `claude` every `codex` event, finds no terminal one among them, and reports a reviewer that finished as one that died.
 
@@ -525,7 +526,25 @@ A runner writing none of these formats is launched, runs, and reads as silence. 
 
 `drover check` reports a `[runners]` entry whose binary is on PATH and whose argv that binary cannot use, as `BAD RUNNER`, and carries the argv that works. It judges only the binaries drover ships knowledge of, so a wrapper is silent there; a wrapper's output is judged where the output exists, which is the park above.
 
-drover tees the stream to the log and renders assistant text and tool markers as a live feed, reading all three formats above. Discovery is by filename, so any runner writing into the log directory is discoverable whether or not drover knows what produced it.
+drover tees the stream to the log and renders assistant text and tool markers as a live feed, reading all four formats above. Discovery is by filename, so any runner writing into the log directory is discoverable whether or not drover knows what produced it.
+
+### T3 Code threads
+
+A runner can be drover's own bridge to a [T3 Code](https://github.com/pingdotgg/t3code) server: `drover t3 run` launches each stage as a T3 Code thread over the server's MCP endpoint, follows it to the end, and prints the `t3` format above. The argv shape is the one every runner has, so `run`, `review --runner` and every `drive` stage use it unchanged:
+
+```toml
+[runners]
+t3       = { headless = ["drover", "t3", "run", "--provider", "claude", "--permission", "full", "-p"] }
+t3-codex = { headless = ["drover", "t3", "run", "--provider", "codex", "--permission", "full", "-p"] }
+
+[run]
+default_runner = "t3"
+review_runner  = "t3-codex"
+```
+
+`-p` takes the next argument as the prompt, so it goes last. With `stdin = true` the argv carries `--stdin` instead. `--model` takes a model id as the server's `orchestrator_capabilities` lists it, and defaults to the first one listed for the provider. `--permission full` launches at T3's `full-access` runtime mode, which a drive needs because nobody answers approvals during one; `supervised`, the default, launches at `approval-required`.
+
+`drover check` judges a bridge argv as `BAD RUNNER`: it must be `drover t3 run`, and `-p` must be last. Where the host holds `[t3] provider_logs`, it also reports `BRIDGE SIGNED OUT`, `BRIDGE UNREACHABLE` and `BRIDGE VERSION`; see [`[t3]`](#t3). [Operating](operating.md#t3-code-threads) covers setting the host up.
 
 Omitting the section entirely gives you the built-in `claude` runner above.
 
@@ -768,11 +787,11 @@ For a `code` check, `drive` also reads what failed out of the same job log: up t
 | `^--- FAIL`                     | A failed Go test                                      |
 | `^FAIL\b`                       | A failed Go test package                              |
 | `^\S+:\d+:\d+: .*\(\w[\w-]*\)$` | A golangci-lint finding, its linter named last        |
-| `^\S+\.\w+:\d+:\d+: `           | A compiler or `go vet` error                          |
+| `^\S+\.\w+:\d+:\d+:`           | A compiler or `go vet` error                          |
 | `^Vulnerability #\d+`           | A govulncheck finding                                 |
-| `^\s*Found in: `                | The module or package version govulncheck found it in |
-| `^\s*Fixed in: `                | The version that fixes it                             |
-| `^panic: `                      | A Go panic                                            |
+| `^\s*Found in:`                | The module or package version govulncheck found it in |
+| `^\s*Fixed in:`                | The version that fixes it                             |
+| `^panic:`                      | A Go panic                                            |
 
 A log matching none of them falls back to the last 5 non-blank lines before its first `make: ***` or `Error:` line. `failure_patterns` adds to the list, so a project whose test runner prints `ERROR <name>` adds `'^ERROR '`; a pattern that does not compile is refused at load. Those lines are what the [`gate_refused`](automation.md#drive---json) park carries when the merge gate then blames the diff: its reason names the check and the first line, its `detail` is `code`, its `evidence` is the lines, and the body sent back to the item adds them and the check's URL under the merge gate's output.
 
@@ -1056,15 +1075,15 @@ Sends to different destinations do not wait on each other or on the drive: each 
 
 An ntfy message carries `Title: drover: <project> <id>` (`drover: <project>` for an event with no item, and for a coalesced or held message), the routed `Priority`, `Tags: robot`, and a body written for its event:
 
-| Event                                | Body                                                                                                                                                   |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `started`                            | The drive id, the queue in order, `--jobs` above 1, and the deadline or `no deadline`.                                                                 |
-| `merged`                             | The pull request's number and title.                                                                                                                   |
-| `parked`                             | The park, its detail and reason, then up to 5 lines of the park's evidence, which for a `gate_refused` park are the lines its check's log says failed. |
+| Event                                | Body                                                                                                                                                                                                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `started`                            | The drive id, the queue in order, `--jobs` above 1, and the deadline or `no deadline`.                                                                                                                                                                                    |
+| `merged`                             | The pull request's number and title.                                                                                                                                                                                                                                      |
+| `parked`                             | The park, its detail and reason, then up to 5 lines of the park's evidence, which for a `gate_refused` park are the lines its check's log says failed.                                                                                                                    |
 | `needs_operator`, `needs_supervisor` | `<action>: <run>`, the action and the command to run. A `usage_admission` `needs_operator` carries `holds`, each usage hold the reading crosses with its `window`, `reason` and `resets_at`, the one taken first; with two or more, `run` says what each resume releases. |
-| `usage_warning`                      | The window, the percent of it left and its reset in local time.                                                                                        |
-| `exit`                               | The summary below.                                                                                                                                     |
-| any other                            | A line naming what happened: the stage, the check, the finding, the position.                                                                          |
+| `usage_warning`                      | The window, the percent of it left and its reset in local time.                                                                                                                                                                                                           |
+| `exit`                               | The summary below.                                                                                                                                                                                                                                                        |
+| any other                            | A line naming what happened: the stage, the check, the finding, the position.                                                                                                                                                                                             |
 
 Where the event concerns a pull request drover recorded, the message sets ntfy's `Click` header to that pull request's URL, so tapping it opens the pull request. The repository address comes from one `gh repo view` per drive, the first time a message needs it.
 
@@ -1136,6 +1155,32 @@ iOS delivers a notification from a self-hosted server instantly only when that s
 ### Migrating from `[supervise]`
 
 `[supervise] notify` and `[supervise.ntfy]` are refused at load. `scripts/migrate-notify.sh <file>`, in the drover repository, rewrites either in place in a project or per-user config: `notify = [...]` becomes a `command` destination named `command` routed `{ needs_operator = "default" }`, and `[supervise.ntfy]` an `ntfy` destination named `ntfy` carrying its `url`, `token_file`, and each of its `events` at its `priority`. It changes only those lines, writes through a temp file and a rename, follows a symlink to the file it names, and leaves a file with neither key untouched. The old `notify` argv also ran on `usage_warning` and on the `resumed` that lifts a usage hold; add `usage_warning` to the migrated destination's `events` to keep hearing it.
+
+## `[t3]`
+
+Where the `drover t3` bridge finds a T3 Code server, and what it reads on the host beside it. Every key may sit in the per-user config, which is where a server serving every project belongs; a project's file overrides it key by key.
+
+| Key              | Default                                 | Meaning                                                                                                                                                                              |
+| ---------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `url`            | unset                                   | The server's MCP endpoint, such as `https://host.example.ts.net/mcp`. HTTPS, or `http://localhost` only: the bearer token rides every request, so any other address is a load error. |
+| `token_file`     | `~/.config/drover/t3-token`             | The OAuth grant `drover t3 login` writes, at mode 0600.                                                                                                                              |
+| `project`        | the drover project's own name           | The T3 Code project title threads are launched in. The bridge never creates a project: add it on the host with `t3 project add`.                                                     |
+| `poll`           | `2s`                                    | The bridge's step between reads of a running thread, as a Go duration. Each `t3_thread_wait` call waits up to three of them.                                                         |
+| `provider_logs`  | `~/.t3/userdata/logs/provider`          | The directory T3 Code writes each thread's provider event log to. The bridge reads turns, tokens, cost and the rate-limit reading there, because no MCP response carries them.       |
+| `tested_version` | `0.1.2`, the release this build records | The T3 Code version the bridge was last verified against. `drover check` reports `BRIDGE VERSION` when the server's `initialize` names another.                                      |
+
+```toml
+[t3]
+url           = "https://mac-studio.example.ts.net/mcp"
+token_file    = "~/.config/drover/t3-token"
+project       = "drover"
+poll          = "2s"
+provider_logs = "~/.t3/userdata/logs/provider"
+```
+
+The provider event log is the one part of the bridge a T3 release can break without an error from the MCP server: it is T3's internal format, named `events.<thread id with ":" as "-">.log`, each line `[<time>] <tag>: <json>`. When it is missing, unreadable, or holds no Claude SDK `result` by the end of a run (a Codex thread, or a release that moved it), the bridge's log carries a `usage_unavailable` line and its result carries no counts. `drover drive --dry-run` then says `usage_admission` is blind for that runner, and a drive on it refuses to start while `[usage.weekly]` sets a level, unless `--allow-blind-usage` is passed. `tested_version` is how `drover check` says the format may have moved before a drive finds out.
+
+`drover check` reads this table only on the T3 host, the one holding `provider_logs`: there it reports `BRIDGE SIGNED OUT` for an unset `url` or a grant the server will not take, `BRIDGE UNREACHABLE` for a server that does not answer `initialize` within 5 seconds, and `BRIDGE VERSION`. A CI host declaring the same runners is not the T3 host and reports none of them.
 
 ## Worked example
 

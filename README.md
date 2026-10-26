@@ -125,7 +125,7 @@ drover check                  # exit 0 or a finding that names what to fix
 
 `drover <command> --help` carries the reasoning behind each, a worked `Examples:` block, and a `Safety:` line naming what that command writes, resolved against this project's own paths, plus an `Actor:` line on the ten that refuse inside a session. The root listing groups them by kind, not in lifecycle order; [Lifecycle](docs/lifecycle.md) is the order an item moves through them in. Ids are bare (`B1`); the padded form (`B01`) belongs to filenames only, and a padded id is refused with the bare form spelled out.
 
-Exit `0` clean, `1` drover could not answer, `2` findings against the project (`check`), `3` a rule drover enforces refused the operation. `--json` is on `status`, `show`, `unaudited`, `drive`, `drives`, `attach`, `check`, `follow-ups`, `intake --list`, `projects`, `skills` and `report`; [Automation](docs/automation.md#--json) carries every shape.
+Exit `0` clean, `1` drover could not answer, `2` findings against the project (`check`), `3` a rule drover enforces refused the operation. `--json` is on `status`, `show`, `unaudited`, `drive`, `drives`, `attach`, `check`, `follow-ups`, `intake --list`, `projects`, `skills`, `t3 discover` and `report`; [Automation](docs/automation.md#--json) carries every shape.
 
 ## Documentation
 

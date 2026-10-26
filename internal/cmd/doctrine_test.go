@@ -328,17 +328,17 @@ func TestEveryCopyOfTheAuditPositionAgrees(t *testing.T) {
 	}
 }
 
-// Every [usage] key this build reads is documented where an operator looks for
-// it. The keys are walked off the Config types, so a key added there and not to
-// the page fails here rather than reading as undocumented silence.
-func TestEveryUsageKeyIsInTheConfigurationReference(t *testing.T) {
+// Every [usage] and [t3] key this build reads is documented where an operator
+// looks for it. The keys are walked off the Config types, so a key added there
+// and not to the page fails here rather than reading as undocumented silence.
+func TestEveryUsageAndT3KeyIsInTheConfigurationReference(t *testing.T) {
 	b, err := os.ReadFile("../../docs/configuration.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc := string(b)
 	for _, k := range config.Keys() {
-		if !strings.HasPrefix(k.Dotted, "usage.") {
+		if !strings.HasPrefix(k.Dotted, "usage.") && !strings.HasPrefix(k.Dotted, "t3.") {
 			continue
 		}
 		if !strings.Contains(doc, "`"+k.Name+"`") {

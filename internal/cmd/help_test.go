@@ -95,7 +95,7 @@ func jsonCommands() []string {
 				// intake writes; only its --list form reads, and --json rides on it.
 				out = append(out, "intake --list")
 			case c.Flags().Lookup("json") != nil:
-				out = append(out, c.Name())
+				out = append(out, strings.TrimPrefix(c.CommandPath(), root.Name()+" "))
 			}
 			walk(c)
 		}
@@ -114,7 +114,13 @@ func TestJSONCommandsShowASample(t *testing.T) {
 		t.Fatal("no command carries --json; the walk found nothing to check")
 	}
 	for _, name := range names {
-		c, _, err := root.Find(strings.Fields(name)[:1])
+		var path []string
+		for _, f := range strings.Fields(name) {
+			if !strings.HasPrefix(f, "-") {
+				path = append(path, f)
+			}
+		}
+		c, _, err := root.Find(path)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}

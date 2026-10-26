@@ -126,6 +126,25 @@ func ambient() seal {
 	return seal{}
 }
 
+// OwnSession reports whether this process is the session a drover launch
+// started rather than something running inside one: its parent is the drover
+// that wrote the marker in its tree, and the marker names the session the
+// environment carries. A runner that is itself drover (the t3 bridge) needs
+// the difference, because Run seals the session it starts and the bridge must
+// still run as that session while refusing to be launched from inside one.
+func OwnSession() bool {
+	wd, err := os.Getwd()
+	if err != nil {
+		return false
+	}
+	_, m, ok := FindMarker(wd)
+	if !ok || m.PID != os.Getppid() {
+		return false
+	}
+	env := os.Getenv(EnvSession)
+	return env != "" && env == m.Session
+}
+
 // SealedBy is the marker that seals this process, when a marker rather than the
 // environment does. A refusal reads it to say what sealed a person's terminal,
 // because "drover launched this session" is not true of one.

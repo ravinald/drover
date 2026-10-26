@@ -188,6 +188,21 @@ Open one for a decision and close it when the decision is made. For example:
 
 The next park gets a new session with an empty context. One session kept open across days of drives becomes the most expensive thing on the account without doing any of the work: [Long-lived sessions](cost.md#long-lived-sessions) explains why.
 
+## T3 Code threads
+
+Any of the modes above can run its stages as [T3 Code](https://github.com/pingdotgg/t3code) threads instead of a CLI drover execs, so each stage's transcript and checkpoints are readable from the T3 Code app on a phone while it runs. drover still assembles the prompt, owns the branch and worktree, reads the result and writes the ledger. The [`t3` runner](configuration.md#t3-code-threads) is `drover t3 run`, which launches the thread over the server's MCP endpoint, follows it to the end and prints a log drover reads like any other runner's. The bridge runs on the same host as the T3 Code server, because that is where it reads usage from.
+
+Setting the host up takes four steps:
+
+1. Add each drover project as a T3 Code project on the host: `t3 project add --title drover <checkout root>`. The bridge never creates one, and a project it cannot find stops the stage with an error naming that command. The title is what `[t3] project` names, the drover project's own name by default.
+2. Set [`[t3] url`](configuration.md#t3) to the server's `/mcp` address, in the per-user config.
+3. Run `drover t3 login`. The sign-in page asks for a pairing code, which you mint on the host with `t3 auth pairing create`, and for an access level. Choose Full access for the grant drive stages run under: a Supervised thread waits on approvals, and nobody answers them during a drive. `drover t3 discover` then prints the server's version and its tools.
+4. Run `drover check`. On the T3 host it reports a missing or refused grant as `BRIDGE SIGNED OUT`, and a server version the bridge was not tested against as `BRIDGE VERSION`.
+
+On the phone, each stage is a thread in the project, titled from the first line of its prompt, with its transcript, its tool calls and a checkpoint at the end of each run. A thread outlives its stage. When drover stops a stage early, the bridge interrupts the run it launched and leaves the thread readable as the record of what happened; it never touches a thread it did not launch. `drover t3 thread --stop <id>` interrupts one by hand.
+
+Usage tracking goes through one more hop. No MCP response carries turns, tokens, cost or the rate-limit reading, so the bridge reads them from the provider event log T3 Code's Claude driver writes on the host, and prints them in the shape a direct `claude` log carries. `usage_admission`, `[usage.weekly]` and `drover report` then treat a T3 Claude thread like a direct session. That log is T3's internal format and is documented nowhere, so a T3 release can move it without the MCP server reporting an error. When it does, or for a Codex thread that writes no such log, the bridge says `usage_unavailable` rather than reporting zeros, `drover drive --dry-run` says `usage_admission` is blind for that runner, and a drive on it refuses to start while `[usage.weekly]` sets a level, unless you pass `--allow-blind-usage`. A thread costs more context than an exec, too: [Cost](cost.md#t3-code-threads) has the measurement.
+
 ## Recommended setup
 
 Most projects end up with the following arrangement once the first few items have proved the merge gate:

@@ -6,61 +6,66 @@ Every word drover prints, or reads back from you, with what it means today. One 
 
 Each command, as typed after `drover`.
 
-| Term                    | Meaning                                                                                                      |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `accept`                | Deletes the stop marker from a scaffold, making it runnable.                                                 |
-| `agents`                | Prints the agent instructions generated from this project's config; `--write` writes them into a file.       |
-| `attach`                | Prints a drive's events from the start and follows them until the drive exits.                               |
-| `amend`                 | Replaces an accepted, unmerged item's numbered requirements and keeps the old list.                          |
-| `audit`                 | Appends an audit row: the audit level, who wrote the code (`--code-by`) and who looked (`--reviewer`).       |
-| `check`                 | Validates the config, the backlog, the ledger and the paths between them; exits 2 on findings.               |
-| `close-changes`         | Replaces the sent-back section of an item with a closed note, writing no request-changes row.                |
-| `completion`            | Prints a shell completion script; hidden from the listing.                                                   |
-| `completion bash`       | The completion script for bash.                                                                              |
-| `completion fish`       | The completion script for fish.                                                                              |
-| `completion powershell` | The completion script for PowerShell.                                                                        |
-| `completion zsh`        | The completion script for zsh.                                                                               |
-| `config`                | Prints the `.drover.toml` this binary would write for the project today.                                     |
-| `draft`                 | Assembles the prompt for writing a scaffold's numbered requirements.                                         |
-| `drive`                 | Walks the ready queue unattended: implement, review, update branch, merge gate and merge.                    |
-| `drives`                | Lists every drive this project has run, newest first, and what each item came to.                            |
-| `finish`                | After a merge: appends the completion row, saves the report, writes to the tracker and returns to the trunk. |
-| `follow-up`             | Parent of `follow-up open` and `follow-up close`, which write to a file-backed follow-up list.               |
-| `follow-up close`       | Closes one follow-up by number.                                                                              |
-| `follow-up open`        | Files a follow-up against an owner item.                                                                     |
-| `follow-ups`            | Lists the open follow-ups: what the project knows is unresolved.                                             |
-| `help`                  | Prints help for any command.                                                                                 |
-| `init`                  | Writes a starting `.drover.toml`; `init --user` writes the per-user config instead.                          |
-| `init supervise`        | Walks the supervise actions by category and sets each one's policy, up to its ceiling.                       |
-| `intake`                | Turns a tracker issue into a scaffolded item; `intake --list` lists issues it could take in and has not.     |
-| `invariant`             | Appends a property every later pass must keep to the item's `## Invariants` section.                         |
-| `link`                  | Adds an issue number to the item's `closes` key, so `finish` answers whoever filed it.                       |
-| `mark-merged`           | Appends the completion row alone, for a merge recorded by hand.                                              |
-| `new`                   | Writes a scaffolded item with no tracker issue behind it.                                                    |
-| `notify`                | Sends a test event, or a sample of one `--event`, to each `[notify]` destination and prints each answer.     |
-| `open-pr`               | Runs the merge gate and opens the pull request for a branch the review passed.                               |
-| `projects`              | Lists every project drover has been pointed at on this machine.                                              |
-| `report`                | Prints the run's self-report beside a requirements checklist; `--save` writes it under `[paths] reports`.    |
-| `request-changes`       | Writes review findings into the item body so the next run reads them.                                        |
-| `resolve`               | Records the disposition of one issue the item's `closes` key names.                                          |
-| `review`                | Assembles the reviewer's prompt and, given a runner, launches a review session.                              |
-| `run`                   | Switches to the item's branch and hands its prompt to a runner; writes ledger stage `implement`.             |
-| `schema`                | Prints the JSON Schema for `.drover.toml`, or with `--frontmatter` the project's body contract.              |
-| `shelve`                | Moves a body to the shelf without recording it merged.                                                       |
-| `show`                  | Prints everything drover knows about one item.                                                               |
-| `signoff`               | Records that the operator met one `[operator]` requirement.                                                  |
-| `skills`                | Reports which guides the backlog references and which are vendored.                                          |
-| `split`                 | Scaffolds a new item for work the contract never named and adds it to this item's deps.                      |
-| `status`                | Prints every item, its state and its audit level.                                                            |
-| `supervise`             | Launches a supervising session that handles what `[supervise]` allows.                                       |
-| `touch`                 | Records a hand edit to an accepted item's prose as the operator's.                                           |
-| `unaccept`              | Restores the stop marker, returning an item to a scaffold.                                                   |
-| `unaudited`             | Lists merged items nobody audited, worst blast radius first.                                                 |
-| `unmark-merged`         | Appends a tombstone withdrawing a completion.                                                                |
-| `unshelve`              | Brings a shelved body back into the backlog.                                                                 |
-| `usage`                 | Records session token usage in the ledger, from run logs (`--backfill`) or transcripts (`--sync`).           |
-| `version`               | Prints the version, commit and build date.                                                                   |
-| `watch`                 | Blocks until a drive emits one of the named events, then prints it.                                          |
+| Term                    | Meaning                                                                                                              |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `accept`                | Deletes the stop marker from a scaffold, making it runnable.                                                         |
+| `agents`                | Prints the agent instructions generated from this project's config; `--write` writes them into a file.               |
+| `attach`                | Prints a drive's events from the start and follows them until the drive exits.                                       |
+| `amend`                 | Replaces an accepted, unmerged item's numbered requirements and keeps the old list.                                  |
+| `audit`                 | Appends an audit row: the audit level, who wrote the code (`--code-by`) and who looked (`--reviewer`).               |
+| `check`                 | Validates the config, the backlog, the ledger and the paths between them; exits 2 on findings.                       |
+| `close-changes`         | Replaces the sent-back section of an item with a closed note, writing no request-changes row.                        |
+| `completion`            | Prints a shell completion script; hidden from the listing.                                                           |
+| `completion bash`       | The completion script for bash.                                                                                      |
+| `completion fish`       | The completion script for fish.                                                                                      |
+| `completion powershell` | The completion script for PowerShell.                                                                                |
+| `completion zsh`        | The completion script for zsh.                                                                                       |
+| `config`                | Prints the `.drover.toml` this binary would write for the project today.                                             |
+| `draft`                 | Assembles the prompt for writing a scaffold's numbered requirements.                                                 |
+| `drive`                 | Walks the ready queue unattended: implement, review, update branch, merge gate and merge.                            |
+| `drives`                | Lists every drive this project has run, newest first, and what each item came to.                                    |
+| `finish`                | After a merge: appends the completion row, saves the report, writes to the tracker and returns to the trunk.         |
+| `follow-up`             | Parent of `follow-up open` and `follow-up close`, which write to a file-backed follow-up list.                       |
+| `follow-up close`       | Closes one follow-up by number.                                                                                      |
+| `follow-up open`        | Files a follow-up against an owner item.                                                                             |
+| `follow-ups`            | Lists the open follow-ups: what the project knows is unresolved.                                                     |
+| `help`                  | Prints help for any command.                                                                                         |
+| `init`                  | Writes a starting `.drover.toml`; `init --user` writes the per-user config instead.                                  |
+| `init supervise`        | Walks the supervise actions by category and sets each one's policy, up to its ceiling.                               |
+| `intake`                | Turns a tracker issue into a scaffolded item; `intake --list` lists issues it could take in and has not.             |
+| `invariant`             | Appends a property every later pass must keep to the item's `## Invariants` section.                                 |
+| `link`                  | Adds an issue number to the item's `closes` key, so `finish` answers whoever filed it.                               |
+| `mark-merged`           | Appends the completion row alone, for a merge recorded by hand.                                                      |
+| `new`                   | Writes a scaffolded item with no tracker issue behind it.                                                            |
+| `notify`                | Sends a test event, or a sample of one `--event`, to each `[notify]` destination and prints each answer.             |
+| `open-pr`               | Runs the merge gate and opens the pull request for a branch the review passed.                                       |
+| `projects`              | Lists every project drover has been pointed at on this machine.                                                      |
+| `report`                | Prints the run's self-report beside a requirements checklist; `--save` writes it under `[paths] reports`.            |
+| `request-changes`       | Writes review findings into the item body so the next run reads them.                                                |
+| `resolve`               | Records the disposition of one issue the item's `closes` key names.                                                  |
+| `review`                | Assembles the reviewer's prompt and, given a runner, launches a review session.                                      |
+| `run`                   | Switches to the item's branch and hands its prompt to a runner; writes ledger stage `implement`.                     |
+| `schema`                | Prints the JSON Schema for `.drover.toml`, or with `--frontmatter` the project's body contract.                      |
+| `shelve`                | Moves a body to the shelf without recording it merged.                                                               |
+| `show`                  | Prints everything drover knows about one item.                                                                       |
+| `signoff`               | Records that the operator met one `[operator]` requirement.                                                          |
+| `skills`                | Reports which guides the backlog references and which are vendored.                                                  |
+| `split`                 | Scaffolds a new item for work the contract never named and adds it to this item's deps.                              |
+| `status`                | Prints every item, its state and its audit level.                                                                    |
+| `supervise`             | Launches a supervising session that handles what `[supervise]` allows.                                               |
+| `t3`                    | The bridge to a T3 Code server, through the subcommands below.                                                       |
+| `t3 discover`           | Prints the T3 Code server's name, version and tool catalog.                                                          |
+| `t3 login`              | Signs drover in to the T3 Code server and writes `[t3] token_file`; `--check` only reports whether it can.           |
+| `t3 run`                | The runner bridge: launches one T3 Code thread with the prompt, follows it to the end and prints a log drover reads. |
+| `t3 thread`             | Launches a thread without following it (`--new`), or interrupts a thread's newest run (`--stop`).                    |
+| `touch`                 | Records a hand edit to an accepted item's prose as the operator's.                                                   |
+| `unaccept`              | Restores the stop marker, returning an item to a scaffold.                                                           |
+| `unaudited`             | Lists merged items nobody audited, worst blast radius first.                                                         |
+| `unmark-merged`         | Appends a tombstone withdrawing a completion.                                                                        |
+| `unshelve`              | Brings a shelved body back into the backlog.                                                                         |
+| `usage`                 | Records session token usage in the ledger, from run logs (`--backfill`) or transcripts (`--sync`).                   |
+| `version`               | Prints the version, commit and build date.                                                                           |
+| `watch`                 | Blocks until a drive emits one of the named events, then prints it.                                                  |
 
 ## Flags
 
@@ -133,42 +138,42 @@ The state `status` prints and `--json` carries as `state`.
 
 Why drive stopped an item (ledger and `--json` `park`), and the underlying failure (`detail`). A review result can also be the park.
 
-| Term                      | Meaning                                                                               |
-| ------------------------- | ------------------------------------------------------------------------------------- |
-| `gate_refused`            | The merge gate exited non-zero for this diff.                                         |
-| `gate_unrunnable`         | The merge gate, the verify command or the numbered-files check would not start.       |
-| `trunk_conflict`          | Merging the trunk into the branch conflicted.                                         |
-| `trunk_red`               | The trunk fails the verify command on its own.                                        |
-| `forge_down`              | The merge gate failed for a reason the diff did not cause, and the drive stopped.     |
-| `protected_paths`         | The branch changes a `[drive] protected_paths` file, so the merge waits for a person. |
-| `infra_failure`           | A forge check failed on infrastructure rather than code.                              |
-| `stopped`                 | The drive stopped or was interrupted while this item ran.                             |
-| `interrupted`             | A signal stopped the session.                                                         |
-| `stale_citations`         | Lines the item cites are missing from the trunk.                                      |
-| `awaiting_signoff`        | The pull request waits on an `[operator]` requirement.                                |
-| `blocked_on_deps`         | The pull request waits on work a review split out.                                    |
-| `runner_fault`            | The runner failed on its service or account, not on the work.                         |
-| `push_failed`             | The branch would not push.                                                            |
-| `open_pr_failed`          | The merge gate passed and the pull request would not open.                            |
-| `merge_failed`            | The forge refused or failed the merge.                                                |
-| `ledger_unwritable`       | The ledger refused a row drive needed to record.                                      |
-| `no_commits`              | The run committed nothing.                                                            |
-| `uncommitted_work`        | The run left uncommitted work in its worktree.                                        |
-| `worktree_failed`         | The item's worktree could not be opened, linked or set up.                            |
-| `hand_edited`             | The body changed outside drover before any session launched.                          |
-| `branch_failed`           | A git step on the item's branch failed.                                               |
-| `implement_died`          | The implement session left no result.                                                 |
-| `implement_unreadable`    | The implement session left a stream drover cannot read.                               |
-| `held`                    | The merge was withheld and the pull request left open.                                |
-| `runner_exit`             | Detail: the runner process exited non-zero.                                           |
-| `tool_denied`             | Detail: the session was refused a tool it needed.                                     |
-| `background_left_running` | Detail: the session left a background process running.                                |
-| `stream_cut`              | Detail: the event stream ended mid-session.                                           |
-| `auth`                    | Detail: the runner had no credentials the service accepts.                            |
-| `oom`                     | Detail: the session was killed for memory.                                            |
-| `push_hook`               | Detail: a pre-push hook refused the branch.                                           |
-| `push_network`            | Detail: the push failed on the network.                                               |
-| `unknown`                 | Detail: drover could not classify the failure.                                        |
+| Term                      | Meaning                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------ |
+| `gate_refused`            | The merge gate exited non-zero for this diff.                                                    |
+| `gate_unrunnable`         | The merge gate, the verify command or the numbered-files check would not start.                  |
+| `trunk_conflict`          | Merging the trunk into the branch conflicted.                                                    |
+| `trunk_red`               | The trunk fails the verify command on its own.                                                   |
+| `forge_down`              | The merge gate failed for a reason the diff did not cause, and the drive stopped.                |
+| `protected_paths`         | The branch changes a `[drive] protected_paths` file, so the merge waits for a person.            |
+| `infra_failure`           | A forge check failed on infrastructure rather than code.                                         |
+| `stopped`                 | The drive stopped or was interrupted while this item ran.                                        |
+| `interrupted`             | A signal stopped the session.                                                                    |
+| `stale_citations`         | Lines the item cites are missing from the trunk.                                                 |
+| `awaiting_signoff`        | The pull request waits on an `[operator]` requirement.                                           |
+| `blocked_on_deps`         | The pull request waits on work a review split out.                                               |
+| `runner_fault`            | The runner failed on its service or account, not on the work, or a T3 Code run did not complete. |
+| `push_failed`             | The branch would not push.                                                                       |
+| `open_pr_failed`          | The merge gate passed and the pull request would not open.                                       |
+| `merge_failed`            | The forge refused or failed the merge.                                                           |
+| `ledger_unwritable`       | The ledger refused a row drive needed to record.                                                 |
+| `no_commits`              | The run committed nothing.                                                                       |
+| `uncommitted_work`        | The run left uncommitted work in its worktree.                                                   |
+| `worktree_failed`         | The item's worktree could not be opened, linked or set up.                                       |
+| `hand_edited`             | The body changed outside drover before any session launched.                                     |
+| `branch_failed`           | A git step on the item's branch failed.                                                          |
+| `implement_died`          | The implement session left no result.                                                            |
+| `implement_unreadable`    | The implement session left a stream drover cannot read.                                          |
+| `held`                    | The merge was withheld and the pull request left open.                                           |
+| `runner_exit`             | Detail: the runner process exited non-zero.                                                      |
+| `tool_denied`             | Detail: the session was refused a tool it needed.                                                |
+| `background_left_running` | Detail: the session left a background process running.                                           |
+| `stream_cut`              | Detail: the event stream ended mid-session.                                                      |
+| `auth`                    | Detail: the runner had no credentials the service accepts.                                       |
+| `oom`                     | Detail: the session was killed for memory.                                                       |
+| `push_hook`               | Detail: a pre-push hook refused the branch.                                                      |
+| `push_network`            | Detail: the push failed on the network.                                                          |
+| `unknown`                 | Detail: drover could not classify the failure.                                                   |
 
 ## Review results
 
@@ -206,43 +211,43 @@ What one item came to, on drive's end row and in `drive --json` `outcome`.
 
 Ledger stage rows, drive event stages, and the events `drive --events`, `attach` and `watch` emit.
 
-| Term               | Meaning                                                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `implement`        | Ledger stage: `run` handed the prompt to a runner.                                                                 |
-| `review`           | Ledger and event stage: a review session launched.                                                                 |
-| `interactive`      | `status` usage key: the `by_stage` entry for usage rows no stage launched, a Claude Code session the operator ran. |
-| `update_branch`    | Event stage: drive merged the trunk into the branch and ran the verify command.                                    |
-| `gate`             | Event stage: the merge gate read the branch head, or a resume reran the verify command.                            |
-| `pr`               | Event stage: drive opened the pull request.                                                                        |
-| `merge`            | Event stage: drive asked the forge to merge.                                                                       |
-| `finish`           | Ledger and event stage: the finish step after a merge.                                                             |
-| `started`          | Event: the drive holds its lease and read its queue; names the queue, `--jobs` and any deadline.                   |
-| `queued`           | Event: an item joined the queue.                                                                                   |
-| `dispatched`       | Event: an item left the queue for a session.                                                                       |
-| `skipped`          | Event: an item left the queue without being attempted, with the state and the reason.                              |
-| `preflight`        | Event: a check drive runs before launching, such as `stale_citations`.                                             |
-| `stage`            | Event: an item reached one of the stages in this table.                                                            |
-| `check`            | Event: drive classified a red forge check on a pushed head.                                                        |
-| `parked`           | Event: an item parked.                                                                                             |
-| `filed`            | Event: a session filed a follow-up, with its coverage.                                                             |
-| `needs_operator`   | Event: an action stopped at operator policy and waits on a person.                                                 |
-| `needs_supervisor` | Event: an action waits on the supervising session.                                                                 |
-| `merged`           | Event: an item's pull request merged.                                                                              |
-| `paused`           | Event: the drive paused.                                                                                           |
-| `resumed`          | Event: the drive resumed, naming what changed.                                                                     |
+| Term               | Meaning                                                                                                                |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `implement`        | Ledger stage: `run` handed the prompt to a runner.                                                                     |
+| `review`           | Ledger and event stage: a review session launched.                                                                     |
+| `interactive`      | `status` usage key: the `by_stage` entry for usage rows no stage launched, a Claude Code session the operator ran.     |
+| `update_branch`    | Event stage: drive merged the trunk into the branch and ran the verify command.                                        |
+| `gate`             | Event stage: the merge gate read the branch head, or a resume reran the verify command.                                |
+| `pr`               | Event stage: drive opened the pull request.                                                                            |
+| `merge`            | Event stage: drive asked the forge to merge.                                                                           |
+| `finish`           | Ledger and event stage: the finish step after a merge.                                                                 |
+| `started`          | Event: the drive holds its lease and read its queue; names the queue, `--jobs` and any deadline.                       |
+| `queued`           | Event: an item joined the queue.                                                                                       |
+| `dispatched`       | Event: an item left the queue for a session.                                                                           |
+| `skipped`          | Event: an item left the queue without being attempted, with the state and the reason.                                  |
+| `preflight`        | Event: a check drive runs before launching, such as `stale_citations`.                                                 |
+| `stage`            | Event: an item reached one of the stages in this table.                                                                |
+| `check`            | Event: drive classified a red forge check on a pushed head.                                                            |
+| `parked`           | Event: an item parked.                                                                                                 |
+| `filed`            | Event: a session filed a follow-up, with its coverage.                                                                 |
+| `needs_operator`   | Event: an action stopped at operator policy and waits on a person.                                                     |
+| `needs_supervisor` | Event: an action waits on the supervising session.                                                                     |
+| `merged`           | Event: an item's pull request merged.                                                                                  |
+| `paused`           | Event: the drive paused.                                                                                               |
+| `resumed`          | Event: the drive resumed, naming what changed.                                                                         |
 | `config_changed`   | Event: the `.drover.toml` on disk differs from the one the running drive uses, which it does not apply until a resume. |
-| `reexec_waiting`   | Event: a re-exec has waited past a minute on running items that do not hold.                                       |
-| `usage_warning`    | Event: the account crossed a `[usage]` notify level; sent once per window per reset, and it pauses nothing.        |
-| `exit`             | Event: the drive ended, with a summary of what it merged and what it left undone and why.                          |
-| `exit_undone`      | `[notify]` routing key: an exit that left an item parked, skipped or held.                                         |
-| `held`             | Event on a `[notify]` command's stdin alone: what quiet hours held, sent as the window ends.                       |
-| `answered`         | Event on a `[notify]` command's stdin alone: a reminded `needs_operator` was answered while the drive ran.         |
-| round              | One implement session and the review that reads it.                                                                |
-| `infra`            | Check class: a red check blamed on the forge's infrastructure.                                                     |
-| `trunk`            | Check class: a red check the trunk fails too.                                                                      |
-| `code`             | Check class: a red check blamed on the diff.                                                                       |
-| `none`             | Check class: no workflow reported on the head.                                                                     |
-| `green`            | Check class: every check passed.                                                                                   |
+| `reexec_waiting`   | Event: a re-exec has waited past a minute on running items that do not hold.                                           |
+| `usage_warning`    | Event: the account crossed a `[usage]` notify level; sent once per window per reset, and it pauses nothing.            |
+| `exit`             | Event: the drive ended, with a summary of what it merged and what it left undone and why.                              |
+| `exit_undone`      | `[notify]` routing key: an exit that left an item parked, skipped or held.                                             |
+| `held`             | Event on a `[notify]` command's stdin alone: what quiet hours held, sent as the window ends.                           |
+| `answered`         | Event on a `[notify]` command's stdin alone: a reminded `needs_operator` was answered while the drive ran.             |
+| round              | One implement session and the review that reads it.                                                                    |
+| `infra`            | Check class: a red check blamed on the forge's infrastructure.                                                         |
+| `trunk`            | Check class: a red check the trunk fails too.                                                                          |
+| `code`             | Check class: a red check blamed on the diff.                                                                           |
+| `none`             | Check class: no workflow reported on the head.                                                                         |
+| `green`            | Check class: every check passed.                                                                                       |
 
 ## Update-branch results
 
@@ -281,6 +286,9 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `UNREADABLE`          | A backlog file did not parse.                                                         |
 | `BAD VALUE`           | An item's value fails what `[frontmatter]` declares the key may hold.                 |
 | `BAD RUNNER`          | A `[runners]` entry's argv is one its binary cannot use.                              |
+| `BRIDGE SIGNED OUT`   | The `t3` bridge has no grant the T3 Code server accepts.                              |
+| `BRIDGE UNREACHABLE`  | The T3 Code server did not answer `initialize`.                                       |
+| `BRIDGE VERSION`      | The T3 Code server is not the version the bridge was tested on.                       |
 | `BAD LEDGER`          | A ledger line is not valid JSON.                                                      |
 | `ORPHAN ROW`          | The ledger names an id whose body is missing or unreadable.                           |
 | `SHELF CLASH`         | One id has a body in both the backlog and the shelf.                                  |
@@ -424,6 +432,7 @@ The `.drover.toml` sections, with the keys whose names carry drover vocabulary. 
 | `[paths] register`           | The follow-up list file, under `[register] backend = "file"`.                                                                                                                                           |
 | `[ids]`                      | Namespaces, the id allocator and `planned_max`.                                                                                                                                                         |
 | `[frontmatter]`              | The frontmatter keys an item may carry and what each may hold.                                                                                                                                          |
+| `[t3]`                       | Where the `t3` bridge finds the T3 Code server, its token file, the project, and T3's provider event logs.                                                                                              |
 | `[verify]`                   | The verify command: `default`, plus per-key commands an item can select.                                                                                                                                |
 | `[status]`                   | Status columns, timezone and render targets.                                                                                                                                                            |
 | `[severity]`                 | The frontmatter key holding severity and its ranks.                                                                                                                                                     |
@@ -456,41 +465,44 @@ The `.drover.toml` sections, with the keys whose names carry drover vocabulary. 
 
 The nouns the docs and the help use throughout.
 
-| Term                          | Meaning                                                                                        |
-| ----------------------------- | ---------------------------------------------------------------------------------------------- |
-| item                          | One markdown work file.                                                                        |
-| backlog                       | The directory of items.                                                                        |
-| shelf                         | The directory of items set aside unmerged.                                                     |
-| ledger                        | The append-only JSONL history of launches, completions, audits and parks.                      |
-| head row, body row, stage row | The ledger's row kinds: a completion, an audit or disposition, a launch.                       |
-| contract                      | An item's numbered requirements.                                                               |
-| numbered requirement          | One top-level `N.` line in an item body; `report --save` turns each into a checkbox.           |
-| `[operator]` requirement      | A requirement only a person can meet, met with `signoff`.                                      |
-| stop marker                   | The line that keeps a scaffold unrunnable until `accept` removes it.                           |
-| prompt                        | The text drover hands a session: implement, review, draft or supervise.                        |
-| runner                        | A configured agent CLI.                                                                        |
-| session                       | One runner process.                                                                            |
-| run                           | One implement session, and the command that starts it.                                         |
-| review pass                   | One review session and the result drive read from it.                                          |
-| self-report                   | A run's own summary of its work; `report` prints it.                                           |
-| verify command                | The item's own check, from `[verify]`: rendered into the prompt and run after a branch update. |
-| merge gate                    | `[drive] merge_gate`: the command whose exit decides whether a branch merges.                  |
-| update branch                 | Merging the trunk into an item's branch and running its verify command again.                  |
-| trunk                         | The main branch, `[run] trunk`.                                                                |
-| forge                         | The code host, GitHub or similar.                                                              |
-| mirror                        | Publishing items as tracker issues.                                                            |
-| park                          | Drive stopping an item for a reason a person reads.                                            |
-| drive                         | One unattended pass over a queue of items.                                                     |
-| supervisor                    | The session `drover supervise` launches.                                                       |
-| operator                      | The person running drover.                                                                     |
-| session marker                | `.drover/session`: the actor, session id and root a launch leaves in its tree.                 |
-| `DROVER_ACTOR=operator`       | A person steering from inside a sealed tree; seals nothing, overrides a marker.                |
-| worktree                      | The separate checkout drive gives each item.                                                   |
-| lease                         | The record of which drover command holds a checkout; it expires.                               |
-| hold                          | A paused item waiting at a stage boundary, or a merge withheld.                                |
-| notify level                  | `notify_remaining`: the percent of a window left at which drive sends one `usage_warning`.     |
-| fail-safe level               | `pause_remaining`: the percent of a window left at which `usage_admission` holds the drive.    |
-| sent-back section             | The block in an item body that `request-changes` writes, replaced on each round.               |
-| `## Invariants`               | The item body section `invariant` appends to.                                                  |
-| planned, intake               | The status sections for ids without a namespace prefix, and ids with one.                      |
-| stem, slug                    | An item filename's padded id and its title part.                                               |
+| Term                          | Meaning                                                                                                                         |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| item                          | One markdown work file.                                                                                                         |
+| backlog                       | The directory of items.                                                                                                         |
+| shelf                         | The directory of items set aside unmerged.                                                                                      |
+| ledger                        | The append-only JSONL history of launches, completions, audits and parks.                                                       |
+| head row, body row, stage row | The ledger's row kinds: a completion, an audit or disposition, a launch.                                                        |
+| contract                      | An item's numbered requirements.                                                                                                |
+| numbered requirement          | One top-level `N.` line in an item body; `report --save` turns each into a checkbox.                                            |
+| `[operator]` requirement      | A requirement only a person can meet, met with `signoff`.                                                                       |
+| stop marker                   | The line that keeps a scaffold unrunnable until `accept` removes it.                                                            |
+| prompt                        | The text drover hands a session: implement, review, draft or supervise.                                                         |
+| runner                        | A configured agent CLI.                                                                                                         |
+| T3 Code thread                | A stage run by the `t3` bridge: one thread on a T3 Code server, followed to the end of its run.                                 |
+| provider event log            | The file T3 Code's Claude driver writes per thread, where the `t3` bridge reads turns, tokens, cost and the rate-limit reading. |
+| `usage_unavailable`           | A `t3` log line saying the provider event log yielded no usage, and why.                                                        |
+| session                       | One runner process.                                                                                                             |
+| run                           | One implement session, and the command that starts it.                                                                          |
+| review pass                   | One review session and the result drive read from it.                                                                           |
+| self-report                   | A run's own summary of its work; `report` prints it.                                                                            |
+| verify command                | The item's own check, from `[verify]`: rendered into the prompt and run after a branch update.                                  |
+| merge gate                    | `[drive] merge_gate`: the command whose exit decides whether a branch merges.                                                   |
+| update branch                 | Merging the trunk into an item's branch and running its verify command again.                                                   |
+| trunk                         | The main branch, `[run] trunk`.                                                                                                 |
+| forge                         | The code host, GitHub or similar.                                                                                               |
+| mirror                        | Publishing items as tracker issues.                                                                                             |
+| park                          | Drive stopping an item for a reason a person reads.                                                                             |
+| drive                         | One unattended pass over a queue of items.                                                                                      |
+| supervisor                    | The session `drover supervise` launches.                                                                                        |
+| operator                      | The person running drover.                                                                                                      |
+| session marker                | `.drover/session`: the actor, session id and root a launch leaves in its tree.                                                  |
+| `DROVER_ACTOR=operator`       | A person steering from inside a sealed tree; seals nothing, overrides a marker.                                                 |
+| worktree                      | The separate checkout drive gives each item.                                                                                    |
+| lease                         | The record of which drover command holds a checkout; it expires.                                                                |
+| hold                          | A paused item waiting at a stage boundary, or a merge withheld.                                                                 |
+| notify level                  | `notify_remaining`: the percent of a window left at which drive sends one `usage_warning`.                                      |
+| fail-safe level               | `pause_remaining`: the percent of a window left at which `usage_admission` holds the drive.                                     |
+| sent-back section             | The block in an item body that `request-changes` writes, replaced on each round.                                                |
+| `## Invariants`               | The item body section `invariant` appends to.                                                                                   |
+| planned, intake               | The status sections for ids without a namespace prefix, and ids with one.                                                       |
+| stem, slug                    | An item filename's padded id and its title part.                                                                                |
