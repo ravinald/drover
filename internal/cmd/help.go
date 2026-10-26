@@ -112,7 +112,7 @@ var classified = map[string]classification{
 	"agents": {group: groupSetup, class: readOnly, who: either,
 		effect: "Prints to stdout. --write <path> replaces only the text between the markers in that file, and --pointer prints the stanza that sends AGENTS.md there."},
 	"check": {group: groupSetup, class: readOnly, who: either,
-		effect: "Reads only. Where a [runners] entry is the t3 bridge and this host holds [t3] provider_logs, reads [t3] token_file and asks [t3] url for its version with one initialize call, bounded at 5s. Exits 2 on a finding, which is what a CI job keys on."},
+		effect: "Reads only. Where a [runners] entry is the t3 bridge and this host holds [t3] provider_logs, reads [t3] token_file, renews an expired grant at the token endpoint it names without writing the file, and asks [t3] url for its version with one initialize call, bounded at 5s together. The one write is a renewal whose server rotated the refresh token: the grant is written back to [t3] token_file, because the refresh token on disk is then spent. Exits 2 on a finding, which is what a CI job keys on."},
 	"config": {group: groupSetup, class: readOnly, who: either,
 		effect: "Prints to stdout. Reads .drover.toml without validating it, so it answers for a config Load would refuse. There is no --write: no TOML round-trip preserves the comments that carry a project's reasoning. --stamp rewrites the drover_version line in .drover.toml and no other."},
 
