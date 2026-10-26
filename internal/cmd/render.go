@@ -435,6 +435,7 @@ func (s *session) templateFuncs(now time.Time, loc *time.Location) template.Func
 		"class":   s.class,
 		"groups":  s.groups,
 		"done":    doneNewest,
+		"open":    openItems,
 		"held":    heldAt,
 		"pausing": pausingCount,
 		"ago": func(v any) string {
@@ -814,6 +815,17 @@ func doneNewest(items any) []any {
 	out := make([]any, len(rows))
 	for i, r := range rows {
 		out[i] = r.obj
+	}
+	return out
+}
+
+// openItems is every item not merged, in backlog order.
+func openItems(items any) []any {
+	out := []any{}
+	for _, it := range objects(items) {
+		if str(it["state"]) != stateDone {
+			out = append(out, it)
+		}
 	}
 	return out
 }

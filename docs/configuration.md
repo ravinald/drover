@@ -801,7 +801,7 @@ With `weekly_budget` as well, the report gains `budget` and `budget_used`, and b
 
 The limit is per account, so `budget_used` sums every project in the [project registry](#the-project-registry), not only the one `status` runs in, counting each ledger once. A registered project whose config or ledger would not read is named in `budget_unread` and left out of the fraction, rather than counted as zero; a registered root that is gone is not a project and is skipped, as `status --all-projects` skips it. Set the table in the per-user file, where one budget serves every project, unless a project wants its own thresholds.
 
-`session_max_hours` and `context_warn` decide which sessions `status` names under [`long_sessions`](automation.md#usage), and both templates list them under "Needs you" with the reason each one qualified. A session open for days at a context near a million tokens is the opposite of the short, well-defined unit of work drover hands a run.
+`session_max_hours` and `context_warn` decide which sessions `status` names under [`long_sessions`](automation.md#usage), and both templates list them under "Needs you", under Long sessions, with the reason each one qualified and a state: `ended` for a session whose every usage row is `headless`, and otherwise `last seen` with how long ago its latest row places it. Neither says "open", because the ledger has no row for a session still running: a headless row is written when it exits and an interactive row when its day ends. Live work is under Running drive. A session open for days at a context near a million tokens is the opposite of the short, well-defined unit of work drover hands a run.
 
 ### `[usage.weekly]` and `[usage.five_hour]`
 
