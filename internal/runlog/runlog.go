@@ -111,6 +111,11 @@ type Result struct {
 	Model      string
 	SessionID  string
 	DurationMS int64
+	// UsageUnavailable is why the session's token counts, cost and rate-limit
+	// reading could not be read, empty where they could or where the runner
+	// never says. Only the t3 bridge says: its counts come from a file T3 Code
+	// writes on the host, and a usage row of zeros would read as a free session.
+	UsageUnavailable string
 	// ContextMax is the largest context any one assistant message carried:
 	// input, cache read and cache creation together. A session's total says
 	// what it spent and this says how full its window got, which is what a
@@ -291,6 +296,14 @@ func Schemas() []Schema {
 			Read:     readCodex,
 			Carry:    carryCodex,
 			Activity: codexActivity,
+		},
+		{
+			Name: "t3", Key: T3Key,
+			Kinds:    T3Kinds(),
+			Terminal: []string{T3Result},
+			Read:     readT3,
+			Carry:    carryT3,
+			Activity: t3Activity,
 		},
 	}
 }
@@ -624,6 +637,9 @@ func ReadResult(path string) (Read, error) {
 		rd.Result.loggedAt = carried.loggedAt
 		if rd.Result.Text == "" {
 			rd.Result.Text = carried.Text
+		}
+		if rd.Result.UsageUnavailable == "" {
+			rd.Result.UsageUnavailable = carried.UsageUnavailable
 		}
 		rd.Result = Classify(rd.Result)
 	}

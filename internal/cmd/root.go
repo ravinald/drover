@@ -53,7 +53,7 @@ ahead of NO_COLOR, CLICOLOR_FORCE and TERM=dumb. --json, --events and every
 file drover writes are never colored, and every colored state is a word too.
 
 --json is on status, show, unaudited, drive, drives, attach, check, follow-ups, intake --list,
-projects, skills and report. Each of those carries a sample object under Examples in its own --help.
+projects, skills, t3 discover and report. Each of those carries a sample object under Examples in its own --help.
 ` + "`drover schema`" + ` prints the .drover.toml contract for a validator or a generator.`,
 	Example: `  drover agents                 # this project's agent instructions, from its config
   drover status                 # the backlog and what state each item is in

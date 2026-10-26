@@ -411,6 +411,8 @@ func faultReason(who string, res runlog.Result, logPath string) string {
 		side = "the account is out of budget"
 	case runlog.FaultAuth:
 		side = "the runner has no credentials the service accepts"
+	case runlog.FaultRunner:
+		side = "its run, which ended without completing"
 	}
 	line := fmt.Sprintf("%s stopped on %s and not on the work: %q (%s)",
 		who, side, trim(res.Text, 300), whereItRan(who, logPath))
@@ -586,9 +588,12 @@ var (
 	driveDry      bool
 	driveJSON     bool
 	driveNoMerge  bool
-	driveFollow   bool
-	driveJobs     int
-	driveCatchUp  bool
+	// driveAllowBlind runs a drive whose t3 runner last reported no usage,
+	// with [usage.weekly] levels set that nothing would then be able to read.
+	driveAllowBlind bool
+	driveFollow     bool
+	driveJobs       int
+	driveCatchUp    bool
 	// driveReviewOnly is --review-only, and reviewOnlyID the item it names,
 	// resolved: that item's first round skips its implement run and reviews
 	// the branch as it stands. An item --follow or --enqueue adds is not it.
@@ -1153,6 +1158,8 @@ func init() {
 	driveCmd.Flags().BoolVar(&driveJSON, "json", false, "one object per line on stdout, flushed as each item ends")
 	driveCmd.Flags().BoolVar(&driveEvents, "events", false,
 		"with --json, also write one event object per line as things happen: queued, dispatched, skipped, preflight, stage, check, parked, filed, needs_operator, needs_supervisor, merged, paused, resumed, reexec_waiting, exit")
+	driveCmd.Flags().BoolVar(&driveAllowBlind, "allow-blind-usage", false,
+		"drive on a t3 runner whose last session reported no usage, though [usage.weekly] sets a level usage_admission then cannot read")
 	driveCmd.Flags().BoolVar(&driveNoMerge, "no-merge", false,
 		"drive the queue and merge nothing, leaving each item green-and-reviewed on its branch; the exception, not the norm")
 	driveCmd.Flags().BoolVar(&driveFollow, "follow", false,
@@ -1218,6 +1225,9 @@ func (s *session) drivePreflight() (reviewer string, err error) {
 		return "", err
 	}
 	if err := s.preflightAuth(reviewer); err != nil {
+		return "", err
+	}
+	if err := s.preflightBlindUsage(reviewer); err != nil {
 		return "", err
 	}
 
@@ -1347,6 +1357,7 @@ func (s *session) drive(ctx context.Context, ids []string, reviewer string, dead
 			return nil
 		}
 		s.driveHeader(os.Stdout, items, reviewer, deadline)
+		s.blindPlan(os.Stdout, reviewer)
 		s.preflightPlan(os.Stdout, items)
 		return s.drivePlan(items, reviewer, len(ids) > 0)
 	}

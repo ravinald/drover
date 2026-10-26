@@ -458,6 +458,42 @@
         }
       }
     },
+    "t3": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the `drover t3` bridge finds a T3 Code server, and what it reads on the host beside it. A runner whose headless argv is `drover t3 run ...` launches each stage as a T3 Code thread over the server's MCP endpoint.",
+      "properties": {
+        "url": {
+          "type": "string",
+          "pattern": "^(https://|http://(localhost|127\\.0\\.0\\.1|\\[::1\\])(:[0-9]+)?(/|$))",
+          "description": "The server's MCP endpoint, such as https://host.example.ts.net/mcp. HTTPS, or http only to localhost: the bearer token rides every request."
+        },
+        "token_file": {
+          "type": "string",
+          "default": "~/.config/drover/t3-token",
+          "description": "The OAuth grant `drover t3 login` writes, at mode 0600."
+        },
+        "project": {
+          "type": "string",
+          "description": "The T3 Code project title threads are launched in. Unset means the drover project's own name. The bridge never creates a project: add it on the host with `t3 project add`."
+        },
+        "poll": {
+          "type": "string",
+          "default": "2s",
+          "description": "The bridge's step between reads of a running thread, as a Go duration."
+        },
+        "provider_logs": {
+          "type": "string",
+          "default": "~/.t3/userdata/logs/provider",
+          "description": "The directory T3 Code writes each thread's provider event log to, the only place a thread's turns, tokens, cost and rate-limit reading can be read. T3's internal format: a release can move it."
+        },
+        "tested_version": {
+          "type": "string",
+          "default": "0.1.2",
+          "description": "The T3 Code version the bridge was last verified against. `drover check` names a server reporting any other."
+        }
+      }
+    },
     "usage": {
       "type": "object",
       "additionalProperties": false,

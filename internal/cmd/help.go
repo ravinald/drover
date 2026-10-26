@@ -112,7 +112,7 @@ var classified = map[string]classification{
 	"agents": {group: groupSetup, class: readOnly, who: either,
 		effect: "Prints to stdout. --write <path> replaces only the text between the markers in that file, and --pointer prints the stanza that sends AGENTS.md there."},
 	"check": {group: groupSetup, class: readOnly, who: either,
-		effect: "Reads only. Exits 2 on a finding, which is what a CI job keys on."},
+		effect: "Reads only. Where a [runners] entry is the t3 bridge and this host holds [t3] provider_logs, reads [t3] token_file, renews an expired grant at the token endpoint it names without writing the file, and asks [t3] url for its version with one initialize call, bounded at 5s together. The one write is a renewal whose server rotated the refresh token: the grant is written back to [t3] token_file, because the refresh token on disk is then spent. Exits 2 on a finding, which is what a CI job keys on."},
 	"config": {group: groupSetup, class: readOnly, who: either,
 		effect: "Prints to stdout. Reads .drover.toml without validating it, so it answers for a config Load would refuse. There is no --write: no TOML round-trip preserves the comments that carry a project's reasoning. --stamp rewrites the drover_version line in .drover.toml and no other."},
 
@@ -161,6 +161,9 @@ var classified = map[string]classification{
 	"notify": {group: groupRun, class: outward, who: either,
 		effect: "With no flag prints its help and sends nothing. --test sends one synthetic event, needs_operator or the kind --event names, through every [notify] destination: POSTs it to each ntfy destination's url, reading its token_file, and runs each command destination's argv with it on stdin. Writes nothing.",
 		reach:  "posts to each [notify] ntfy destination, runs each [notify] command destination"},
+	"t3": {group: groupRun, class: outward, who: either,
+		effect: "login runs an OAuth sign-in against [t3] url, opening a browser unless --no-browser and listening on a loopback port for the redirect, and writes the grant to [t3] token_file at mode 0600; login --check reads that file and, for an expired grant carrying a refresh token, renews it at the server's token endpoint and rewrites it. discover calls initialize and tools/list and writes nothing. run launches one thread on the server, in the T3 Code project [t3] project names and the directory it runs in, follows it with t3_thread_wait and t3_thread_read until its run ends, reads that thread's provider event log under [t3] provider_logs, and prints the log on stdout; it interrupts the run it launched whenever it exits before the run ends, and never answers a request or touches a thread it did not launch. run and thread --new refuse with exit 3 inside a session drover launched, except that run is that session when drover launched it. thread --new launches one thread and prints its id and link without following it; thread --stop interrupts the named thread's newest run. Every subcommand reads the token file, and none writes the ledger.",
+		reach:  "launches and interrupts T3 Code threads, writes [t3] token_file"},
 	"attach": {group: groupRun, class: readOnly, who: either,
 		effect: "Reads the drive's event file under $XDG_STATE_HOME/drover/drives/<project>, {ledger} and this checkout's lease, and under --session the session logs its stage events name in the log directory, opened for reading only. Never signals the drive or writes anything it reads, so an interrupt leaves the drive running."},
 	"watch": {group: groupRun, class: readOnly, who: either,

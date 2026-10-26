@@ -222,12 +222,52 @@ func families() map[string]family {
 	}
 }
 
+// IsT3 reports a runner that is drover's own T3 Code bridge: argv[0] drover
+// and its first argument t3. It is one binary drover knows two ways, so the
+// basename alone cannot route it.
+func IsT3(spec Spec) bool {
+	argv := spec.Headless
+	return len(argv) > 1 && filepath.Base(argv[0]) == "drover" && argv[1] == "t3"
+}
+
+// T3Login is what signs the t3 bridge in.
+const T3Login = "drover t3 login"
+
+// t3Faults judges a bridge argv: it must be `t3 run`, and its prompt must land
+// where the bridge reads one. -p takes the next argument as the prompt, so it
+// has to be last, and a prompt on stdin is read only under --stdin.
+func t3Faults(spec Spec) []Fault {
+	argv := spec.Headless
+	if len(argv) < 3 || argv[2] != "run" {
+		return []Fault{{Mode: Headless, Reason: fmt.Sprintf(
+			"%s is not the bridge: a headless stage runs `drover t3 run`, which follows the thread it launches and prints the log drover reads",
+			strings.Join(argv, " ")),
+			Fix: "headless = [\"drover\", \"t3\", \"run\", \"--provider\", \"claude\", \"-p\"]"}}
+	}
+	var out []Fault
+	at := slices.Index(argv, "-p")
+	switch {
+	case spec.Stdin && !slices.Contains(argv, "--stdin"):
+		out = append(out, Fault{Mode: Headless, Reason: "stdin = true hands the prompt on standard input, and drover t3 run reads it there only under --stdin",
+			Fix: "add --stdin to the argv"})
+	case !spec.Stdin && at >= 0 && at != len(argv)-1:
+		reordered := slices.Concat(argv[:at], argv[at+1:], []string{argv[at]})
+		out = append(out, Fault{Mode: Headless, Reason: fmt.Sprintf(
+			"-p takes the next argument as its prompt, so drover t3 run reads %q as the whole prompt", argv[at+1]),
+			Fix: "move it last: " + Spec{Headless: reordered}.Display(Headless)})
+	}
+	return out
+}
+
 // Faults reports what is wrong with a runner's headless argv, for a binary
 // drover knows. An empty slice is every check passing, not every check running.
 func Faults(spec Spec) []Fault {
 	argv := spec.Headless
 	if len(argv) == 0 {
 		return nil
+	}
+	if IsT3(spec) {
+		return t3Faults(spec)
 	}
 	fam, known := families()[filepath.Base(argv[0])]
 	if !known {
@@ -292,6 +332,9 @@ func (s Spec) binary() string {
 // for. argv[0] is the declared one, so a runner named by path is asked at that
 // path.
 func AuthCheck(spec Spec) []string {
+	if IsT3(spec) {
+		return []string{spec.Headless[0], "t3", "login", "--check"}
+	}
 	bin := spec.binary()
 	si, ok := signIns()[filepath.Base(bin)]
 	if bin == "" || !ok {
@@ -304,6 +347,9 @@ func AuthCheck(spec Spec) []string {
 // binary drover knows nothing about gets a sentence naming it rather than a
 // guessed flag.
 func Login(spec Spec) string {
+	if IsT3(spec) {
+		return T3Login
+	}
 	bin := spec.binary()
 	if si, ok := signIns()[filepath.Base(bin)]; ok {
 		return si.login
@@ -650,6 +696,13 @@ func renderFeed(r io.Reader, out io.Writer) error {
 				// other codex item uses "text".
 				Message string `json:"message"`
 			} `json:"item"`
+			// The t3 bridge's own lines, keyed on "t3" so no other shape
+			// claims them.
+			T3       string `json:"t3"`
+			Role     string `json:"role"`
+			Text     string `json:"text"`
+			Title    string `json:"title"`
+			ItemType string `json:"item_type"`
 		}
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			continue
@@ -680,6 +733,14 @@ func renderFeed(r io.Reader, out io.Writer) error {
 			if m := codexMarker(ev.Item.Type); m != "" {
 				_, _ = fmt.Fprintf(out, "·%s ", m)
 			}
+		case ev.T3 == runlog.T3Message && ev.Role == "assistant":
+			_, _ = fmt.Fprintf(out, "\n%s", ev.Text)
+		case ev.T3 == runlog.T3Tool:
+			name := ev.Title
+			if name == "" {
+				name = ev.ItemType
+			}
+			_, _ = fmt.Fprintf(out, "·%s ", name)
 		case ev.Type == "item.completed":
 			switch ev.Item.Type {
 			case "agent_message":

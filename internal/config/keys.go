@@ -72,6 +72,10 @@ var resolved = map[string]string{
 	"usage.context_warn":      strconv.Itoa(DefaultContextWarn),
 	"usage.overage.mode":      strconv.Quote(OveragePause),
 	"notify.coalesce":         strconv.Quote("0s"),
+	"t3.token_file":           strconv.Quote(DefaultT3TokenFile),
+	"t3.poll":                 strconv.Quote(DefaultT3Poll.String()),
+	"t3.provider_logs":        strconv.Quote(DefaultT3ProviderLogs),
+	"t3.tested_version":       strconv.Quote(T3TestedVersion),
 
 	// A usage level nobody set is no step at all, which "off" also says, and
 	// 0 does not: pause_remaining = 0 holds at 100% used.
@@ -89,6 +93,8 @@ var resolved = map[string]string{
 // that prints one of these prints it commented.
 var unset = map[string]string{
 	"usage.weekly_budget": "no budget",
+	"t3.url":              "no T3 Code server",
+	"t3.project":          "the drover project's own name",
 }
 
 // NotifyKeys is every key under notify., the destination keys written under

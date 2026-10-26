@@ -70,6 +70,13 @@ var neverRefuses = []string{
 // One case per refusing command. Not one per documented refusal: what the doc
 // pins is the command, and one executed refusal proves the command can exit 3.
 var refusalCases = map[string][]refusalCase{
+	"t3": {{
+		why: "t3 run inside a session drover launched",
+		run: func(t *testing.T) error {
+			t.Setenv(runner.EnvActor, runner.ActorAgent)
+			return refuse(t, "t3", "run", "--provider", "claude", "-p", "hi")
+		},
+	}},
 	"config": {{
 		why: "--stamp on a build carrying no release version",
 		run: func(t *testing.T) error {

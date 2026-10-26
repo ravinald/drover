@@ -66,6 +66,10 @@ A review that keeps sending an item back is spending two sessions per round on a
 
 The runner's argv decides the model. A model with a very large context window lets a session grow far past the point where a smaller one would have compacted, and every turn after that pays for the larger context. Choose the model in `[runners]` per stage if a cheaper one does the job: see [Configuration](configuration.md#runners).
 
+### T3 Code threads
+
+A stage run as a [T3 Code thread](operating.md#t3-code-threads) is one hop more than a CLI drover execs. The bridge polls the server every `[t3] poll` while the run goes, which costs nothing on the account, but the thread itself starts from a larger context than the bare CLI: T3 Code's Claude driver adds its own system prompt and tools. The probe that settled the bridge's design sent a one-line prompt ("Reply with the word ok and nothing else") to a T3 Claude thread on `claude-haiku-5-5`, and that one turn read about 73,000 tokens of context, 60,365 of them written to cache and 12,817 read from it, for 48 tokens of output. Every stage pays that floor before it reads the item, so a `t3` runner suits items whose own context dwarfs it, and a queue of very small items costs noticeably more through T3 than through a direct `claude` runner.
+
 ## What you spent
 
 drover reports cost only for the sessions it records. The following command prints a headless run's outcome line, including its turn count and the cost its runner reported:
