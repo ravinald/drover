@@ -165,7 +165,6 @@ func usageEvent(evs []DriveEvent, event string) *DriveEvent {
 // runner_fault and ending the drive. The deadline arrives before the reset, so
 // the drive exits 0 and the item reports held.
 func TestARefusedSessionPausesTheDriveWithTheItemQueued(t *testing.T) {
-	t.Cleanup(func() { driveFor, driveNoMerge, driveJSON, driveEvents = 0, false, false, false })
 	poll := enqueuePoll
 	enqueuePoll = 20 * time.Millisecond
 	t.Cleanup(func() { enqueuePoll = poll })
@@ -247,7 +246,6 @@ func TestARefusedSessionPausesTheDriveWithTheItemQueued(t *testing.T) {
 // A hold inside the drive's bound lifts at the reset on its own, says so, and
 // the item goes on from the stage that was refused.
 func TestAHeldDriveResumesAtTheReset(t *testing.T) {
-	t.Cleanup(func() { driveFor, driveNoMerge, driveJSON, driveEvents = 0, false, false, false })
 	poll, slack := enqueuePoll, quotaSlack
 	enqueuePoll, quotaSlack = 20*time.Millisecond, 0
 	t.Cleanup(func() { enqueuePoll, quotaSlack = poll, slack })
@@ -286,7 +284,6 @@ func TestAHeldDriveResumesAtTheReset(t *testing.T) {
 // One usage_warning per window per reset, across drives and projects: the
 // ledger row the first drive writes is what the second reads.
 func TestOneUsageWarningAcrossTwoDrives(t *testing.T) {
-	t.Cleanup(func() { driveNoMerge = false })
 	home := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", home)
 	sent := filepath.Join(t.TempDir(), "sent")
@@ -364,7 +361,6 @@ func TestStatusCarriesTheNewestReading(t *testing.T) {
 
 // --dry-run says whether usage_admission would hold now, and why.
 func TestADryRunSaysWhetherUsageWouldHold(t *testing.T) {
-	t.Cleanup(func() { driveDry = false })
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	s := driveProject(t)
 	out := capture(t, func() { _ = execute(t, "drive", "--dry-run") })
@@ -467,7 +463,6 @@ func TestAProjectOffRunsOnCreditUnderAPerUserWeeklyPause(t *testing.T) {
 // resume lets the drive dispatch.
 func TestEachResumeReleasesOneOfTheHoldsAReadingCrosses(t *testing.T) {
 	enqueueFixture(t)
-	t.Cleanup(func() { drivesJSON = false })
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cfgPath := filepath.Join(".", config.FileName)
 	raw, err := os.ReadFile(cfgPath)
@@ -577,7 +572,6 @@ func TestEachResumeReleasesOneOfTheHoldsAReadingCrosses(t *testing.T) {
 
 // --dry-run lists every hold the reading crosses, not only the first.
 func TestADryRunListsEveryHold(t *testing.T) {
-	t.Cleanup(func() { driveDry = false })
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	s := driveProjectWith(t, "\n[drive]\nmerge_gate = [\"stub-gate\"]\n\n[usage.weekly]\npause_remaining = 5\n")
 	r := reading("rejected", "seven_day", 1, 0.1, time.Now().Add(30*time.Hour), true, "")

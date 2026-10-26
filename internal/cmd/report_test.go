@@ -13,7 +13,6 @@ import (
 // default every project starts on.
 func reportProject(t *testing.T) (home, logPath string) {
 	t.Helper()
-	t.Cleanup(func() { reportJSON, reportSave = false, false })
 
 	home = t.TempDir()
 	t.Setenv("HOME", home)

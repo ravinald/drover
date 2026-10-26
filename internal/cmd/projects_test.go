@@ -248,7 +248,6 @@ func TestAWorktreeRendersUnderItsParent(t *testing.T) {
 			strings.Count(md, "| example |") != 1 {
 			t.Errorf("%s: the Obsidian index does not show the worktree on its parent's row alone:\n%s", when, md)
 		}
-		t.Cleanup(func() { drivesAll, drivesJSON = false, false })
 		if ds := drivesAllJSON(t); len(ds) != 1 || ds[0].Root != parent {
 			t.Errorf("%s: drives --all reads %+v, want the parent alone", when, ds)
 		}

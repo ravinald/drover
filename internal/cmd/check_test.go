@@ -1177,8 +1177,6 @@ func TestCheckRendersAStalePromptTemplate(t *testing.T) {
 		t.Errorf("BAD TEMPLATE appears %d times, want 1:\n%s", n, out)
 	}
 
-	prev := checkJSON
-	t.Cleanup(func() { checkJSON = prev })
 	out = capture(t, func() { err = execute(t, "check", "--json") })
 	if Code(err) != ExitFindings {
 		t.Fatalf("check --json exited %d (%v):\n%s", Code(err), err, out)

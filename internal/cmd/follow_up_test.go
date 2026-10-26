@@ -105,7 +105,6 @@ func TestFileRegisterPrintsThroughFollowUps(t *testing.T) {
 // fires on a register nothing truncated.
 func TestFileRegisterAtThePageLimitReportsNoTruncation(t *testing.T) {
 	fileRegisterProject(t, "[github]\npage_limit = 2\n", fileRisk, fileSecond)
-	t.Cleanup(func() { registerJSON = false })
 
 	var err error
 	out := capture(t, func() { err = execute(t, "follow-ups") })

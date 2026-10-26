@@ -384,7 +384,6 @@ func TestDriveReloadsTheLedgerAfterEachLaunch(t *testing.T) {
 // --dry-run resolves every step and leaves nothing behind: no stage row, no
 // branch switch, no log.
 func TestDriveDryRunLaunchesNothing(t *testing.T) {
-	t.Cleanup(func() { driveDry, driveFor, driveUntil, driveMax = false, 0, "", 0 })
 	s := driveProject(t)
 	dir := s.cfg.Root
 	head := headBranch(t, dir)
@@ -588,7 +587,6 @@ func TestAParkNamesTheRunnerAndItsLog(t *testing.T) {
 // name resumes a park, and says nothing about deps that have not merged or an
 // item already finished.
 func TestDriveResumesAParkedItemOnlyWhenNamed(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveFor, driveUntil, driveMax = false, 0, "", 0 })
 
 	// One fixture per arm. A drive reconciles before it reads the queue, and
 	// reconciling finishes what drover launched, so arms sharing a project would
@@ -681,7 +679,6 @@ func driveOne(t *testing.T, id string) DriveItem {
 // every item it was handed would list a named blocked item among the "1
 // item(s)" it would drive, then skip it with one word when the drive ran.
 func TestDriveDryRunAgreesWithTheRun(t *testing.T) {
-	t.Cleanup(func() { driveDry, driveJSON, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 
 	t.Run("a named blocked item previews as skipped", func(t *testing.T) {
 		s := driveProject(t)
@@ -1021,7 +1018,6 @@ func driveAll(t *testing.T, args ...string) []DriveItem {
 // Both arms run inside one drive, because a queue where every item takes the
 // same branch says nothing about the discriminator.
 func TestDriveMergesWhatPassedAndParksWhatDidNot(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	ghLog := mergeProject(t)
 
 	rows := driveAll(t)
@@ -1072,7 +1068,6 @@ func TestDriveMergesWhatPassedAndParksWhatDidNot(t *testing.T) {
 // merged. Same fixture, same green gate, same clean review: the only difference
 // is the flag, which is what makes this a test of the flag.
 func TestNoMergeHoldsWhatTheGatePassed(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	ghLog := mergeProject(t)
 
 	rows := driveAll(t, "--no-merge")
@@ -1104,7 +1099,6 @@ func TestNoMergeHoldsWhatTheGatePassed(t *testing.T) {
 // has been paid for yet. A refusal that arrived per item would arrive after a
 // night of launches.
 func TestDriveRefusesBeforeSpendingAnythingOnAQueueNothingCanPass(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	s := driveProjectWith(t, "") // no [drive] merge_gate
 	dir := s.cfg.Root
 	head := headBranch(t, dir)
@@ -1154,7 +1148,6 @@ func gateLog(t *testing.T, dir string) []string {
 // commit; if the remote head is behind the branch, both are answering about
 // something else and neither says so.
 func TestAPassedItemIsPushedBeforeTheGateRuns(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	mergeProject(t)
 	dir, err := os.Getwd()
 	if err != nil {
@@ -1194,8 +1187,6 @@ func splitGateLine(t *testing.T, line string) (branch, local, remote string) {
 func TestDriveRefusesAQueueItCannotPush(t *testing.T) {
 	// driveDry among them: this case passes --dry-run, and a leaked preview flag
 	// turns every later drive in the package into one that launches nothing.
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
-	t.Cleanup(func() { driveDry = false })
 	s := driveProject(t)
 	dir := s.cfg.Root
 	git(t, dir, "remote", "remove", "origin")
@@ -1222,7 +1213,6 @@ func TestDriveRefusesAQueueItCannotPush(t *testing.T) {
 // refused up front rather than discovered on the first green item. A project
 // declaring no gate reaches no forge and is left alone.
 func TestDriveRefusesAGateItCannotActOn(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	bin := t.TempDir()
 	stub(t, filepath.Join(bin, "gh"), "#!/bin/sh\nexit 1\n") // gh is there and says no
 	driveProject(t)
@@ -1254,7 +1244,6 @@ func prCreates(t *testing.T, log string) []string {
 // remote where somebody can look at it, and what it does not have is a document
 // saying it is ready.
 func TestAParkOpensNoPullRequest(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	ghLog := mergeProject(t)
 	dir, err := os.Getwd()
 	if err != nil {
@@ -1287,7 +1276,6 @@ func TestAParkOpensNoPullRequest(t *testing.T) {
 // same way. Nothing has said the branch may merge, so nothing opens a document
 // that says so.
 func TestAGateRefusalLeavesABranchAndNoPullRequest(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	ghLog := mergeProject(t)
 	dir, err := os.Getwd()
 	if err != nil {
@@ -1342,7 +1330,6 @@ func TestASplitMidDriveParksWithThePullRequestOpen(t *testing.T) {
 		{"--no-merge", []string{"--no-merge", "1"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 			ghLog := mergeProject(t)
 			t.Setenv("DROVER_TEST_SPLIT", "1")
 
@@ -1375,7 +1362,6 @@ func TestASplitMidDriveParksWithThePullRequestOpen(t *testing.T) {
 // A rejected push is an answer, not an obstacle. Forcing past it would discard
 // whatever put the remote ahead, which can be a human's commits.
 func TestAPushRejectionParksAndNeverForces(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	ghLog := mergeProject(t)
 	dir, err := os.Getwd()
 	if err != nil {
@@ -1427,7 +1413,6 @@ func TestAPushNamesABranchNothingCreated(t *testing.T) {
 // open is the ordinary case. Opening a second splits the review history of one
 // contract across two places.
 func TestOpenPRReusesAPullRequestAlreadyOpen(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	s := driveProject(t)
 	bin := t.TempDir()
 	log := filepath.Join(t.TempDir(), "gh.log")
@@ -1466,8 +1451,6 @@ func TestOpenPRReusesAPullRequestAlreadyOpen(t *testing.T) {
 // exists. A drive that pushes and opens pull requests and a preview that mentions
 // neither answer different ones.
 func TestTheDryRunNamesThePushAndThePullRequest(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
-	t.Cleanup(func() { driveDry = false })
 	driveProject(t)
 
 	out := capture(t, func() {
@@ -1514,7 +1497,6 @@ func TestTheBodyNamesTheGateKeyAndNotItsArgv(t *testing.T) {
 // first would merge a stale supported-versions table. The pass row is what
 // open-pr reads instead, and it is the row drive computes for exactly this.
 func TestOpenPRTrustsThePassRowOverTheLedgerReading(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	s := driveProject(t)
 	path := filepath.Join(s.cfg.Root, "ledger.jsonl")
 	if err := os.WriteFile(path, []byte(auditNoteOnlyRows+
@@ -1553,7 +1535,6 @@ func TestOpenPRTrustsThePassRowOverTheLedgerReading(t *testing.T) {
 // though a drive had spoken: the reading cannot see a session that died, and the
 // output says so.
 func TestOpenPRWithoutADriveNamesTheAuthorityThatAnswered(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	s := driveProject(t)
 	path := filepath.Join(s.cfg.Root, "ledger.jsonl")
 	// A converged manual history: a review that sent work back, a re-run, then a
@@ -1659,7 +1640,6 @@ var setAside = []string{"set aside the drive pass", passChangesUnrecorded, "2026
 // aside so a reader can tell a pass drive computed from one the ledger
 // inferred.
 func TestALaterManualReviewOutranksAStalePass(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	out, err := reviewPassedOver(t, "", unrequestedPassRows())
 	if err != nil {
 		t.Fatalf("B31's converged manual review must pass: %v", err)
@@ -1678,7 +1658,6 @@ func TestALaterManualReviewOutranksAStalePass(t *testing.T) {
 // instruction the reviewer had just followed: findings filed as asked, and their
 // items still unable to merge.
 func TestAnItemAtTheLimitCanStillOpenAPullRequest(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	out, err := reviewPassedOver(t, "\n[review]\nmax_review_rounds = 2\n", unrequestedPassRows())
 	if err != nil {
 		t.Fatalf("an item at the cap with a converged review must propose: %v", err)
@@ -1696,7 +1675,6 @@ func TestAnItemAtTheLimitCanStillOpenAPullRequest(t *testing.T) {
 // pass it set aside: a reader of one cannot otherwise tell it from a project
 // drive never ran in.
 func TestAStalePassHandsTheFallbackItsOwnRefusals(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	authored := unrequestedPassRows()
 	authored[len(authored)-1].Independent = false
 	selfGraded := unrequestedPassRows()
@@ -1754,7 +1732,6 @@ func TestAStalePassHandsTheFallbackItsOwnRefusals(t *testing.T) {
 // and nobody has touched since, is a pass: nothing has to have been sent back
 // first.
 func TestACleanFirstReviewOpensAPullRequestWithoutForce(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	out, err := reviewPassedOver(t, "", []ledger.Row{
 		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-10-01"},
 		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: bodyAtLaunch, Date: "2026-10-01"},
@@ -1771,7 +1748,6 @@ func TestACleanFirstReviewOpensAPullRequestWithoutForce(t *testing.T) {
 // A stale pass with no review after it has no later review to read, so it
 // refuses as stale and sets nothing aside.
 func TestAStalePassNobodyReviewedStillRefusesAsStale(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	_, err := reviewPassedOver(t, "",
 		append(unrequestedPassRows()[:4], ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-09-22"}))
 	if Code(err) != ExitRefused {
@@ -1787,7 +1763,6 @@ func TestAStalePassNobodyReviewedStillRefusesAsStale(t *testing.T) {
 // lifetime request for changes total and an audit level both read as acceptance when the last
 // review sent the work straight back.
 func TestTheFallbackNeedsAReviewItCanDelimit(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	for _, c := range []struct {
 		name, want string
 		rows       []ledger.Row
@@ -1890,7 +1865,6 @@ func TestTheBodyNamesTheItemItIsAbout(t *testing.T) {
 // real command and reads the file back through a fresh session, which is the
 // only reader that proves the row reached disk.
 func TestADriveWritesThePassRowToDisk(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	mergeProject(t)
 	dir, err := os.Getwd()
 	if err != nil {
@@ -1971,7 +1945,6 @@ func TestOpenPRPublishesTheHeadTheGateReadsAbout(t *testing.T) {
 		{"the remote is behind the reviewed head", true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			t.Cleanup(func() { openPRForce = false })
 			dir, branch, ghLog := openPRReady(t)
 			if c.advance {
 				git(t, dir, "push", "-q", "-u", "origin", branch)
@@ -2014,7 +1987,6 @@ func TestOpenPRPublishesTheHeadTheGateReadsAbout(t *testing.T) {
 // a stale remote head reports on code nobody proposed, and a pull request over it
 // claims a commit the forge does not have.
 func TestAProposalThatCannotPushReachesNeitherGateNorForge(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	dir, branch, ghLog := openPRReady(t)
 	remote := git(t, dir, "remote", "get-url", "origin")
 	other := t.TempDir()
@@ -2047,7 +2019,6 @@ func TestAProposalThatCannotPushReachesNeitherGateNorForge(t *testing.T) {
 func TestOpenPRRefusesAForgeItCannotReach(t *testing.T) {
 	for _, args := range [][]string{{"open-pr", "1"}, {"open-pr", "1", "--force"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			t.Cleanup(func() { openPRForce = false })
 			openPRReady(t)
 			bin := t.TempDir()
 			stub(t, filepath.Join(bin, "gh"), "#!/bin/sh\nexit 1\n")
@@ -2069,7 +2040,6 @@ func TestOpenPRRefusesAForgeItCannotReach(t *testing.T) {
 // request is what they read it in: withholding it takes away the review of the
 // one change the loop is not allowed to make for them.
 func TestAProposalNamesADeniedPathAndOpensAnyway(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	dir, _, ghLog := openPRReady(t)
 	// [drive] is the last table the fixture writes, so this lands inside it.
 	f, err := os.OpenFile(filepath.Join(dir, config.FileName), os.O_APPEND|os.O_WRONLY, 0o600)
@@ -2350,7 +2320,6 @@ func TestFaultWaitOnClaudesWeeklyReset(t *testing.T) {
 // The same refusal end to end, at usage_admission = "off": the park stands as
 // it did before the action existed, naming the event's reset.
 func TestADriveParksOnAWeeklyResetPastItsBoundWhenAdmissionIsOff(t *testing.T) {
-	t.Cleanup(func() { driveFor, driveNoMerge = 0, false })
 	driveProjectWith(t, "\n[drive]\nmerge_gate = [\"stub-gate\"]\n\n[supervise]\nusage_admission = \"off\"\n")
 	bin := t.TempDir()
 	stub(t, filepath.Join(bin, "stub-impl"), "#!/bin/sh\n"+
@@ -2376,7 +2345,6 @@ func TestADriveParksOnAWeeklyResetPastItsBoundWhenAdmissionIsOff(t *testing.T) {
 // out and the item carries on, rather than costing a park and a resume somebody
 // has to type in the morning.
 func TestADriveWaitsOutAQuotaInsideItsBound(t *testing.T) {
-	t.Cleanup(func() { driveFor, driveNoMerge = 0, false })
 	backoff, slack := faultBackoff, quotaSlack
 	t.Cleanup(func() { faultBackoff, quotaSlack = backoff, slack })
 	faultBackoff, quotaSlack = 10*time.Millisecond, 0
@@ -2550,7 +2518,6 @@ func TestEveryPassTokenIsWorded(t *testing.T) {
 // sending the operator to the reviewer's log for a cause that is in the
 // implementer's.
 func TestDriveParksOnTheImplementRunBeforeSpendingAReviewer(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	ghLog := mergeProject(t)
 	t.Setenv("DROVER_TEST_IMPL_STOPS", "1")
 
@@ -2758,7 +2725,6 @@ func TestEveryEntryFormHoldsEveryAwkwardName(t *testing.T) {
 // outside the tree so a test can say which items a drive reached.
 func treeProject(t *testing.T) (s *session, launches string) {
 	t.Helper()
-	t.Cleanup(func() { driveJSON, driveFor, driveUntil, driveMax = false, 0, "", 0 })
 	s = driveProject(t)
 	write(t, filepath.Join(s.cfg.Root, "work", "02-second.md"),
 		"---\ntitle: Second\ndeps:\n---\n\n1. Do it too.\n")
@@ -3201,7 +3167,6 @@ func TestCheckReportsADenyEntryThatMatchesNothing(t *testing.T) {
 // transport that read the quoted display form would never match the prefix and
 // would merge it.
 func TestADriveHoldsANonASCIIFileUnderADeniedDirectory(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	ghLog := mergeProject(t)
 	dir, err := os.Getwd()
 	if err != nil {
@@ -3714,7 +3679,6 @@ func TestReconciliationFinishesAnExternalReportReplacedOverASubmoduleHardLink(t 
 // branch as merged, because it sits at the trunk it was cut from. Reconciliation
 // would then record a completion for work that does not exist.
 func TestADriveParksOnABranchHoldingNoCommits(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveNoMerge, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	s := driveProject(t)
 
 	bin := t.TempDir()
@@ -5515,7 +5479,6 @@ func standingProject(t *testing.T) (dir, ghLog string) {
 // and write nothing. The digest does not move, so the rows read as a clean pass
 // over a body that says the opposite.
 func TestAnAuditOverAStandingBlockParks(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	dir, ghLog := standingProject(t)
 
 	rows := driveAll(t)
@@ -5567,7 +5530,6 @@ func TestAClearedBlockPasses(t *testing.T) {
 // open-pr then honors, so an item parked this way needs no open-pr --force
 // after the clear.
 func TestACloseChangesAfterAStandingPassLetsOpenPRRunTheGate(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	dir, ghLog := standingProject(t)
 
 	rows := driveAll(t)
@@ -5701,7 +5663,6 @@ func TestAnExactBytesDigestStillMatches(t *testing.T) {
 		t.Errorf("drive read an unchanged body against its exact-bytes digest as %q, want %q", got, passPassed)
 	}
 
-	t.Cleanup(func() { openPRForce = false })
 	if _, err := reviewPassedOver(t, "", []ledger.Row{launch, audit}); err != nil {
 		t.Errorf("propose refused an unchanged body against its exact-bytes digest: %v", err)
 	}
@@ -6368,7 +6329,6 @@ func TestAGateSayingBehindIsRetriedOnceAfterACatchUp(t *testing.T) {
 			isolate(t)
 			ghLog := mergeProject(t)
 			dir, remote := forge(t, ghLog)
-			t.Cleanup(func() { driveEvents = false })
 			t.Setenv("DROVER_TEST_GATE_BEHIND", c.behind)
 			moveTrunkAfter(t, remote, "merge-gate", "*", "elsewhere.txt", "theirs")
 

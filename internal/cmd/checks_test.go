@@ -156,7 +156,6 @@ func TestARateLimitedJobIsRerunAndPasses(t *testing.T) {
 // parks trunk_red naming the check and main's run, nothing is sent back, the
 // operator is told, and the drive stops.
 func TestAFailureRedOnTheTrunkParksTrunkRedWithoutSendingChangesBack(t *testing.T) {
-	t.Cleanup(func() { driveEvents = false })
 	checksForge(t, "trunk")
 	before := ledgerCounts(t).ChangesRequested
 
@@ -198,7 +197,6 @@ func TestAFailureRedOnTheTrunkParksTrunkRedWithoutSendingChangesBack(t *testing.
 // trunk's latest completed run, so the item parks trunk_red as it would had
 // the tip finished red.
 func TestAFailureRedOnTheTrunkBehindItsRunningTipParksTrunkRed(t *testing.T) {
-	t.Cleanup(func() { driveEvents = false })
 	ghLog := checksForge(t, "behind")
 	parent := git(t, ".", "rev-parse", "main")
 	write(t, "trunk-moved.txt", "x\n")
@@ -676,7 +674,6 @@ func TestAStandardLibraryVulnerabilityIsRerun(t *testing.T) {
 // detail and the lines as its evidence, on the park row, the parked event and
 // in the body sent back with the run's URL.
 func TestACodeFailureParkSaysWhatFailed(t *testing.T) {
-	t.Cleanup(func() { driveEvents = false })
 	logPath, err := filepath.Abs("testdata/f14-revive-ae30c3c.log")
 	if err != nil {
 		t.Fatal(err)

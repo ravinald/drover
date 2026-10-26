@@ -315,7 +315,6 @@ func TestCleanupListsADirtyWorktreeAndApplyKeepsIt(t *testing.T) {
 // refusal names that action rather than enqueue, which every other drive is.
 func TestASupervisorPausesOnlyAtSupervisorPolicy(t *testing.T) {
 	enqueueFixture(t)
-	t.Cleanup(func() { drivePause = false })
 	t.Setenv(runner.EnvActor, runner.ActorSupervisor)
 	err := refuse(t, "drive", "--pause")
 	if Code(err) != ExitRefused || !strings.Contains(err.Error(), "pause_for_config_change") {

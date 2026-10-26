@@ -122,7 +122,6 @@ func TestUsageRowsChangeNoReader(t *testing.T) {
 		}
 	}
 	t.Chdir(s.cfg.Root)
-	t.Cleanup(func() { statusJSON, statusNoTracker, checkJSON = false, false, false })
 	read := func() (status, check string, checkErr error) {
 		status = capture(t, func() {
 			if err := execute(t, "status", "--json", "--no-tracker"); err != nil {

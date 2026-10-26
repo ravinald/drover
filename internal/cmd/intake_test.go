@@ -359,7 +359,6 @@ esac
 	t.Chdir(dir)
 	// Both flags are package state cobra never resets between executions, so a
 	// promotion test would leave --kind and --json set for whatever runs next.
-	t.Cleanup(func() { intakeKind, registerJSON = "", false })
 	return dir
 }
 

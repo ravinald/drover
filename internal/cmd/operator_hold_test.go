@@ -61,7 +61,6 @@ echo '{"type":"result","subtype":"success","is_error":false}'
 // item reports and events.
 func driveWithEvents(t *testing.T, args ...string) (rows []DriveItem, evs []DriveEvent, err error) {
 	t.Helper()
-	t.Cleanup(func() { driveEvents = false })
 	out := capture(t, func() { err = execute(t, append([]string{"drive", "--json", "--events"}, args...)...) })
 	for _, line := range strings.Split(out, "\n") {
 		var probe map[string]any

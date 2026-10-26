@@ -79,7 +79,6 @@ func TestReviewRunnerNeverInheritsTheItemAgent(t *testing.T) {
 // runner implemented and which reviewed is answered by a single value that the
 // second launch would overwrite.
 func TestReviewRecordsItsRunnerApartFromTheImplementer(t *testing.T) {
-	t.Cleanup(func() { runRunner, reviewRunner, reviewHeadless = "", "", false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	s := fixture(t, `
 [runners.impl]
@@ -280,7 +279,6 @@ const agyDeniedResult = `{"event":"result","result":{"conversation_id":"a918ec5b
 // whether the findings were good news. Without this, answering it takes the
 // ledger by hand and then the log by hand.
 func TestAReviewDeniedItsCommandsSaysSoAtReviewTime(t *testing.T) {
-	t.Cleanup(func() { runRunner, reviewRunner, reviewHeadless = "", "", false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	s := fixture(t, `
 [runners.impl]
@@ -339,7 +337,6 @@ headless    = ["stub-review"]
 // not read at all. Most runs are this one, so a cause
 // clause that fired here would be noise on every pass drover reports.
 func TestAReviewWithNoDenialReportsNoCause(t *testing.T) {
-	t.Cleanup(func() { runRunner, reviewRunner, reviewHeadless = "", "", false })
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	s := fixture(t, `
 [runners.rev]

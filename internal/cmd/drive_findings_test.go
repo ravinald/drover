@@ -21,7 +21,6 @@ import (
 // supervise is a [supervise] block, empty for the catalog defaults.
 func findingsProject(t *testing.T, supervise string) string {
 	t.Helper()
-	t.Cleanup(func() { driveEvents = false })
 	mergeProject(t)
 	dir, err := os.Getwd()
 	if err != nil {
@@ -311,7 +310,6 @@ func TestARegisterThatWillNotReadLeavesTheOutcomeAlone(t *testing.T) {
 // no drive running, and judges each again on every read: a row whose owner
 // merges after it was filed reads dormant from then on.
 func TestStatusListsFindingsNeedingTriageWithNoDrive(t *testing.T) {
-	t.Cleanup(func() { statusJSON, registerCoverage, registerJSON = false, false, false })
 	dir := fileRegisterProject(t, "",
 		registerLine("1", `"B1"`),
 		registerLine("2", ""),

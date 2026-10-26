@@ -72,7 +72,6 @@ func stubRunner(t *testing.T, dir, name, emit string) {
 // attribute the work, and a log is not an answer — an interactive run writes
 // none, and two runs with two runners make the newest log a guess.
 func TestRunRecordsTheResolvedRunner(t *testing.T) {
-	t.Cleanup(func() { runRunner = "" })
 	s := fixture(t, `
 [run]
 default_runner = "gemini"

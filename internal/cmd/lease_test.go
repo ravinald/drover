@@ -360,7 +360,6 @@ func TestFinishPassesADriveHoldingTheCheckout(t *testing.T) {
 }
 
 func TestOpenPRPassesADriveHoldingTheCheckout(t *testing.T) {
-	t.Cleanup(func() { openPRForce = false })
 	dir, _, ghLog := openPRReady(t)
 	holdDrive(t, dir)
 

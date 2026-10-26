@@ -102,7 +102,6 @@ optional = ["skills"]
 func TestSkillsJSONWritesNothingButJSONWhileVendoring(t *testing.T) {
 	skillsProject(t)
 	src := guideSource(t, "go-review")
-	t.Cleanup(func() { skillsJSON, skillsFrom = false, "" })
 
 	var (
 		err error
@@ -146,7 +145,6 @@ func vendorGuide(t *testing.T, project, name string) string {
 // removal.
 func TestSkillsPruneDeletesAndReportsOnOneStream(t *testing.T) {
 	dead := vendorGuide(t, skillsProject(t), "dead")
-	t.Cleanup(func() { skillsPrune = false })
 
 	var (
 		err error
@@ -177,7 +175,6 @@ func TestSkillsPruneDeletesAndReportsOnOneStream(t *testing.T) {
 // that ordering, and that stdout is still the array alone while it happens.
 func TestSkillsJSONPruneDeletesAndLeavesStdoutParseable(t *testing.T) {
 	dead := vendorGuide(t, skillsProject(t), "dead")
-	t.Cleanup(func() { skillsPrune, skillsJSON = false, false })
 
 	var (
 		err error

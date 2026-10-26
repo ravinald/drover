@@ -40,7 +40,6 @@ func pendingProject(t *testing.T) {
 
 func TestPendingIsTheImportQueueAndNotTheRegister(t *testing.T) {
 	pendingProject(t)
-	t.Cleanup(func() { intakeList, intakeJSON = false, false })
 
 	var err error
 	out := capture(t, func() { err = execute(t, "intake", "--list") })

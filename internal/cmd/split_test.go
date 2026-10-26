@@ -505,7 +505,6 @@ func TestShowReadsTheDirectionFromTheDeps(t *testing.T) {
 func TestShowFlagsSplitPairsThatWaitOnEachOther(t *testing.T) {
 	dir := draftProject(t, "")
 	resetSplitFlags(t)
-	t.Cleanup(func() { showJSON, showNoTracker = false, false })
 	proposal := filepath.Join(dir, "proposal.md")
 	write(t, proposal, "Requirements:\n\n1. Reject duplicates.\n")
 	if err := execute(t, "split", "1", "unique widgets", "--into", "bug", "-f", proposal); err != nil {
@@ -534,7 +533,6 @@ func TestShowNamesTheSplitDirectionOnBothItems(t *testing.T) {
 		t.Run(c.want, func(t *testing.T) {
 			dir := draftProject(t, "")
 			resetSplitFlags(t)
-			t.Cleanup(func() { showJSON, showNoTracker = false, false })
 			proposal := filepath.Join(dir, "proposal.md")
 			write(t, proposal, "Requirements:\n\n1. Reject duplicates.\n")
 			if err := execute(t, append([]string{"split", "1", "unique widgets", "--into", "bug", "-f", proposal}, c.flags...)...); err != nil {

@@ -18,7 +18,6 @@ import (
 // An item can cite lines that have drifted on the trunk, and nothing else
 // catches it before the drive. The fixture's go.mod is one line long.
 func TestACitedRangePastTheEndOfItsFileIsReported(t *testing.T) {
-	t.Cleanup(func() { driveDry = false })
 	s := driveProject(t)
 	write(t, filepath.Join(s.cfg.Root, "work", "01-first.md"),
 		"---\ntitle: First\ndeps:\n---\n\n1. Fix `go.mod:1-40` and `gone/away.go:3`, beside go.mod:1.\n")
@@ -71,7 +70,6 @@ func TestAHostAndPortIsNotACitedFile(t *testing.T) {
 
 // At operator the item is held with needs_operator, before any session.
 func TestRefDriftAtOperatorHoldsTheItem(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	s := driveProjectWith(t, "\n[drive]\nmerge_gate = [\"stub-gate\"]\n\n[supervise]\nstale_citations = \"operator\"\n")
 	write(t, filepath.Join(s.cfg.Root, "work", "01-first.md"),
 		"---\ntitle: First\ndeps:\n---\n\n1. Fix `go.mod:9`.\n")
@@ -145,7 +143,6 @@ func TestACarriedItemDoesNotReportRefDriftAgain(t *testing.T) {
 
 // `deps: F65,F66` is a comma-separated line, which Deps reads as one id.
 func TestACommaInDepsIsRefusedWithTheCorrectedForm(t *testing.T) {
-	t.Cleanup(func() { runDry = false })
 	dir := markerProject(t, map[string]string{
 		"B01-scaffold.md": strings.Replace(scaffold, "deps:\n", "deps: B2,B3\n", 1),
 		"B02-two.md":      "---\ntitle: Two\ndeps:\n---\n\n1. Two.\n",
@@ -170,7 +167,6 @@ func TestACommaInDepsIsRefusedWithTheCorrectedForm(t *testing.T) {
 }
 
 func TestDriveRefusesAMalformedDepsLine(t *testing.T) {
-	t.Cleanup(func() { driveDry = false })
 	s := driveProject(t)
 	write(t, filepath.Join(s.cfg.Root, "work", "02-second.md"), "---\ntitle: Second\ndeps: 1, 03\n---\n\n1. Two.\n")
 
@@ -185,7 +181,6 @@ func TestDriveRefusesAMalformedDepsLine(t *testing.T) {
 
 // Two large drives on one host turn passing tests into flakes.
 func TestALoadAboveMaxLoadHoldsDispatch(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	driveProjectWith(t, "\n[drive]\nmerge_gate = [\"stub-gate\"]\nmax_load = 4\n\n[supervise]\nhost_load_admission = \"auto\"\n")
 	var reads atomic.Int32
 	was, poll := loadAverage, loadPoll
@@ -216,7 +211,6 @@ func TestALoadAboveMaxLoadHoldsDispatch(t *testing.T) {
 }
 
 func TestLoadAdmissionAtAutoEmitsClean(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	driveProjectWith(t, "\n[drive]\nmerge_gate = [\"stub-gate\"]\nmax_load = 4\n\n[supervise]\nhost_load_admission = \"auto\"\n")
 	was := loadAverage
 	loadAverage = func() (float64, error) { return 1, nil }
@@ -238,7 +232,6 @@ func TestLoadAdmissionAtAutoEmitsClean(t *testing.T) {
 }
 
 func TestDepsLintOffSaysNotChecked(t *testing.T) {
-	t.Cleanup(func() { driveDry = false })
 	s := driveProjectWith(t, "\n[drive]\nmerge_gate = [\"stub-gate\"]\n\n[supervise]\ndeps_lint = \"off\"\n")
 	write(t, filepath.Join(s.cfg.Root, "work", "02-second.md"), "---\ntitle: Second\ndeps: 1,03\n---\n\n1. Two.\n")
 
@@ -249,7 +242,6 @@ func TestDepsLintOffSaysNotChecked(t *testing.T) {
 }
 
 func TestLoadAdmissionOffNeverReadsTheLoad(t *testing.T) {
-	t.Cleanup(func() { driveJSON, driveEvents, driveFor, driveUntil, driveMax = false, false, 0, "", 0 })
 	driveProject(t)
 	was := loadAverage
 	loadAverage = func() (float64, error) { t.Error("the load was read at off"); return 99, nil }
@@ -282,7 +274,6 @@ func TestAcceptABareNumberNamesThePrefixedIDs(t *testing.T) {
 // A verify command can read an ignored file such as test/e2e/hosts.env, which no
 // worktree has unless [drive] worktree_links carries it.
 func TestAVerifyCommandReadingAnIgnoredFileIsReported(t *testing.T) {
-	t.Cleanup(func() { driveDry = false })
 	s := driveProject(t)
 	dir := s.cfg.Root
 	conf := filepath.Join(dir, ".drover.toml")

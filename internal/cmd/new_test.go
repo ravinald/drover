@@ -65,7 +65,6 @@ func TestNewScaffoldsAnItemRunRefusesUntilAccepted(t *testing.T) {
 	// runDry is a package-level flag cobra does not reset between Execute calls,
 	// so a test that dry-runs leaves every later one dry — and a dry run writes
 	// no ledger row.
-	t.Cleanup(func() { newSev, runDry = "", false })
 
 	capture(t, func() {
 		if err := execute(t, "new", "bug", "the resolver drops a trailing dot"); err != nil {
@@ -116,7 +115,6 @@ func TestNewScaffoldsAnItemRunRefusesUntilAccepted(t *testing.T) {
 // cannot collide and the second does not have to be told what the first took.
 func TestNewAllocatesTheNextIDInItsNamespace(t *testing.T) {
 	dir := newProject(t)
-	t.Cleanup(func() { newSev = "" })
 	for _, c := range []struct{ kind, title, want string }{
 		{"bug", "first bug", "B01-first-bug.md"},
 		{"bug", "second bug", "B02-second-bug.md"},
@@ -275,7 +273,6 @@ func newFiled(t *testing.T, dir, title, foundIn, description string) (string, st
 // human replaces. The marker stays, so the description makes nothing runnable.
 func TestNewWritesTheDescriptionBelowProvenanceAndAboveTheRole(t *testing.T) {
 	dir := newProject(t)
-	t.Cleanup(func() { runDry = false })
 	write(t, filepath.Join(dir, "work", "B01-vet-the-allow-list.md"),
 		"---\ntitle: vet the allow-list\ndeps:\nkind: bug\n---\n\n1. Fix it.\n")
 
@@ -318,7 +315,6 @@ func TestNewWritesACRLFDescriptionWithLFEndings(t *testing.T) {
 // names where that one was found, not this one, so draft must not read it.
 func TestDraftIgnoresAProvenanceLineQuotedInTheDescription(t *testing.T) {
 	dir := newProject(t)
-	t.Cleanup(func() { draftRunner = "" })
 	write(t, filepath.Join(dir, "work", "F01-vet.md"), "---\ntitle: vet\ndeps:\nkind: feature\n---\n\n1. Vet.\n")
 	newFiled(t, dir, "quoted provenance", "", "B114 reads:\n\nFound while working F1, vet.\n")
 	brief := capture(t, func() {
@@ -378,7 +374,6 @@ func TestNewRefusesADescriptionItCannotWrite(t *testing.T) {
 // writes the requirements reads, so the note has to reach it.
 func TestDraftCarriesTheAuditNotesOfTheItemAFindingCameFrom(t *testing.T) {
 	dir := newProject(t)
-	t.Cleanup(func() { draftRunner = "" })
 	write(t, filepath.Join(dir, "work", "F01-narrow-the-allow-list.md"),
 		"---\ntitle: narrow the allow-list\ndeps:\nkind: feature\n---\n\n1. Narrow it.\n")
 	write(t, filepath.Join(dir, "work", "F02-quiet-item.md"),

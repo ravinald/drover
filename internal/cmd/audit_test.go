@@ -126,7 +126,6 @@ func TestAuditCodeByAgentResolvesPerSession(t *testing.T) {
 		{name: "a launched session with no id", session: "", want: ExitRefused},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			t.Cleanup(func() { auditCodeBy, auditReviewer = "", "" })
 			s := fixture(t, "")
 			path := filepath.Join(s.cfg.Root, "ledger.jsonl")
 			for _, r := range []ledger.Row{
@@ -259,7 +258,6 @@ func TestAuditWarnsWhenIndependenceContradictsTheRecord(t *testing.T) {
 // The warning must not become a refusal by accident: the row is written and the
 // command exits 0, or an honest record becomes the expensive path to take.
 func TestAuditRecordsDespiteTheWarning(t *testing.T) {
-	t.Cleanup(func() { auditCodeBy, auditReviewer = "", "" })
 	s := fixture(t, "")
 	path := filepath.Join(s.cfg.Root, "ledger.jsonl")
 	if err := ledger.Append(path, ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "claude"}); err != nil {
