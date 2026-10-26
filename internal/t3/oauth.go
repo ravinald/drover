@@ -88,15 +88,74 @@ func WriteGrant(path string, g Grant) error {
 	return os.Rename(tmp.Name(), path)
 }
 
-// Tokens hands out the access token from a token file, renewing it through the
-// refresh token when it has expired and writing the renewed grant back.
+// SameEndpoint reports whether two MCP endpoint URLs name one endpoint, after
+// normalizing the case of scheme and host, a default port, and a trailing
+// slash. An unparseable or relative URL matches nothing.
+func SameEndpoint(a, b string) bool {
+	na, ok1 := normalEndpoint(a)
+	nb, ok2 := normalEndpoint(b)
+	return ok1 && ok2 && na == nb
+}
+
+func normalEndpoint(raw string) (string, bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return "", false
+	}
+	scheme, host, port := strings.ToLower(u.Scheme), strings.ToLower(u.Hostname()), u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host = net.JoinHostPort(host, port)
+	} else if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	path := strings.TrimRight(u.EscapedPath(), "/")
+	out := scheme + "://" + host + path
+	if u.RawQuery != "" {
+		out += "?" + u.RawQuery
+	}
+	return out, true
+}
+
+// For refuses to hand the grant to an endpoint it was not issued for. [t3] url
+// can come from a project's .drover.toml, so a cloned repo naming its own
+// server would otherwise receive the bearer token of whatever the operator
+// signed in to.
+func (g Grant) For(endpoint, path string) error {
+	if g.URL == "" {
+		return fmt.Errorf("the T3 Code grant in %s names no endpoint it was issued for, so drover sends it nowhere: run `drover t3 login` to sign in to %s", path, endpoint)
+	}
+	if !SameEndpoint(g.URL, endpoint) {
+		return fmt.Errorf("the T3 Code grant in %s was issued for %s, and [t3] url names %s: drover sends a grant only to the endpoint that issued it. "+
+			"Correct [t3] url, or run `drover t3 login` to sign in to %s", path, g.URL, endpoint, endpoint)
+	}
+	return nil
+}
+
+// Tokens hands out the access token from a token file for one endpoint,
+// renewing it through the refresh token when it has expired and writing the
+// renewed grant back.
 type Tokens struct {
 	Path string
+	// URL is the endpoint the token is sent to. A grant issued for any other
+	// is refused before a request is made.
+	URL  string
 	HTTP *http.Client
+	// ReadOnly renews in memory and leaves the file as it was, for a caller
+	// that writes nothing. A renewal that rotated the refresh token is written
+	// anyway: the one on disk may be spent, and keeping it would sign the
+	// bridge out.
+	ReadOnly bool
 
 	mu    sync.Mutex
 	grant *Grant
 }
+
+// Client is an MCP client for the endpoint these tokens are for, so the URL a
+// request goes to and the URL the grant is checked against cannot differ.
+func (t *Tokens) Client() *Client { return NewClient(t.URL, t.Token) }
 
 // Token is the current access token, renewed first when it has expired.
 func (t *Tokens) Token(ctx context.Context) (string, error) {
@@ -109,8 +168,17 @@ func (t *Tokens) Token(ctx context.Context) (string, error) {
 		}
 		t.grant = &g
 	}
+	if err := t.grant.For(t.URL, t.Path); err != nil {
+		return "", err
+	}
 	if !t.grant.Expired(time.Now()) {
 		return t.grant.AccessToken, nil
+	}
+	// Another bridge on this host may have renewed the file since it was read,
+	// and under refresh-token rotation the token held here is then spent.
+	if g, err := ReadGrant(t.Path); err == nil && g.For(t.URL, t.Path) == nil && !g.Expired(time.Now()) {
+		t.grant = &g
+		return g.AccessToken, nil
 	}
 	if t.grant.RefreshToken == "" || t.grant.TokenEndpoint == "" {
 		return "", fmt.Errorf("the T3 Code grant in %s expired at %s and carries no refresh token: run `drover t3 login`",
@@ -120,8 +188,10 @@ func (t *Tokens) Token(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("the T3 Code grant in %s expired and would not renew (%v): run `drover t3 login`", t.Path, err)
 	}
-	if err := WriteGrant(t.Path, next); err != nil {
-		return "", fmt.Errorf("renewed the T3 Code grant and could not write it to %s: %w", t.Path, err)
+	if !t.ReadOnly || next.RefreshToken != t.grant.RefreshToken {
+		if err := WriteGrant(t.Path, next); err != nil {
+			return "", fmt.Errorf("renewed the T3 Code grant and could not write it to %s: %w", t.Path, err)
+		}
 	}
 	t.grant = &next
 	return next.AccessToken, nil

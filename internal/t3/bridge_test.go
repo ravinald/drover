@@ -118,6 +118,14 @@ func TestACleanRunReadsTheRecordedTurnsTokensAndCost(t *testing.T) {
 	if got := strings.Join(kinds, " "); got != wantKinds {
 		t.Errorf("kinds = %s\nwant    %s", got, wantKinds)
 	}
+	if v, ok := final["is_error"]; !ok || v != false {
+		t.Errorf("the result line's is_error = %v (present %v), want false on every result line", v, ok)
+	}
+	for _, l := range lines(t, path) {
+		if _, ok := l["is_error"]; ok && l["t3"] != runlog.T3Result {
+			t.Errorf("a %v line carries is_error; only the result does", l["t3"])
+		}
+	}
 	if cps, _ := final["checkpoints"].([]any); len(cps) != 1 {
 		t.Errorf("checkpoints = %v, want the run's one checkpoint item", final["checkpoints"])
 	}
@@ -220,6 +228,41 @@ func TestCancellingInterruptsTheLaunchedRunAndNoOther(t *testing.T) {
 	}
 }
 
+// The SDK writes an interrupted query's result after the interrupt, so the
+// cancelled bridge waits for it within its stop budget, and the stage's
+// tokens and cost reach the usage row rather than a usage_unavailable.
+func TestACancelledRunWaitsForTheSDKResultItsInterruptWrites(t *testing.T) {
+	r := newRig(t)
+	r.srv.Set(func(s *t3test.Server) { s.Hold, s.LateResult = true, 150*time.Millisecond })
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for len(r.srv.CallsTo("t3_thread_wait")) == 0 {
+			time.Sleep(5 * time.Millisecond)
+		}
+		cancel()
+	}()
+	began := time.Now()
+	path, err := r.run(ctx, t, "hold on")
+	if !errors.Is(err, t3.ErrRunFailed) {
+		t.Fatalf("Run = %v, want ErrRunFailed", err)
+	}
+	if took := time.Since(began); took > 8*time.Second {
+		t.Errorf("the cancelled bridge took %v, past the budget runner.Run allows before it kills", took)
+	}
+	var result map[string]any
+	for _, l := range lines(t, path) {
+		if l["t3"] == runlog.T3UsageUnavailable {
+			t.Errorf("a cancelled run printed usage_unavailable although the SDK result arrived: %v", l)
+		}
+		if l["t3"] == runlog.T3Result {
+			result = l
+		}
+	}
+	if result["subtype"] != "interrupted" || result["num_turns"] == nil || result["usage"] == nil {
+		t.Errorf("result = %v, want interrupted carrying num_turns and usage", result)
+	}
+}
+
 func TestAMissingProjectNamesTProjectAdd(t *testing.T) {
 	r := newRig(t)
 	_, err := t3.FindProject(context.Background(), r.cl, "nowhere")
@@ -308,8 +351,83 @@ func TestGrantFileIsPrivateAndExpiryRespectsTheRefreshToken(t *testing.T) {
 	if err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("token file mode %v, %v; want 0600", fi.Mode().Perm(), err)
 	}
-	tok := &t3.Tokens{Path: path}
+	tok := &t3.Tokens{Path: path, URL: "https://x/mcp"}
 	if _, err := tok.Token(context.Background()); err == nil || !strings.Contains(err.Error(), "drover t3 login") {
 		t.Errorf("an expired grant with no refresh token = %v, want the login named", err)
+	}
+}
+
+func TestSameEndpointNormalizesOnlyWhatNamesTheSameServer(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		same bool
+	}{
+		{"https://h.example/mcp", "https://h.example/mcp", true},
+		{"https://H.Example:443/mcp/", "https://h.example/mcp", true},
+		{"http://localhost:80/mcp", "HTTP://localhost/mcp", true},
+		{"https://h.example/mcp", "http://h.example/mcp", false},
+		{"https://h.example/mcp", "https://h.example:8443/mcp", false},
+		{"https://h.example/mcp", "https://h.example/other", false},
+		{"https://h.example/mcp", "https://evil.example/mcp", false},
+		{"https://h.example/mcp", "https://h.example.evil.example/mcp", false},
+		{"", "https://h.example/mcp", false},
+		{"/mcp", "/mcp", false},
+	} {
+		if got := t3.SameEndpoint(c.a, c.b); got != c.same {
+			t.Errorf("SameEndpoint(%q, %q) = %v, want %v", c.a, c.b, got, c.same)
+		}
+	}
+}
+
+// A grant goes only to the endpoint it was issued for: [t3] url may sit in a
+// cloned project's config, and a server it names gets no request at all.
+func TestAGrantForAnotherEndpointIsRefusedBeforeAnyRequest(t *testing.T) {
+	for _, issued := range []string{"https://t3-host-a.example/mcp", ""} {
+		r := newRig(t)
+		path := filepath.Join(t.TempDir(), "t3-token")
+		if err := t3.WriteGrant(path, t3.Grant{URL: issued, AccessToken: "test-token"}); err != nil {
+			t.Fatal(err)
+		}
+		tok := &t3.Tokens{Path: path, URL: r.srv.MCP}
+		_, err := tok.Client().Initialize(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "drover t3 login") || !strings.Contains(err.Error(), r.srv.MCP) {
+			t.Errorf("grant for %q: Initialize = %v, want a refusal naming [t3] url and the login", issued, err)
+		}
+		if issued != "" && !strings.Contains(err.Error(), issued) {
+			t.Errorf("the refusal does not name the endpoint the grant was issued for: %v", err)
+		}
+		r.srv.Set(func(s *t3test.Server) {
+			if s.Hits != 0 {
+				t.Errorf("grant for %q: the server at [t3] url received %d requests, want 0", issued, s.Hits)
+			}
+		})
+	}
+}
+
+// Read-only renewal leaves the token file as it was, unless the server rotated
+// the refresh token, when the file on disk would otherwise hold a spent one.
+func TestReadOnlyRenewalWritesOnlyARotatedRefreshToken(t *testing.T) {
+	for _, rotate := range []string{"", "r2"} {
+		r := newRig(t)
+		r.srv.Set(func(s *t3test.Server) { s.Token, s.Refresh, s.Renewed, s.Rotate = "old", "r1", "new", rotate })
+		path := filepath.Join(t.TempDir(), "t3-token")
+		g := t3.Grant{URL: r.srv.MCP, AccessToken: "old", RefreshToken: "r1", ClientID: "c",
+			TokenEndpoint: r.srv.URL + "/token", ExpiresAt: time.Now().Add(-time.Hour)}
+		if err := t3.WriteGrant(path, g); err != nil {
+			t.Fatal(err)
+		}
+		before, _ := os.ReadFile(path)
+		tok := &t3.Tokens{Path: path, URL: r.srv.MCP, ReadOnly: true}
+		if _, err := tok.Client().Initialize(context.Background()); err != nil {
+			t.Fatalf("rotate %q: Initialize = %v, want the renewed token accepted", rotate, err)
+		}
+		after, _ := os.ReadFile(path)
+		got, _ := t3.ReadGrant(path)
+		switch {
+		case rotate == "" && !bytes.Equal(before, after):
+			t.Errorf("read-only renewal rewrote the token file:\n%s", after)
+		case rotate != "" && got.RefreshToken != rotate:
+			t.Errorf("a rotated refresh token was not written back: the file holds %q", got.RefreshToken)
+		}
 	}
 }

@@ -238,3 +238,98 @@ func TestADriveRefusesABlindT3RunnerUnderAWeeklyLevel(t *testing.T) {
 		t.Errorf("--allow-blind-usage still refused: %v", err)
 	}
 }
+
+// A grant issued for one endpoint never reaches the server another [t3] url
+// names: discover, the bridge and check each refuse naming the login, and the
+// server [t3] url points at receives nothing.
+func TestAGrantForAnotherEndpointReachesNoServer(t *testing.T) {
+	srv, root := t3Host(t)
+	token := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "t3-token")
+	if err := t3.WriteGrant(token, t3.Grant{URL: "https://t3-host-a.example/mcp", AccessToken: "test-token"}); err != nil {
+		t.Fatal(err)
+	}
+
+	c := asDroverCmd(t, "t3", "discover")
+	c.Dir = root
+	out, err := c.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "drover t3 login") || !strings.Contains(string(out), "t3-host-a.example") {
+		t.Errorf("discover = %v\n%s\nwant a refusal naming both endpoints and the login", err, out)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "F17-x.20261026-120000.000000000.jsonl")
+	oc, err := runner.Run(context.Background(), runner.Where{Dir: root}, t3Spec(false), runner.Headless, "hi", logPath, &strings.Builder{})
+	if b, _ := os.ReadFile(logPath); err == nil || oc.Exit != 1 || !strings.Contains(string(b), "drover t3 login") {
+		t.Errorf("t3 run = %v, exit %d\n%s\nwant exit 1 naming the login", err, oc.Exit, b)
+	}
+
+	dir, _ := t3BridgeProject(t, srv, token, "")
+	got := findings(openIn(t, dir).checkReport(), "BRIDGE SIGNED OUT")
+	if len(got) != 1 || !strings.Contains(got[0].Message, "t3-host-a.example") || !strings.Contains(got[0].Detail, "drover t3 login") {
+		t.Errorf("check BRIDGE SIGNED OUT = %+v, want one naming the grant's endpoint and the login", got)
+	}
+
+	srv.Set(func(s *t3test.Server) {
+		if s.Hits != 0 {
+			t.Errorf("the server [t3] url names received %d requests, want 0", s.Hits)
+		}
+	})
+}
+
+// An expired grant carrying a refresh token is not signed out: check renews it
+// in memory, initializes with the renewed token, and leaves the file as it was.
+func TestCheckRenewsAnExpiredGrantWithoutWritingIt(t *testing.T) {
+	srv, _ := t3Host(t)
+	srv.Set(func(s *t3test.Server) { s.Token, s.Refresh, s.Renewed = "never-issued", "r1", "renewed" })
+	token := filepath.Join(t.TempDir(), "t3-token")
+	if err := t3.WriteGrant(token, t3.Grant{URL: srv.MCP, AccessToken: "old", RefreshToken: "r1", ClientID: "c",
+		TokenEndpoint: srv.URL + "/token", ExpiresAt: time.Now().Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, _ := t3BridgeProject(t, srv, token, "")
+	rep := openIn(t, dir).checkReport()
+	for _, kind := range []string{"BRIDGE SIGNED OUT", "BRIDGE UNREACHABLE", "BRIDGE VERSION"} {
+		if got := findings(rep, kind); len(got) != 0 {
+			t.Errorf("%s = %+v, want none for a grant that renews", kind, got)
+		}
+	}
+	if after, _ := os.ReadFile(token); string(after) != string(before) {
+		t.Errorf("check rewrote the token file:\nbefore %s\nafter  %s", before, after)
+	}
+	if len(srv.CallsTo("t3_thread_launch")) != 0 {
+		t.Error("check launched a thread")
+	}
+}
+
+// An interrupted session says nothing about whether the provider log moved, so
+// it neither trips the blind-usage refusal nor hides an earlier completed
+// session that did print usage_unavailable.
+func TestAnInterruptedSessionIsNoEvidenceOfABlindRunner(t *testing.T) {
+	srv, _ := t3Host(t)
+	dir, logs := t3BridgeProject(t, srv, filepath.Join(t.TempDir(), "t3-token"), "\n[usage.weekly]\npause_remaining = 10\n")
+	blindLog := func(name, session, subtype string) {
+		write(t, filepath.Join(logs, name),
+			`{"t3":"thread.started","thread_id":"mcp:x","session":"`+session+`"}`+"\n"+
+				`{"t3":"usage_unavailable","path":"/p","reason":"gone"}`+"\n"+
+				`{"t3":"result","subtype":"`+subtype+`","is_error":`+fmt.Sprint(subtype != "success")+`,"checkpoints":[],"usage_unavailable":"not reported: gone"}`+"\n")
+	}
+	blindLog("F17-x.20261026-130000.000000000.jsonl", "late", "interrupted")
+	write(t, filepath.Join(dir, "ledger.jsonl"),
+		`{"id":"F17","stage":"implement","runner":"t3","session":"late","date":"2026-10-26"}`+"\n")
+	defer func(r string, a bool) { driveRunner, driveAllowBlind = r, a }(driveRunner, driveAllowBlind)
+	driveRunner, driveAllowBlind = "t3", false
+	if err := openIn(t, dir).preflightBlindUsage("t3"); err != nil {
+		t.Errorf("an interrupted last session refused the drive: %v", err)
+	}
+
+	blindLog("F17-x.20261026-120000.000000000.jsonl", "early", "success")
+	write(t, filepath.Join(dir, "ledger.jsonl"),
+		`{"id":"F17","stage":"implement","runner":"t3","session":"early","date":"2026-10-26"}`+"\n"+
+			`{"id":"F17","stage":"implement","runner":"t3","session":"late","date":"2026-10-26"}`+"\n")
+	if err := openIn(t, dir).preflightBlindUsage("t3"); Code(err) != ExitRefused {
+		t.Errorf("a completed blind session behind an interrupted one = %v, want the refusal", err)
+	}
+}

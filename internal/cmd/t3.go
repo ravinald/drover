@@ -79,7 +79,7 @@ run it as the bridge's sign-in check.`,
 		}
 		path := cfg.T3TokenFile()
 		if t3Check {
-			tok := &t3.Tokens{Path: path}
+			tok := &t3.Tokens{Path: path, URL: cfg.T3.URL}
 			if _, err := tok.Token(c.Context()); err != nil {
 				return err
 			}
@@ -287,8 +287,8 @@ func t3Config() (*config.Config, error) {
 }
 
 func t3Client(cfg *config.Config) *t3.Client {
-	tok := &t3.Tokens{Path: cfg.T3TokenFile()}
-	return t3.NewClient(cfg.T3.URL, tok.Token)
+	tok := &t3.Tokens{Path: cfg.T3TokenFile(), URL: cfg.T3.URL}
+	return tok.Client()
 }
 
 // t3PromptFrom is the prompt from exactly one of -p, the positional argument
@@ -368,33 +368,39 @@ func openBrowser(u string) bool {
 	return exec.Command(argv[0], argv[1:]...).Start() == nil // #nosec G204 -- the platform opener, with the URL drover built
 }
 
-// t3Blind is why usage_admission cannot see a t3 runner, read off the last
-// session the ledger records it running: that session's log printed
-// usage_unavailable. Empty when it did not, when the runner is not a bridge,
-// or when no such session or log can be found, which is not evidence of
-// blindness.
+// t3Blind is why usage_admission cannot see a t3 runner, read off the newest
+// session the ledger records it running to completion: that session's log
+// printed usage_unavailable. A session that was interrupted or stopped on an
+// error is passed over, because its SDK result may never have been written and
+// its absence says nothing about whether the log format moved. Empty when the
+// runner is not a bridge, or when no completed session or its log can be
+// found, which is not evidence of blindness.
 func (s *session) t3Blind(name string) string {
 	spec, ok := s.cfg.Runners[name]
 	if !ok || !runner.IsT3(spec) || s.ledger == nil {
 		return ""
 	}
-	var sessionID string
-	for i := len(s.ledger.Rows) - 1; i >= 0; i-- {
+	seen := map[string]bool{}
+	for i := len(s.ledger.Rows) - 1; i >= 0 && len(seen) < t3BlindLookback; i-- {
 		r := s.ledger.Rows[i]
-		if r.Stage != "" && r.Runner == name && r.Session != "" {
-			sessionID = r.Session
-			break
+		if r.Stage == "" || r.Runner != name || r.Session == "" || seen[r.Session] {
+			continue
+		}
+		seen[r.Session] = true
+		path := t3LogFor(s.cfg.LogDir(), r.Session)
+		if path == "" {
+			continue
+		}
+		if subtype, why := t3UsageUnavailable(path); subtype == "success" {
+			return why
 		}
 	}
-	if sessionID == "" {
-		return ""
-	}
-	path := t3LogFor(s.cfg.LogDir(), sessionID)
-	if path == "" {
-		return ""
-	}
-	return t3UsageUnavailable(path)
+	return ""
 }
+
+// t3BlindLookback bounds how many sessions t3Blind reads back through for one
+// that completed: each costs a scan of the log directory.
+const t3BlindLookback = 20
 
 // t3LogFor is the newest log in dir whose thread.started line names the drover
 // session, empty when none does. Stage rows carry the session and not the log,
@@ -423,14 +429,15 @@ func t3LogFor(dir, sessionID string) string {
 	return ""
 }
 
-// t3UsageUnavailable is the reason a finished t3 log gave for printing no
-// usage, empty when it printed usage or never finished.
-func t3UsageUnavailable(path string) string {
+// t3UsageUnavailable is how a finished t3 log ended and the reason it gave for
+// printing no usage, the reason empty when it printed usage. Both are empty for
+// a log that never finished.
+func t3UsageUnavailable(path string) (subtype, why string) {
 	rd, err := runlog.ReadResult(path)
 	if err != nil || !rd.Found || rd.Result.Schema != "t3" {
-		return ""
+		return "", ""
 	}
-	return rd.Result.UsageUnavailable
+	return rd.Result.Subtype, rd.Result.UsageUnavailable
 }
 
 // blindRunners are the runners this drive launches by default whose last

@@ -1737,8 +1737,8 @@ An item is printed once, when its status says it is finished, because `afterPosi
 }
 ```
 
-- `subtype` is `success` for a run T3 reports `completed`. Anything else sets `is_error` and names the run's own status (`interrupted`, `failed`, `cancelled`), the server's refusal code (`thread_not_found`, `capability_denied`), or the bridge's (`unauthorized`, `wait_failed`, `refused` for a project, provider or model that stopped the stage before a launch). `result` then carries why, followed by the run's last assistant message where it wrote one. The bridge exits 1 for all of them.
-- `num_turns`, `usage`, `cost_usd` and `session_id` come from the SDK `result` in the provider log. Where there was none, all four are absent rather than zero, and `usage_unavailable` says the counts were not reported and why. A usage row is written only from a result that carries `usage`.
+- `is_error` is on every `result` line, `false` for `success`, and on no other kind. `subtype` is `success` for a run T3 reports `completed`. Anything else sets `is_error` and names the run's own status (`interrupted`, `failed`, `cancelled`), the server's refusal code (`thread_not_found`, `capability_denied`), or the bridge's (`unauthorized`, `wait_failed`, `refused` for a project, provider or model that stopped the stage before a launch). `result` then carries why, followed by the run's last assistant message where it wrote one. The bridge exits 1 for all of them.
+- `num_turns`, `usage`, `cost_usd` and `session_id` come from the SDK `result` in the provider log. A stopped bridge interrupts its run and waits up to 8 seconds for the SDK `result` the interrupt writes, inside the 10 seconds `runner.Run` allows after `SIGTERM`. Where there was none, all four are absent rather than zero, and `usage_unavailable` says the counts were not reported and why. A usage row is written only from a result that carries `usage`.
 - `checkpoints` is the item id of every `checkpoint` item of the run, empty when there were none.
 - `session_id` is the SDK's own session id, which also names the Claude Code transcript the SDK writes, so `usage --sync` does not count a T3 thread twice.
 

@@ -275,6 +275,11 @@ type Options struct {
 	Grace time.Duration
 }
 
+// stopBudget bounds everything a bridge does after it is told to stop. It sits
+// inside the 10 seconds runner.Run waits after SIGTERM before it kills the
+// group, leaving the rest for the result line to be written.
+const stopBudget = 8 * time.Second
+
 // ErrRunFailed is the bridge's exit for a run that did not complete; its
 // result line has already said why.
 var ErrRunFailed = errors.New("the T3 Code run did not complete")
@@ -343,24 +348,32 @@ func Run(ctx context.Context, o Options) (err error) {
 	ended := false
 	// Every return before the run ends stops the run this bridge launched, and
 	// only that one: the thread id and run id are the launch's own answer.
-	stop := func() {
+	stop := func(ictx context.Context) {
 		if ended {
 			return
 		}
 		ended = true
-		ictx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
 		if _, ierr := Interrupt(ictx, o.Client, f.thread, f.run, "drover stopped the stage"); ierr != nil {
 			fmt.Fprintf(os.Stderr, "drover t3: interrupting run %s of thread %s failed: %v\n", f.run, f.thread, ierr)
 		}
 	}
-	defer stop()
+	defer func() {
+		ictx, cancel := context.WithTimeout(context.Background(), stopBudget)
+		defer cancel()
+		stop(ictx)
+	}()
 
 	status := l.Status
 	for {
 		if ctx.Err() != nil {
-			stop()
-			_ = f.drain(context.Background(), true)
+			// The interrupt, the last read and the wait for the SDK's result
+			// share one budget, so the result line is written before the kill
+			// that follows SIGTERM.
+			sctx, cancel := context.WithTimeout(context.Background(), stopBudget)
+			defer cancel()
+			stop(sctx)
+			_ = f.drain(sctx, true)
+			f.lastRead(sctx, stopBudget)
 			f.finish("interrupted", fmt.Sprintf("drover stopped the stage (%v), and interrupted run %s", context.Cause(ctx), f.run))
 			return ErrRunFailed
 		}
@@ -401,7 +414,7 @@ func Run(ctx context.Context, o Options) (err error) {
 			}
 		}
 	}
-	f.lastRead(ctx)
+	f.lastRead(ctx, f.o.Grace)
 	if status != "completed" {
 		f.finish(status, fmt.Sprintf("the T3 Code run %s ended %s", f.run, status))
 		return ErrRunFailed
@@ -570,15 +583,24 @@ func (f *follower) noteWaiting(status string) {
 }
 
 // lastRead gives the provider log the grace a result written after the run
-// ended needs.
-func (f *follower) lastRead(ctx context.Context) {
-	deadline := time.Now().Add(f.o.Grace)
-	for f.log.result == nil && time.Now().Before(deadline) && ctx.Err() == nil {
+// ended needs: the SDK writes it once the query closes, which can be after T3
+// marks the run complete, and an interrupted query closes only once it has
+// aborted. It stops early at ctx's deadline.
+func (f *follower) lastRead(ctx context.Context, grace time.Duration) {
+	deadline := time.Now().Add(grace)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	for f.log.result == nil {
+		f.log.poll(f.relay)
+		left := time.Until(deadline)
+		if f.log.result != nil || left <= 0 || ctx.Err() != nil {
+			return
+		}
 		select {
-		case <-time.After(f.o.Poll / 4):
+		case <-time.After(min(f.o.Poll/4, left)):
 		case <-ctx.Done():
 		}
-		f.log.poll(f.relay)
 	}
 }
 
@@ -606,12 +628,13 @@ func (f *follower) finish(subtype, why string) {
 	if checks == nil {
 		checks = []string{}
 	}
+	failed := subtype != "success"
 	ev := runlog.T3Event{
 		Kind: runlog.T3Result, ThreadID: f.thread, RunID: f.run, Provider: f.o.Provider,
-		Model: f.o.Launch.Place.Model, Subtype: subtype, IsError: subtype != "success",
+		Model: f.o.Launch.Place.Model, Subtype: subtype, IsError: &failed,
 		Result: f.answer, Checkpoints: &checks,
 	}
-	if ev.IsError {
+	if failed {
 		ev.Result = why
 		if f.answer != "" {
 			ev.Result += "; its last message: " + f.answer

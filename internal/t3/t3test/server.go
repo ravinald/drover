@@ -94,6 +94,16 @@ type Server struct {
 	NoLog  bool
 	// SSE answers tools/call as an event stream rather than one JSON object.
 	SSE bool
+	// LateResult leaves the SDK result out of the provider log a launch writes
+	// and appends it this long after the run is interrupted, which is when the
+	// SDK writes it for an interrupted query.
+	LateResult time.Duration
+	// Refresh is the refresh token /token accepts. Each refresh it answers
+	// issues Renewed as the access token and makes it the one Token requires,
+	// and Rotate, when set, as the new refresh token.
+	Refresh, Renewed, Rotate string
+	// Hits counts every HTTP request, before any check of its bearer.
+	Hits int
 
 	Calls   []Call
 	Threads map[string]*Thread
@@ -167,8 +177,13 @@ type rpcReq struct {
 
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
+	s.Hits++
 	token := s.Token
 	s.mu.Unlock()
+	if r.URL.Path == "/token" && r.Method == http.MethodPost {
+		s.token(w, r)
+		return
+	}
 	if r.URL.Path != "/mcp" || r.Method != http.MethodPost {
 		http.NotFound(w, r)
 		return
@@ -215,6 +230,25 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	sse := s.SSE
 	s.mu.Unlock()
 	reply(w, req.ID, map[string]any{"content": []map[string]any{{"type": "text", "text": string(text)}}, "isError": failure != ""}, sse)
+}
+
+// token is the OAuth token endpoint, answering the refresh grant alone.
+func (s *Server) token(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	if r.FormValue("grant_type") != "refresh_token" || s.Refresh == "" || r.FormValue("refresh_token") != s.Refresh {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
+		return
+	}
+	s.Token = s.Renewed
+	out := map[string]any{"access_token": s.Renewed, "token_type": "Bearer", "expires_in": 3600}
+	if s.Rotate != "" {
+		out["refresh_token"] = s.Rotate
+		s.Refresh = s.Rotate
+	}
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 func reply(w http.ResponseWriter, id json.RawMessage, result any, sse bool) {
@@ -302,7 +336,7 @@ func (s *Server) launch(args map[string]any) (any, string) {
 	s.Threads[id] = t
 	if !s.NoLog && s.LogDir != "" {
 		_ = os.MkdirAll(s.LogDir, 0o700)
-		_ = os.WriteFile(filepath.Join(s.LogDir, "events."+strings.ReplaceAll(id, ":", "-")+".log"), []byte(providerLog(id)), 0o600)
+		_ = os.WriteFile(s.logPath(id), []byte(providerLog(id, s.LateResult == 0)), 0o600)
 	}
 	return map[string]any{"threadId": id, "projectId": t.Project,
 		"modelSelection": args["modelSelection"], "runId": run, "status": "preparing"}, ""
@@ -315,19 +349,28 @@ func nilIfEmpty(s string) any {
 	return s
 }
 
+func (s *Server) logPath(threadID string) string {
+	return filepath.Join(s.LogDir, "events."+strings.ReplaceAll(threadID, ":", "-")+".log")
+}
+
+func providerLine(threadID, direction, payload string) string {
+	return fmt.Sprintf(`[2026-10-25T22:42:17.100Z] NTIVE: {"provider":"claudeAgent","protocol":"claude-agent-sdk.query","providerSessionId":%q,"event":{"direction":%q,"stage":"stream","payload":%s}}`+"\n",
+		threadID, direction, payload)
+}
+
 // providerLog is the provider event log the probe's Claude driver wrote, cut
 // to the lines that matter: the query opening, the two payloads drover reads,
-// and an event of another kind in between.
-func providerLog(threadID string) string {
-	line := func(direction, payload string) string {
-		return fmt.Sprintf(`[2026-10-25T22:42:17.100Z] NTIVE: {"provider":"claudeAgent","protocol":"claude-agent-sdk.query","providerSessionId":%q,"event":{"direction":%q,"stage":"stream","payload":%s}}`+"\n",
-			threadID, direction, payload)
+// and an event of another kind in between. withResult false leaves the SDK
+// result to be appended later.
+func providerLog(threadID string, withResult bool) string {
+	out := providerLine(threadID, "outgoing", `{"type":"query.open","options":{"model":"claude-haiku-5-5","cwd":"/tmp","sessionId":"5b1c8f0e-probe"}}`) +
+		providerLine(threadID, "incoming", `{"type":"system","subtype":"init"}`) +
+		providerLine(threadID, "incoming", RecordedRateLimit) +
+		providerLine(threadID, "incoming", `{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}`)
+	if withResult {
+		out += providerLine(threadID, "incoming", RecordedResult)
 	}
-	return line("outgoing", `{"type":"query.open","options":{"model":"claude-haiku-5-5","cwd":"/tmp","sessionId":"5b1c8f0e-probe"}}`) +
-		line("incoming", `{"type":"system","subtype":"init"}`) +
-		line("incoming", RecordedRateLimit) +
-		line("incoming", `{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}`) +
-		line("incoming", RecordedResult)
+	return out
 }
 
 func (s *Server) thread(args map[string]any) (*Thread, string) {
@@ -416,5 +459,16 @@ func (s *Server) interrupt(args map[string]any) (any, string) {
 		return map[string]any{"threadId": t.ID, "runId": nil, "status": "no_active_run"}, ""
 	}
 	t.Status = "interrupted"
+	if s.LateResult > 0 && !s.NoLog && s.LogDir != "" {
+		path, line := s.logPath(t.ID), providerLine(t.ID, "incoming", RecordedResult)
+		time.AfterFunc(s.LateResult, func() {
+			f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- the test's own log directory
+			if err != nil {
+				return
+			}
+			_, _ = f.WriteString(line)
+			_ = f.Close()
+		})
+	}
 	return map[string]any{"threadId": t.ID, "runId": t.RunID, "status": "interrupted"}, ""
 }

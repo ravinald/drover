@@ -72,10 +72,10 @@ type T3Event struct {
 	// result. Usage, NumTurns and CostUSD are pointers so a result whose
 	// counts could not be read omits them, rather than reporting zeros a usage
 	// row would record as a free session; UsageUnavailable then says why.
-	// Checkpoints is a pointer so the result carries it empty and every other
-	// kind omits it.
+	// IsError and Checkpoints are pointers so the result carries them false and
+	// empty, and every other kind omits them.
 	Subtype          string    `json:"subtype,omitempty"`
-	IsError          bool      `json:"is_error,omitempty"`
+	IsError          *bool     `json:"is_error,omitempty"`
 	Result           string    `json:"result,omitempty"`
 	NumTurns         *int      `json:"num_turns,omitempty"`
 	Usage            *APIUsage `json:"usage,omitempty"`
@@ -95,7 +95,7 @@ func readT3(line []byte) (Result, bool) {
 		return Result{}, false
 	}
 	r := Result{
-		Subtype: ev.Subtype, IsError: ev.IsError, Text: ev.Result, Model: ev.Model,
+		Subtype: ev.Subtype, IsError: ev.IsError != nil && *ev.IsError, Text: ev.Result, Model: ev.Model,
 		SessionID: ev.SessionID, DurationMS: ev.DurationMS, UsageUnavailable: ev.UsageUnavailable,
 	}
 	if ev.NumTurns != nil {
