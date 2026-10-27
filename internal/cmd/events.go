@@ -55,7 +55,8 @@ const (
 	// evThreadOpened is a T3 Code thread `drover t3 thread --from-event`
 	// opened for an item's needs_operator or needs_supervisor, written when
 	// the command destination that ran it answers. It is the drive's record of
-	// which thread answers an item, and no destination routes it.
+	// which thread answers an item, and reaches only a destination whose events
+	// table names it.
 	evThreadOpened = "thread_opened"
 )
 
