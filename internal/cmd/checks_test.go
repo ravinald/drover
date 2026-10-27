@@ -20,6 +20,10 @@ import (
 //	behind     vuln fails; main's tip, by name or $DROVER_TEST_TRUNK_TIP, is
 //	           still running it, and every commit before the tip failed it
 //	pending    vuln fails; no trunk commit has a completed run of it
+//	stale      vuln fails; main and every commit but $DROVER_TEST_TRUNK_OLD
+//	           completed build alone, and $DROVER_TEST_TRUNK_OLD failed vuln
+//	paged      vuln fails, and fails on main too, on the second page of
+//	           main's check runs, which only gh api --paginate prints
 //	disk       build fails out of disk space however many times it is rerun
 //	none       no check run at all
 //	nosteps    build fails with no step run, however often it is read
@@ -65,6 +69,11 @@ case "$*" in
     case "$DROVER_TEST_CHECKS_SCENARIO" in
       trunk|infratrunk) echo '{"total_count":1,"check_runs":[{"id":99,"name":"vuln","status":"completed","conclusion":"failure","html_url":"https://github.com/o/r/runs/99","completed_at":"2026-10-17T00:00:00Z"}]}' ;;
       behind|pending) echo '{"total_count":1,"check_runs":[{"id":97,"name":"vuln","status":"in_progress","conclusion":null}]}' ;;
+      paged)
+        echo '{"total_count":101,"check_runs":[{"id":93,"name":"build","status":"completed","conclusion":"success","completed_at":"2026-10-17T00:00:00Z"}]}'
+        case "$*" in
+          *--paginate*) echo '{"total_count":101,"check_runs":[{"id":94,"name":"vuln","status":"completed","conclusion":"failure","html_url":"https://github.com/o/r/runs/94","completed_at":"2026-10-17T00:00:00Z"}]}' ;;
+        esac ;;
       *) echo '{"total_count":1,"check_runs":[{"id":98,"name":"build","status":"completed","conclusion":"success","completed_at":"2026-10-17T00:00:00Z"}]}' ;;
     esac ;;
   *'/check-runs?filter=all'*)
@@ -72,7 +81,12 @@ case "$*" in
       *"/commits/$DROVER_TEST_TRUNK_TIP/"*) running=1 ;;
       *) running= ;;
     esac
-    if [ "$DROVER_TEST_CHECKS_SCENARIO" = behind ] && [ -z "$running" ]; then
+    if [ "$DROVER_TEST_CHECKS_SCENARIO" = stale ]; then
+      case "$*" in
+        *"/commits/$DROVER_TEST_TRUNK_OLD/"*) echo '{"total_count":1,"check_runs":[{"id":92,"name":"vuln","status":"completed","conclusion":"failure","html_url":"https://github.com/o/r/runs/92","completed_at":"2026-10-16T00:00:00Z"}]}' ;;
+        *) echo '{"total_count":1,"check_runs":[{"id":91,"name":"build","status":"completed","conclusion":"success","completed_at":"2026-10-17T00:00:00Z"}]}' ;;
+      esac
+    elif [ "$DROVER_TEST_CHECKS_SCENARIO" = behind ] && [ -z "$running" ]; then
       echo '{"total_count":1,"check_runs":[{"id":96,"name":"vuln","status":"completed","conclusion":"failure","html_url":"https://github.com/o/r/runs/96","completed_at":"2026-10-16T00:00:00Z"}]}'
     else
       echo '{"total_count":1,"check_runs":[{"id":95,"name":"vuln","status":"in_progress","conclusion":null}]}'
@@ -92,7 +106,7 @@ case "$*" in
         [ -f "$DROVER_TEST_CHECKS_STATE/first" ] || echo "$sha" > "$DROVER_TEST_CHECKS_STATE/first"
         if [ "$(cat "$DROVER_TEST_CHECKS_STATE/first")" = "$sha" ]; then id=40; name=build; else name=vuln; fi ;;
       ratelimit) [ "$reruns" -gt 0 ] && { echo '{"total_count":1,"check_runs":[{"id":'$id',"name":"build","status":"completed","conclusion":"success"}]}' ; exit 0 ; } ; name=build ;;
-      trunk|behind|pending) name=vuln ;;
+      trunk|behind|pending|stale|paged) name=vuln ;;
       *) name=build ;;
     esac
     echo '{"total_count":1,"check_runs":[{"id":'$id',"name":"'$name'","status":"completed","conclusion":"failure","details_url":"https://github.com/o/r/actions/runs/500/job/'$id'"}]}' ;;
@@ -218,6 +232,11 @@ func TestAFailureRedOnTheTrunkBehindItsRunningTipParksTrunkRed(t *testing.T) {
 	if parked == nil || parked.Park != parkTrunkRed || !strings.Contains(parked.Reason, "https://github.com/o/r/runs/96") {
 		t.Fatalf("item 1 parked %+v, want trunk_red naming the run on the commit before main's tip", parked)
 	}
+	for _, want := range []string{parent[:7], "1 first-parent commit behind main's tip", "completed 2026-10-16T00:00:00Z"} {
+		if !strings.Contains(parked.Reason, want) {
+			t.Errorf("trunk_red reason %q does not name %q, so a stale read would not show", parked.Reason, want)
+		}
+	}
 	if calls := strings.Join(ghCalls(t, ghLog), "\n"); !strings.Contains(calls, "/commits/"+parent+"/check-runs") {
 		t.Errorf("no check-runs read for %s, the commit before the tip:\n%s", parent, calls)
 	}
@@ -242,6 +261,57 @@ func TestAFailureNoTrunkCommitCompletedIsTheCodes(t *testing.T) {
 	cs := checkRows(t)
 	if len(cs) != 1 || cs[0].Class != ledger.ClassCode || cs[0].Check != "vuln" {
 		t.Errorf("classification rows %+v, want vuln classified code", cs)
+	}
+}
+
+// The trunk stopped running vuln: six newer commits completed every run they
+// carry and none of them is vuln, above an older commit that failed it. That
+// failure says nothing about the trunk now, so the check is the code's and the
+// drive goes on to the gate rather than stopping.
+func TestAFailureTheTrunkNoLongerRunsIsTheCodes(t *testing.T) {
+	ghLog := checksForge(t, "stale")
+	old := git(t, ".", "rev-parse", "main")
+	t.Setenv("DROVER_TEST_TRUNK_OLD", old)
+	for i := range 6 {
+		name := "trunk-moved-" + string(rune('a'+i)) + ".txt"
+		write(t, name, "x\n")
+		git(t, ".", "add", name)
+		git(t, ".", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "the trunk moved")
+	}
+	git(t, ".", "push", "-q", "origin", "main")
+	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
+
+	rows := driveAll(t)
+	if got := rows[0]; got.Park == parkTrunkRed || got.Park != parkGateRefused || got.Rounds != 1 {
+		t.Errorf("item 1 is %s rounds=%d (%s), want gate_refused with one round, never trunk_red", got.Park, got.Rounds, got.Reason)
+	}
+	cs := checkRows(t)
+	if len(cs) != 1 || cs[0].Class != ledger.ClassCode || cs[0].Check != "vuln" {
+		t.Errorf("classification rows %+v, want vuln classified code", cs)
+	}
+	if calls := strings.Join(ghCalls(t, ghLog), "\n"); strings.Contains(calls, "/commits/"+old+"/check-runs") {
+		t.Errorf("check-runs read for %s, behind six completed commits:\n%s", old, calls)
+	}
+}
+
+// main carries more than 100 check runs and its failed vuln is on the second
+// page, so a read of the first page alone would find the trunk no longer runs it.
+func TestAFailureOnTheTrunksSecondPageOfRunsParksTrunkRed(t *testing.T) {
+	checksForge(t, "paged")
+
+	evs, _, err := driveEventsOf(t)
+	if Code(err) == 0 {
+		t.Errorf("drive exited 0 over a red trunk, want the stop a red trunk raises")
+	}
+	var parked *DriveEvent
+	for i, e := range evs {
+		if e.Event == evParked && e.ID == "1" {
+			parked = &evs[i]
+		}
+	}
+	if parked == nil || parked.Park != parkTrunkRed || !strings.Contains(parked.Reason, "https://github.com/o/r/runs/94") ||
+		!strings.Contains(parked.Reason, "main's tip") {
+		t.Fatalf("item 1 parked %+v, want trunk_red naming the run on the second page at main's tip", parked)
 	}
 }
 
