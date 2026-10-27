@@ -225,6 +225,9 @@ func notifyAll(w io.Writer, cfg *config.Config, kind string) (sent, ok bool) {
 			switch {
 			case err == nil:
 				fmt.Fprintf(w, "%-8s command %s at %s: exit 0\n", d.Name, argv, p)
+				for th := range threadLines(out) {
+					fmt.Fprintf(w, "%-8s opened T3 Code thread %s for %s\n", "", th.URL, th.ID)
+				}
 			case code >= 0:
 				fmt.Fprintf(w, "%-8s command %s at %s: exit %d%s\n", d.Name, argv, p, code, outClause(out))
 			default:
@@ -253,7 +256,9 @@ is the worst moment to learn the token expired.
 
 --test sends one synthetic event, id TEST, through every destination
 configured, and prints what each came to: the HTTP status for ntfy, the exit
-status for a command. It needs no running drive. With no --event the sample is
+status for a command, and the T3 Code thread a command destination running
+drover t3 thread --from-event opened, so a wrong [t3] project or an expired
+token shows before a drive parks. It needs no running drive. With no --event the sample is
 needs_operator, sent to every destination whatever its events name, at its
 routed priority or high where it routes none, since the point is to test the
 destination. --event <name> sends a sample of that kind instead (any event a

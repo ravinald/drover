@@ -76,6 +76,7 @@ var resolved = map[string]string{
 	"t3.poll":                 strconv.Quote(DefaultT3Poll.String()),
 	"t3.provider_logs":        strconv.Quote(DefaultT3ProviderLogs),
 	"t3.tested_version":       strconv.Quote(T3TestedVersion),
+	"t3.operator_permission":  strconv.Quote("supervised"),
 
 	// A usage level nobody set is no step at all, which "off" also says, and
 	// 0 does not: pause_remaining = 0 holds at 100% used.
