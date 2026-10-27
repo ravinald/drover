@@ -685,7 +685,7 @@ func ReadResult(path string) (Read, error) {
 			rd.Result.Text = carried.Text
 		}
 		if rd.Result.SessionID == "" {
-			rd.Result.SessionID = carried.SessionID
+			rd.Result.SessionID = rd.SessionID
 		}
 		if rd.Result.UsageUnavailable == "" {
 			rd.Result.UsageUnavailable = carried.UsageUnavailable

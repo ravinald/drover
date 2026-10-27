@@ -368,8 +368,8 @@ func TestCodexTurnWithoutUsageLeavesItNil(t *testing.T) {
 	if rd.Result.Usage != nil {
 		t.Errorf("usage = %+v, want nil for a turn with no usage object", *rd.Result.Usage)
 	}
-	if rd.SessionID != "s" {
-		t.Errorf("session = %q, want the session_id key over the thread_id", rd.SessionID)
+	if rd.SessionID != "s" || rd.Result.SessionID != "s" {
+		t.Errorf("Read.SessionID=%q Result.SessionID=%q, want the session_id key over the thread_id in both", rd.SessionID, rd.Result.SessionID)
 	}
 }
 

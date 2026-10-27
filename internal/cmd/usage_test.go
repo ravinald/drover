@@ -661,3 +661,26 @@ func TestRecordWritesOneUsageRowPerSession(t *testing.T) {
 		t.Errorf("usage rows = %d, want 1", len(rows))
 	}
 }
+
+// A stream naming both keys writes its usage row under session_id, the id
+// Read reports, so the row and the log deduplicate against the same session.
+func TestUsageRowPrefersSessionIDOverThreadID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex.jsonl")
+	body := `{"type":"thread.started","thread_id":"t"}` + "\n" +
+		`{"type":"turn.started","session_id":"s"}` + "\n" +
+		`{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":1}}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rd, err := runlog.ReadResult(path)
+	if err != nil || !rd.Found {
+		t.Fatalf("found=%v err=%v", rd.Found, err)
+	}
+	row, ok := usageRow("1", ledger.StageReview, path, rd.Result)
+	if !ok {
+		t.Fatal("a turn.completed with usage wrote no usage row")
+	}
+	if rd.SessionID != "s" || row.SessionID != "s" {
+		t.Errorf("Read.SessionID=%q row.SessionID=%q, want s in both", rd.SessionID, row.SessionID)
+	}
+}
