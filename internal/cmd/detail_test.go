@@ -481,3 +481,53 @@ func TestOnlyAPassThatReachedNoResultIsLost(t *testing.T) {
 		}
 	}
 }
+
+// A park no session caused names its own cause. trunk_conflict carries the
+// conflicting files, which status prints where a session park prints its
+// detail; any other such park with no detail of its own is unrecorded, its
+// evidence the cause and the reason, and the review log before it is no part
+// of the row.
+func TestAParkNoSessionCausedNamesItsCauseAndNoLog(t *testing.T) {
+	mergeProject(t)
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := openIn(t, dir)
+	review := filepath.Join(t.TempDir(), "review.jsonl")
+	write(t, review, `{"type":"system","subtype":"thinking_tokens"}`+"\n")
+	last := &runner.Outcome{LogPath: review}
+	for _, id := range []string{"1", "2"} {
+		ranClean(t, s, mustItem(t, s, id))
+	}
+
+	conflict := DriveItem{ID: "1", Outcome: outcomeParked, Park: parkTrunkConflict,
+		Reason: "merging origin/main into b1 conflicts on docs/usage.md; the merge was aborted and nothing was pushed"}
+	conflict.setDetail(parkDetail{Detail: "docs/usage.md", Evidence: "CONFLICT (content): Merge conflict in docs/usage.md"})
+	s.recordPark(&conflict, last, nil)
+	red := DriveItem{ID: "2", Outcome: outcomeParked, Park: parkTrunkRed, Reason: "main fails the verify command alone"}
+	s.recordPark(&red, last, nil)
+
+	if pk, ok := s.ledger.Parked("2"); !ok || pk.Detail != detailUnrecorded || pk.Log != "" ||
+		!strings.Contains(pk.Evidence, parkTrunkRed) || !strings.Contains(pk.Evidence, red.Reason) {
+		t.Errorf("ledger park row = %+v (found %v), want %s naming %s and its reason, and no log", pk, ok, detailUnrecorded, parkTrunkRed)
+	}
+	notes := map[string]string{}
+	for _, r := range s.rows() {
+		notes[r.ID] = r.note()
+	}
+	for id, want := range map[string]string{"1": "parked: trunk_conflict (docs/usage.md)", "2": "parked: trunk_red (unrecorded)"} {
+		if !strings.HasPrefix(notes[id], want) {
+			t.Errorf("item %s status note %q, want %s", id, notes[id], want)
+		}
+	}
+
+	text := capture(t, func() {
+		if err := execute(t, "show", "1"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !strings.Contains(text, "parked     trunk_conflict (docs/usage.md)") || strings.Contains(text, "park log") {
+		t.Errorf("show prints the conflict park wrong, or points at a log:\n%s", text)
+	}
+}

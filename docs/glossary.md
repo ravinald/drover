@@ -174,6 +174,7 @@ Why drive stopped an item (ledger and `--json` `park`), and the underlying failu
 | `push_hook`               | Detail: a pre-push hook refused the branch.                                                      |
 | `push_network`            | Detail: the push failed on the network.                                                          |
 | `unknown`                 | Detail: drover could not classify the failure.                                                   |
+| `unrecorded`              | Detail: a park no session caused named no detail; evidence is the reason.                        |
 
 ## Review results
 
