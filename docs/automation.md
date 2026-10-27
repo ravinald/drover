@@ -1899,6 +1899,8 @@ A usage row records one session's tokens, and a set `usage` object is what makes
 }
 ```
 
+A codex session writes a usage row from the `usage` object on its terminal `turn.completed`, `turn.failed` or `turn.aborted` event, and a terminal event carrying none writes no row. Its fields map as `output_tokens` to `output`, `cached_input_tokens` to `cache_read`, `cache_write_input_tokens` to `cache_create`, and `input_tokens` less both cache fields, floored at 0, to `input`: codex counts its cached input inside `input_tokens`, while `input` means uncached input, the way Claude Code reports it. `reasoning_output_tokens` is already inside `output_tokens` and is not recorded apart. `session_id` is the `thread_id` from codex's `thread.started` event. A codex row carries no `model` and no `cost_usd`, since codex reports neither, and `context_max` is 0, because codex states usage per turn rather than per message.
+
 A row from a session whose log carried a `rate_limit_event` adds `rate_limit`, the last one it wrote, renamed into the ledger's own case: `status` (`allowed`, `allowed_warning`, `rejected`), `rate_limit_type` (the window that status is about), `resets_at` (a Unix second), `five_hour` and `seven_day` (each `utilization` from 0 to 1, its `resets_at`, and `status` where the event gave one), `is_using_overage`, `overage_status` and `overage_disabled_reason` (`out_of_credits` once purchased credit is spent). It is absent on a row from a runner that writes no such event, codex and agy among them. `status --json` reports the newest one as [`rate_limit`](#rate_limit), and `drive`'s usage admission judges it.
 
 ```json

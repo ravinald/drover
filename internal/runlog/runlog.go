@@ -488,35 +488,77 @@ func readCodex(line []byte) (Result, bool) {
 		Error struct {
 			Message string `json:"message"`
 		} `json:"error"`
+		Usage *codexUsage `json:"usage"`
 	}
 	if err := json.Unmarshal(line, &ev); err != nil {
 		return Result{}, false
 	}
+	var r Result
 	switch ev.Type {
 	case "turn.completed":
-		return Result{Subtype: "success", NumTurns: 1}, true
+		r = Result{Subtype: "success", NumTurns: 1}
 	case "turn.failed", "turn.aborted":
 		text := ev.Error.Message
 		if text == "" {
 			text = "codex reported " + ev.Type + " and no reason"
 		}
-		return Result{Subtype: strings.TrimPrefix(ev.Type, "turn."), IsError: true, Text: text}, true
+		r = Result{Subtype: strings.TrimPrefix(ev.Type, "turn."), IsError: true, Text: text}
+	default:
+		return Result{}, false
 	}
-	return Result{}, false
+	if ev.Usage != nil {
+		u := ev.Usage.usage()
+		r.Usage = &u
+	}
+	return r, true
+}
+
+// codexUsage is the usage object on a codex turn event.
+type codexUsage struct {
+	Input      int64 `json:"input_tokens"`
+	CacheRead  int64 `json:"cached_input_tokens"`
+	CacheWrite int64 `json:"cache_write_input_tokens"`
+	Output     int64 `json:"output_tokens"`
+}
+
+// usage maps codex's counts onto a Usage. codex fills both cache fields from
+// the Responses API's input_tokens_details, so they are portions of
+// input_tokens rather than additions to it, where Usage.Input means uncached
+// input the way claude reports it. Floored at 0 so a provider whose breakdown
+// overruns its total cannot write a negative row.
+func (c codexUsage) usage() Usage {
+	return Usage{
+		Input:       max(c.Input-c.CacheRead-c.CacheWrite, 0),
+		Output:      c.Output,
+		CacheCreate: c.CacheWrite,
+		CacheRead:   c.CacheRead,
+	}
 }
 
 // carryCodex keeps the latest agent message, which is the report a result
 // wants and is never on the terminal event. A turn that failed states its own
 // reason, so this only ever fills a gap rather than overwriting one.
+//
+// It also keeps thread.started's thread_id, which is codex's name for the
+// session and the id a usage row is deduplicated by. Read here rather than as
+// a key in ReadResult's loop because a t3 log carries a thread_id too, naming
+// a T3 Code thread rather than a session.
 func carryCodex(line []byte, r *Result) {
 	var ev struct {
-		Type string `json:"type"`
-		Item struct {
+		Type     string `json:"type"`
+		ThreadID string `json:"thread_id"`
+		Item     struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"item"`
 	}
-	if json.Unmarshal(line, &ev) != nil || ev.Type != "item.completed" {
+	if json.Unmarshal(line, &ev) != nil {
+		return
+	}
+	if ev.Type == "thread.started" && r.SessionID == "" {
+		r.SessionID = ev.ThreadID
+	}
+	if ev.Type != "item.completed" {
 		return
 	}
 	if ev.Item.Type == "agent_message" && ev.Item.Text != "" {
@@ -562,6 +604,7 @@ type Read struct {
 	Known  int
 	// SessionID is the first session_id any event carried, which a killed
 	// session's log names from its first line though it never reached a result.
+	// A codex log names none and falls back to its thread.started thread_id.
 	SessionID string
 }
 
@@ -626,6 +669,9 @@ func ReadResult(path string) (Read, error) {
 	if err := sc.Err(); err != nil {
 		return Read{}, fmt.Errorf("read %s: %w", path, err)
 	}
+	if rd.SessionID == "" {
+		rd.SessionID = carried.SessionID
+	}
 	// Classified again once the carried fields land: codex states a failure's
 	// reason on the terminal event and its report on an item event, so a
 	// terminal event that carried neither is only nameable from what Carry kept,
@@ -637,6 +683,9 @@ func ReadResult(path string) (Read, error) {
 		rd.Result.loggedAt = carried.loggedAt
 		if rd.Result.Text == "" {
 			rd.Result.Text = carried.Text
+		}
+		if rd.Result.SessionID == "" {
+			rd.Result.SessionID = rd.SessionID
 		}
 		if rd.Result.UsageUnavailable == "" {
 			rd.Result.UsageUnavailable = carried.UsageUnavailable

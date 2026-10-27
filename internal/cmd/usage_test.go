@@ -602,6 +602,26 @@ func TestSyncDryRunCountsALoggedSessionOnce(t *testing.T) {
 	}
 }
 
+// A codex session's log reads to a usage row named by its thread, which is
+// what --sync deduplicates by and skips a row without.
+func TestUsageRowFromACodexStream(t *testing.T) {
+	rd, err := runlog.ReadResult(filepath.Join("..", "runlog", "testdata", "codex-stream.jsonl"))
+	if err != nil || !rd.Found {
+		t.Fatalf("found=%v err=%v", rd.Found, err)
+	}
+	row, ok := usageRow("1", ledger.StageReview, "x.jsonl", rd.Result)
+	if !ok {
+		t.Fatal("a codex turn.completed with usage wrote no usage row")
+	}
+	if row.SessionID != "01a0b561-3923-7d13-9bac-316b8a767584" {
+		t.Errorf("session_id = %q", row.SessionID)
+	}
+	want := runlog.Usage{Input: 405, Output: 5, CacheCreate: 26926}
+	if row.Usage == nil || *row.Usage != want {
+		t.Errorf("usage = %+v, want %+v", row.Usage, want)
+	}
+}
+
 // A usage row carries context_max even at zero, and no other row carries it.
 func TestUsageRowCarriesContextMaxAtZero(t *testing.T) {
 	rd, err := runlog.ReadResult(filepath.Join("..", "runlog", "testdata", "claude-usage-limit.jsonl"))
@@ -639,5 +659,28 @@ func TestRecordWritesOneUsageRowPerSession(t *testing.T) {
 	}
 	if rows := usageRows(t, s.cfg.Root); len(rows) != 1 {
 		t.Errorf("usage rows = %d, want 1", len(rows))
+	}
+}
+
+// A stream naming both keys writes its usage row under session_id, the id
+// Read reports, so the row and the log deduplicate against the same session.
+func TestUsageRowPrefersSessionIDOverThreadID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex.jsonl")
+	body := `{"type":"thread.started","thread_id":"t"}` + "\n" +
+		`{"type":"turn.started","session_id":"s"}` + "\n" +
+		`{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":1}}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rd, err := runlog.ReadResult(path)
+	if err != nil || !rd.Found {
+		t.Fatalf("found=%v err=%v", rd.Found, err)
+	}
+	row, ok := usageRow("1", ledger.StageReview, path, rd.Result)
+	if !ok {
+		t.Fatal("a turn.completed with usage wrote no usage row")
+	}
+	if rd.SessionID != "s" || row.SessionID != "s" {
+		t.Errorf("Read.SessionID=%q row.SessionID=%q, want s in both", rd.SessionID, row.SessionID)
 	}
 }
