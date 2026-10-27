@@ -96,6 +96,7 @@ var unset = map[string]string{
 	"usage.weekly_budget": "no budget",
 	"t3.url":              "no T3 Code server",
 	"t3.project":          "the drover project's own name",
+	"intake.closes":       "intake leaves closes empty",
 }
 
 // NotifyKeys is every key under notify., the destination keys written under

@@ -387,7 +387,20 @@ type Intake struct {
 	// refuses a body with one on a line, and check reports one in an accepted
 	// item. Unset means DefaultHoldMarkers; an empty list turns the check off.
 	HoldMarkers []string `toml:"hold_markers"`
+	// Closes is what intake seeds the closes key with. "issue" writes the
+	// issue number there as well as into issue, for the project whose items
+	// usually fix the issue they came from; unset leaves closes empty. finish
+	// never falls back to issue, so an empty closes keeps meaning "closes
+	// nothing" and a split item or partial fix has its number removed by hand.
+	Closes string `toml:"closes"`
 }
+
+// IntakeCloses are the values [intake] closes accepts, default first.
+func IntakeCloses() []string { return []string{"", IntakeClosesIssue} }
+
+// IntakeClosesIssue is the [intake] closes value under which intake writes
+// the issue number into closes.
+const IntakeClosesIssue = "issue"
 
 // DefaultHoldMarkers is what [intake] hold_markers means when a project does
 // not set it.
@@ -1450,6 +1463,16 @@ func (c *Config) validate(path string) error {
 	if !slices.Contains(MergeMethods(), c.Git.MergeMethod) {
 		return fmt.Errorf("%s: git.merge_method is %q (known: %s)",
 			path, c.Git.MergeMethod, strings.Join(MergeMethods(), ", "))
+	}
+	if !slices.Contains(IntakeCloses(), c.Intake.Closes) {
+		return fmt.Errorf("%s: intake.closes is %q (known: %q, or unset)",
+			path, c.Intake.Closes, IntakeClosesIssue)
+	}
+	// intake writes only declared keys, so the setting would seed nothing, and
+	// a hand-added closes line would be an undeclared key the next read refuses.
+	if c.Intake.Closes != "" && !slices.Contains(c.DeclaredKeys(), backlog.KeyCloses) {
+		return fmt.Errorf("%s: intake.closes = %q needs a %s key to write, and [frontmatter] declares none: add %q to [frontmatter] optional",
+			path, c.Intake.Closes, backlog.KeyCloses, backlog.KeyCloses)
 	}
 	for prefix := range c.IDs.Namespaces {
 		if prefix == "" {
