@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +52,7 @@ var (
 	t3Title      string
 	t3New        bool
 	t3Stop       string
+	t3FromEvent  bool
 )
 
 var t3LoginCmd = &cobra.Command{
@@ -209,13 +212,40 @@ Code opens it at. It does not follow the thread: a person picks it up in T3
 Code.
 
 --stop <id> interrupts that thread's newest run. The thread stays, readable in
-T3 Code; no tool deletes one. A thread with no run in progress is not an error.`,
+T3 Code; no tool deletes one. A thread with no run in progress is not an error.
+
+--from-event is the argv of a [notify] command destination. It reads the one
+event line the destination sends on stdin and, for needs_operator and
+needs_supervisor, opens a thread in [t3] project titled "<project> <id>:
+<action>" whose first message is the event's message, the output of drover
+show <id> --no-tracker, and the command the event names, fenced, as the first
+thing to run. It runs under [t3] operator_permission, which is supervised: a
+thread opened unattended on the operator's behalf never runs without an
+approval step, so --permission full is refused here. A second event for an item
+whose thread this drive opened, and which is still open, is sent to that thread
+as a new message instead; a thread stopped or deleted since is replaced. It
+prints one thread_opened line, which the drive records in its event file and
+links the item's later ntfy messages to. Any other event kind exits 0 and opens
+nothing.`,
 	Example: `  drover t3 thread --new --project drover --title "B12 needs you" -p "drover show B12"
-  drover t3 thread --stop mcp:68eab9c9-e102-4e85-8e5b-4563f82da101`,
+  drover t3 thread --stop mcp:68eab9c9-e102-4e85-8e5b-4563f82da101
+  echo "$event" | drover t3 thread --from-event
+
+  # --from-event prints the thread it opened or sent to:
+  {"event":"thread_opened","project":"drover","id":"B12","thread":"mcp:68eab9c9-e102-4e85-8e5b-4563f82da101","url":"t3-thread://v1/mcp:68eab9c9-e102-4e85-8e5b-4563f82da101"}`,
 	Args: cobra.NoArgs,
 	RunE: func(c *cobra.Command, _ []string) error {
-		if t3New == (t3Stop != "") {
-			return errors.New("pass exactly one of --new and --stop <thread id>")
+		modes := 0
+		for _, on := range []bool{t3New, t3Stop != "", t3FromEvent} {
+			if on {
+				modes++
+			}
+		}
+		if modes != 1 {
+			return errors.New("pass exactly one of --new, --stop <thread id> and --from-event")
+		}
+		if t3FromEvent {
+			return t3FromEventRun(c)
 		}
 		cfg, err := t3Config()
 		if err != nil {
@@ -266,6 +296,7 @@ func init() {
 	t3RunCmd.Flags().BoolVar(&t3Stdin, "stdin", false, "read the prompt from standard input")
 	t3ThreadCmd.Flags().BoolVar(&t3New, "new", false, "launch a thread and print its id and link, without following it")
 	t3ThreadCmd.Flags().StringVar(&t3Stop, "stop", "", "interrupt this thread's newest run")
+	t3ThreadCmd.Flags().BoolVar(&t3FromEvent, "from-event", false, "open or reuse a thread for the needs_operator or needs_supervisor event on stdin")
 	t3Cmd.AddCommand(t3LoginCmd, t3DiscoverCmd, t3RunCmd, t3ThreadCmd)
 	root.AddCommand(t3Cmd)
 }
@@ -495,4 +526,178 @@ func (s *session) blindPlan(w io.Writer, reviewer string) {
 		}
 		fmt.Fprintf(w, "==> usage_admission: blind for runner %s, whose last session printed usage_unavailable (%s); %s\n", b[0], b[1], verdict)
 	}
+}
+
+// t3ShowWait bounds the drover show --from-event reads, inside the 30 seconds
+// a command destination has for the whole bridge.
+const t3ShowWait = 10 * time.Second
+
+// t3ShowItem is what drover show prints for one item, apart so a test need not
+// run the binary. --no-tracker keeps the forge out of it: a gh call that hangs
+// would spend the destination's whole budget before the thread opened.
+var t3ShowItem = func(ctx context.Context, root, id string) (string, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, t3ShowWait)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, self, "show", id, "--no-tracker") // #nosec G204 -- this binary, with an item id
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	return strings.TrimRight(string(out), "\n"), err
+}
+
+// t3FromEventRun opens, or reuses, the thread that answers one needs_operator
+// or needs_supervisor, and prints the thread_opened the drive records.
+func t3FromEventRun(c *cobra.Command) error {
+	if !runner.Supervising() {
+		if err := runner.NestedLaunch(); err != nil {
+			return Refusal{err}
+		}
+	}
+	p, err := readEventLine(c.InOrStdin())
+	if err != nil {
+		return err
+	}
+	if !asksSomebody(p.Event) {
+		return nil
+	}
+	if c.Flags().Changed("permission") && t3Permission != "supervised" {
+		return Refusal{fmt.Errorf("--from-event runs under [t3] operator_permission, never --permission %s: a thread opened unattended on the operator's behalf must not run without an approval step", t3Permission)}
+	}
+	cfg, err := t3Config()
+	if err != nil {
+		return err
+	}
+	ctx := c.Context()
+	msg := t3EventMessage(ctx, cfg.Root, p)
+	if err := t3.CheckPrompt(msg); err != nil {
+		return err
+	}
+	opened := DriveEvent{Event: evThreadOpened, TS: time.Now().UTC().Format(time.RFC3339), Drive: p.Drive, Project: p.Project, ID: p.ID}
+	if known := t3KnownThread(p); known != "" {
+		cl := t3Client(cfg)
+		alive, err := t3.Open(ctx, cl, known)
+		if err != nil {
+			return err
+		}
+		if alive {
+			if err := t3.Send(ctx, cl, known, msg, p.Drive+":"+p.ID+":"+strconv.Itoa(p.Seq)); err != nil {
+				return err
+			}
+			opened.Thread, opened.URL = known, t3.ThreadURL(known)
+			return printJSONLine(c.OutOrStdout(), opened)
+		}
+	}
+	t3Permission = cfg.T3OperatorPermission()
+	title := p.Project
+	if p.ID != "" {
+		title += " " + p.ID
+	}
+	title += ": " + p.Action
+	start, cl, err := t3Resolve(ctx, cfg, msg, title)
+	if err != nil {
+		return err
+	}
+	l, err := t3.Start(ctx, cl, start)
+	if err != nil {
+		return err
+	}
+	opened.Thread, opened.URL = l.ThreadID, t3.ThreadURL(l.ThreadID)
+	return printJSONLine(c.OutOrStdout(), opened)
+}
+
+// readEventLine is the first line on r that holds a JSON object, which is
+// what a command destination writes.
+func readEventLine(r io.Reader) (NotifyPayload, error) {
+	b, err := io.ReadAll(io.LimitReader(r, 1<<20))
+	if err != nil {
+		return NotifyPayload{}, fmt.Errorf("read the event from stdin: %w", err)
+	}
+	for line := range strings.Lines(string(b)) {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var p NotifyPayload
+		if err := json.Unmarshal([]byte(line), &p); err != nil || p.Event == "" {
+			return NotifyPayload{}, fmt.Errorf("stdin holds no event line a [notify] command destination sends (%q): run this as a destination's argv, or pipe it one line of drive --events", trim(strings.TrimSpace(line), 80))
+		}
+		return p, nil
+	}
+	return NotifyPayload{}, errors.New("stdin holds no event: run this as a [notify] command destination's argv, which sends one line per event")
+}
+
+// t3KnownThread is the thread already answering p's item: the one the drive
+// handed over on the event, else the newest thread_opened for the item in the
+// drive's event file. Empty when neither names one.
+func t3KnownThread(p NotifyPayload) string {
+	if p.Thread != "" {
+		return p.Thread
+	}
+	if p.ID == "" || p.Drive == "" || p.Project == "" {
+		return ""
+	}
+	path, err := driveEventsPath(p.Project, p.Drive)
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(path) // #nosec G304 -- under the per-user state directory
+	if err != nil {
+		return ""
+	}
+	known := ""
+	for th := range threadLines(string(b)) {
+		if th.ID == p.ID {
+			known = th.Thread
+		}
+	}
+	return known
+}
+
+// t3EventMessage is the thread's first message: what the phone said, what
+// drover show says about the item, and the command to run first, fenced.
+func t3EventMessage(ctx context.Context, root string, p NotifyPayload) string {
+	text := p.Message
+	if text == "" {
+		text = noticeBody(p.DriveEvent)
+	}
+	parts := []string{text}
+	if p.ID != "" {
+		show, err := t3ShowItem(ctx, root, p.ID)
+		head := "`drover show " + p.ID + "`:"
+		if err != nil {
+			head = fmt.Sprintf("`drover show %s` failed (%v):", p.ID, err)
+		}
+		parts = append(parts, head+"\n\n"+fenced(show, "text"))
+	}
+	if p.Run != "" {
+		parts = append(parts, "Run this first:\n\n"+fenced(p.Run, "sh"))
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// fenced is s in a Markdown code block whose fence is longer than any run of
+// backticks s holds, so nothing in s closes it.
+func fenced(s, lang string) string {
+	longest, run := 0, 0
+	for _, r := range s {
+		if r == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
+	}
+	f := strings.Repeat("`", max(3, longest+1))
+	return f + lang + "\n" + s + "\n" + f
+}
+
+func printJSONLine(w io.Writer, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "%s\n", b)
+	return err
 }

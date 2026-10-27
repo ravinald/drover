@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"iter"
 	"maps"
 	"math"
 	"slices"
@@ -213,6 +215,13 @@ type notifier struct {
 	forge     func() string
 	forgeOnce sync.Once
 	forgeURL  string
+	// opened records a thread_opened in the drive's event file. threads is the
+	// thread each item's command destination last answered with, which a
+	// needs_operator carries to the bridge so it reuses the thread, and which
+	// a message with no pull request links its Click header to.
+	opened    func(DriveEvent)
+	threadsMu sync.Mutex
+	threads   map[string]DriveEvent
 
 	mu     sync.Mutex
 	dests  []*destination
@@ -643,7 +652,12 @@ func (d *destination) send(nt notice) {
 				where, d.URL, err, res.bodyClause())
 		}
 	case config.DestCommand:
-		out, err := runArgvNotifier(d.n.root, d.Argv, nt.payload())
+		p := nt.payload()
+		if th, ok := d.n.thread(p.ID); ok && asksSomebody(p.Event) {
+			p.Thread, p.URL = th.Thread, th.URL
+		}
+		out, err := runArgvNotifier(d.n.root, d.Argv, p)
+		d.n.threadsFrom(out)
 		if err != nil && d.said.failed.CompareAndSwap(false, true) {
 			fmt.Fprintf(errOut, "· %s %s failed (%v)%s; the drive goes on, and later failures here are not reported\n",
 				where, strings.Join(d.Argv, " "), err, outClause(out))
@@ -655,17 +669,70 @@ func (nt notice) payload() NotifyPayload {
 	return NotifyPayload{DriveEvent: nt.event, Priority: nt.priority, Message: nt.body, Folded: nt.folded, Reminder: nt.reminder}
 }
 
-// click is the pull request URL an event concerns, empty where it names none
-// or the repository would not resolve.
+// click is the pull request URL an event concerns, or, where it names no pull
+// request or the repository would not resolve, the T3 Code thread opened for
+// its item. Empty when it has neither.
 func (n *notifier) click(e DriveEvent) string {
-	if e.PR == 0 || n.forge == nil {
-		return ""
+	if e.PR != 0 && n.forge != nil {
+		n.forgeOnce.Do(func() { n.forgeURL = n.forge() })
+		if n.forgeURL != "" {
+			return n.forgeURL + "/pull/" + strconv.Itoa(e.PR)
+		}
 	}
-	n.forgeOnce.Do(func() { n.forgeURL = n.forge() })
-	if n.forgeURL == "" {
-		return ""
+	if th, ok := n.thread(e.ID); ok {
+		return th.URL
 	}
-	return n.forgeURL + "/pull/" + strconv.Itoa(e.PR)
+	return ""
+}
+
+// asksSomebody is an event the bridge opens a thread for.
+func asksSomebody(event string) bool {
+	return event == evNeedsOperator || event == evNeedsSupervisor
+}
+
+// thread is the thread_opened this drive holds for an item.
+func (n *notifier) thread(id string) (DriveEvent, bool) {
+	if n == nil || id == "" {
+		return DriveEvent{}, false
+	}
+	n.threadsMu.Lock()
+	defer n.threadsMu.Unlock()
+	th, ok := n.threads[id]
+	return th, ok
+}
+
+// threadsFrom reads the thread_opened lines a command destination printed and
+// keeps each, recording one whose link this drive did not already hold for
+// that item: a thread the bridge reused is not news.
+func (n *notifier) threadsFrom(out string) {
+	for th := range threadLines(out) {
+		n.threadsMu.Lock()
+		prev, held := n.threads[th.ID]
+		if n.threads == nil {
+			n.threads = map[string]DriveEvent{}
+		}
+		n.threads[th.ID] = th
+		n.threadsMu.Unlock()
+		if (!held || prev.URL != th.URL) && n.opened != nil {
+			n.opened(th)
+		}
+	}
+}
+
+// threadLines are the thread_opened events in a destination's output that
+// name an item and a link, the bridge's answer among whatever else it printed.
+func threadLines(out string) iter.Seq[DriveEvent] {
+	return func(yield func(DriveEvent) bool) {
+		for line := range strings.Lines(out) {
+			var e DriveEvent
+			if json.Unmarshal([]byte(strings.TrimSpace(line)), &e) != nil || e.Event != evThreadOpened || e.ID == "" || e.URL == "" {
+				continue
+			}
+			if !yield(DriveEvent{Event: evThreadOpened, ID: e.ID, Thread: e.Thread, URL: e.URL}) {
+				return
+			}
+		}
+	}
 }
 
 // noticeBody is what a person reads on the phone for one event: what to do
@@ -711,6 +778,8 @@ func noticeBody(e DriveEvent) string {
 		case e.Reason != "":
 			return e.Reason
 		}
+	case evThreadOpened:
+		return "T3 Code thread opened: " + e.URL
 	case evUsageWarning:
 		b := e.Window
 		if e.Remaining != nil {

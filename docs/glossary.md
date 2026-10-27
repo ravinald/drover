@@ -57,7 +57,7 @@ Each command, as typed after `drover`.
 | `t3 discover`           | Prints the T3 Code server's name, version and tool catalog.                                                          |
 | `t3 login`              | Signs drover in to the T3 Code server and writes `[t3] token_file`; `--check` only reports whether it can.           |
 | `t3 run`                | The runner bridge: launches one T3 Code thread with the prompt, follows it to the end and prints a log drover reads. |
-| `t3 thread`             | Launches a thread without following it (`--new`), or interrupts a thread's newest run (`--stop`).                    |
+| `t3 thread`             | Launches a thread (`--new`), opens one for a `needs_operator` (`--from-event`), or interrupts one (`--stop`).         
 | `touch`                 | Records a hand edit to an accepted item's prose as the operator's.                                                   |
 | `unaccept`              | Restores the stop marker, returning an item to a scaffold.                                                           |
 | `unaudited`             | Lists merged items nobody audited, worst blast radius first.                                                         |
@@ -238,6 +238,7 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `config_changed`   | Event: the `.drover.toml` on disk differs from the one the running drive uses, which it does not apply until a resume. |
 | `reexec_waiting`   | Event: a re-exec has waited past a minute on running items that do not hold.                                           |
 | `usage_warning`    | Event: the account crossed a `[usage]` notify level; sent once per window per reset, and it pauses nothing.            |
+| `thread_opened`    | Event: `t3 thread --from-event` opened a T3 Code thread for an item; carries `thread` and `url`.                         |
 | `exit`             | Event: the drive ended, with a summary of what it merged and what it left undone and why.                              |
 | `exit_undone`      | `[notify]` routing key: an exit that left an item parked, skipped or held.                                             |
 | `held`             | Event on a `[notify]` command's stdin alone: what quiet hours held, sent as the window ends.                           |

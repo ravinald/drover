@@ -35,6 +35,11 @@ type T3 struct {
 	// TestedVersion is the T3 Code release the bridge was last verified
 	// against. `drover check` names a server reporting any other.
 	TestedVersion string `toml:"tested_version"`
+	// OperatorPermission is the permission a thread `drover t3 thread
+	// --from-event` opens on the operator's behalf runs under. Only supervised
+	// loads: that thread is opened unattended, so nothing it does may skip an
+	// approval step.
+	OperatorPermission string `toml:"operator_permission"`
 }
 
 // The [t3] defaults. T3TestedVersion is the release this build's bridge was
@@ -80,6 +85,14 @@ func (c *Config) T3ProviderLogs() string {
 	return c.Abs(c.T3.ProviderLogs)
 }
 
+// T3OperatorPermission is [t3] operator_permission, or supervised.
+func (c *Config) T3OperatorPermission() string {
+	if c.T3.OperatorPermission != "" {
+		return c.T3.OperatorPermission
+	}
+	return "supervised"
+}
+
 // T3TestedVersion is [t3] tested_version, or the release this build records.
 func (c *Config) T3TestedVersion() string {
 	if c.T3.TestedVersion != "" {
@@ -96,6 +109,13 @@ func (c *Config) validateT3(path string) error {
 		if d, err := time.ParseDuration(p); err != nil || d <= 0 {
 			return fmt.Errorf("%s: t3.poll is %q: give a positive duration such as \"2s\"", path, p)
 		}
+	}
+	switch p := c.T3.OperatorPermission; p {
+	case "", "supervised":
+	case "full":
+		return fmt.Errorf("%s: t3.operator_permission is \"full\": a thread drover t3 thread --from-event opens unattended on the operator's behalf must not run without an approval step; give \"supervised\" or remove the key", path)
+	default:
+		return fmt.Errorf("%s: t3.operator_permission is %q: give \"supervised\"", path, p)
 	}
 	return nil
 }

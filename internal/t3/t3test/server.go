@@ -166,6 +166,14 @@ func (s *Server) AddThread(id string) {
 	s.Threads[id] = &Thread{ID: id, RunID: "run:thread:" + id + ":ordinal:1", Status: "running"}
 }
 
+// Delete drops a thread, as deleting it in T3 Code does: every later call
+// naming it answers thread_not_found.
+func (s *Server) Delete(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.Threads, id)
+}
+
 type rpcReq struct {
 	ID     json.RawMessage `json:"id"`
 	Method string          `json:"method"`
@@ -296,6 +304,8 @@ func (s *Server) tool(r *http.Request, name string, args map[string]any) (any, s
 		return s.read(args)
 	case "t3_thread_interrupt":
 		return s.interrupt(args)
+	case "t3_thread_send":
+		return s.send(args)
 	case "t3_pending_request_list":
 		return map[string]any{"requests": []any{}}, ""
 	}
@@ -445,6 +455,22 @@ func (s *Server) read(args map[string]any) (any, string) {
 		"recentRuns": []any{map[string]any{"runId": t.RunID, "ordinal": 1, "status": t.Status}},
 		"items":      items, "nextPosition": next, "hasMore": false,
 	}, ""
+}
+
+// send appends the message to the thread's timeline as a user message.
+func (s *Server) send(args map[string]any) (any, string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, fail := s.thread(args)
+	if fail != "" {
+		return nil, fail
+	}
+	msg, _ := args["message"].(string)
+	t.Items = append(t.Items, map[string]any{
+		"position": len(t.Items), "itemId": fmt.Sprintf("turn-item:user_message:%d", len(t.Items)), "runId": t.RunID,
+		"type": "user_message", "status": "completed", "title": nil, "text": msg, "textTruncated": false, "nextTextOffset": nil,
+	})
+	return map[string]any{"threadId": t.ID, "status": "accepted"}, ""
 }
 
 func (s *Server) interrupt(args map[string]any) (any, string) {

@@ -52,6 +52,12 @@ const (
 	// evUsageWarning is a [usage] notify level crossed, sent once per window
 	// per reset. It pauses nothing.
 	evUsageWarning = "usage_warning"
+	// evThreadOpened is a T3 Code thread `drover t3 thread --from-event`
+	// opened for an item's needs_operator or needs_supervisor, written when
+	// the command destination that ran it answers. It is the drive's record of
+	// which thread answers an item, and reaches only a destination whose events
+	// table names it.
+	evThreadOpened = "thread_opened"
 )
 
 // The stages a stage event names. implement and review are ledger stages; the
@@ -164,6 +170,13 @@ type DriveEvent struct {
 	// Waiting is each running item a re-exec still waits on to hold, with the
 	// stage it was last seen in, on reexec_waiting alone.
 	Waiting []WaitingItem `json:"waiting,omitempty"`
+	// Thread and URL are the T3 Code thread opened for the item and the link
+	// T3 Code opens it at, on thread_opened. On the needs_operator or
+	// needs_supervisor a command destination reads, they are the thread this
+	// drive already opened for the item, so the bridge sends to it rather
+	// than opening another.
+	Thread string `json:"thread,omitempty"`
+	URL    string `json:"url,omitempty"`
 	// DriveTotals is the drive's findings, on exit alone, and absent on the
 	// exit of a drive that never reached its queue.
 	*DriveTotals
@@ -203,6 +216,9 @@ type eventSink struct {
 	// stages is the stage each item's last stage event named since its
 	// dispatch, which is where a re-exec reports an item it waits on.
 	stages map[string]string
+	// exited is the exit written, after which a thread_opened arriving late
+	// from a destination is dropped: attach stops reading at the exit.
+	exited bool
 }
 
 // events is the running drive's sink, nil outside a drive that launches.
@@ -216,6 +232,9 @@ func newEventSink(cfg *config.Config, stream bool) *eventSink {
 	if stream {
 		es.w = os.Stdout
 	}
+	// A destination's goroutine answers here, and the exit holds mu while it
+	// waits for those goroutines to drain, so the record goes out on its own.
+	es.notifier.opened = func(e DriveEvent) { go es.emit(e) }
 	return es
 }
 
@@ -234,6 +253,9 @@ func (es *eventSink) emit(e DriveEvent) {
 	}
 	es.mu.Lock()
 	defer es.mu.Unlock()
+	if es.exited && e.Event == evThreadOpened {
+		return
+	}
 	es.track(e)
 	if e.Drive != "" {
 		es.openLocked(e.Drive, false)
@@ -250,6 +272,7 @@ func (es *eventSink) emit(e DriveEvent) {
 	}
 	es.notifier.route(e)
 	if e.Event == evExit {
+		es.exited = true
 		es.closeFile()
 		es.notifier.close()
 	}

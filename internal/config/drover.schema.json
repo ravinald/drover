@@ -491,6 +491,12 @@
           "type": "string",
           "default": "0.1.2",
           "description": "The T3 Code version the bridge was last verified against. `drover check` names a server reporting any other."
+        },
+        "operator_permission": {
+          "type": "string",
+          "enum": ["supervised"],
+          "default": "supervised",
+          "description": "The permission a thread `drover t3 thread --from-event` opens on the operator's behalf runs under. full is a load error: that thread is opened unattended, so it must not run without an approval step."
         }
       }
     },
@@ -650,7 +656,7 @@
                 "type": "object",
                 "minProperties": 1,
                 "propertyNames": {
-                  "enum": ["started", "queued", "dispatched", "skipped", "preflight", "stage", "check", "parked", "filed", "needs_operator", "needs_supervisor", "merged", "paused", "resumed", "reexec_waiting", "config_changed", "usage_warning", "exit", "exit_undone"]
+                  "enum": ["started", "queued", "dispatched", "skipped", "preflight", "stage", "check", "parked", "filed", "needs_operator", "needs_supervisor", "merged", "paused", "resumed", "reexec_waiting", "config_changed", "usage_warning", "thread_opened", "exit", "exit_undone"]
                 },
                 "additionalProperties": {
                   "type": "string",

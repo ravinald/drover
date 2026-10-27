@@ -258,6 +258,44 @@ func Interrupt(ctx context.Context, c *Client, threadID, runID, reason string) (
 	return out.Status, err
 }
 
+// Send posts a message to a thread that already exists, starting it when idle
+// and queuing behind a run in progress. requestID makes a retry of the same
+// send land once.
+func Send(ctx context.Context, c *Client, threadID, message, requestID string) error {
+	if err := CheckPrompt(message); err != nil {
+		return err
+	}
+	args := map[string]any{"threadId": threadID, "message": message, "mode": "auto"}
+	if requestID != "" {
+		args["clientRequestId"] = requestID
+	}
+	return c.Call(ctx, "t3_thread_send", args, nil)
+}
+
+// Open reports whether a thread can still take a message: it exists, is not
+// archived or deleted, and its last run was not interrupted, which is what
+// `drover t3 thread --stop` leaves behind. An error is a read that did not
+// answer, which says nothing about the thread.
+func Open(ctx context.Context, c *Client, threadID string) (bool, error) {
+	var out struct {
+		Thread struct {
+			Status    string  `json:"status"`
+			Archived  bool    `json:"archived"`
+			DeletedAt *string `json:"deletedAt"`
+		} `json:"thread"`
+	}
+	err := c.Call(ctx, "t3_thread_read", map[string]any{"threadId": threadID, "limit": 1}, &out)
+	switch Code(err) {
+	case "thread_not_found", "not_found":
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	t := out.Thread
+	return !t.Archived && t.DeletedAt == nil && t.Status != "interrupted", nil
+}
+
 // Options are what `drover t3 run` resolved before following a thread.
 type Options struct {
 	Client       *Client

@@ -188,6 +188,8 @@ Open one for a decision and close it when the decision is made. For example:
 
 The next park gets a new session with an empty context. One session kept open across days of drives becomes the most expensive thing on the account without doing any of the work: [Long-lived sessions](cost.md#long-lived-sessions) explains why.
 
+With a [T3 Code](#t3-code-threads) host paired to your phone, the event can open that session for you. A `command` destination whose argv is `drover t3 thread --from-event` opens one thread per `needs_operator` or `needs_supervisor`, in the `[t3] project`, titled `<project> <id>: <action>`. Its first message is the notification's text, the output of `drover show <id> --no-tracker`, and the command the event names, fenced, as the first thing to run. The thread runs under `[t3] operator_permission`, which only takes `supervised`: it was opened with nobody watching, so every tool call waits for your approval. A second stop for the same item while its thread is still open goes into that thread as a new message; a thread you stopped or deleted gets a new one. The drive records each thread as a `thread_opened` event that `drover attach` and `drover watch` show, and the item's later ntfy messages (a reminder, its `parked`, its `merged`) open the thread when no pull request exists yet. `drover notify --test --event needs_operator` sends a sample through it and prints the thread it opened, so a wrong project name or an expired grant shows up before a drive parks.
+
 ## T3 Code threads
 
 Any of the modes above can run its stages as [T3 Code](https://github.com/pingdotgg/t3code) threads instead of a CLI drover execs, so each stage's transcript and checkpoints are readable from the T3 Code app on a phone while it runs. drover still assembles the prompt, owns the branch and worktree, reads the result and writes the ledger. The [`t3` runner](configuration.md#t3-code-threads) is `drover t3 run`, which launches the thread over the server's MCP endpoint, follows it to the end and prints a log drover reads like any other runner's. The bridge runs on the same host as the T3 Code server, because that is where it reads usage from.
@@ -210,7 +212,21 @@ Most projects end up with the following arrangement once the first few items hav
 1. Run `drover init supervise`, so every action has an owner you chose ([Who handles each event](#who-handles-each-event)).
 2. Write and accept items in a short operator session.
 3. Start `drover drive --detach --for <hours>` from a terminal, not as a background task inside an agent session.
-4. Let a [`[notify]`](configuration.md#notify) destination reach you on `needs_operator` and `exit_undone`, and use `drover supervise` only if routine parks keep waiting overnight.
+4. Let a [`[notify]`](configuration.md#notify) destination reach you on `needs_operator` and `exit_undone`, and use `drover supervise` only if routine parks keep waiting overnight. On a [T3 Code](#t3-code-threads) host, put a thread destination beside the ntfy one, so each stop arrives with a session already opened for it ([Operator sessions](#operator-sessions)):
+
+   ```toml
+   [notify.destinations.phone]
+   type       = "ntfy"
+   url        = "https://ntfy.example.com/drover"
+   token_file = "~/.config/drover/ntfy-token"
+   events     = { needs_operator = "high", needs_supervisor = "default", parked = "default", exit_undone = "high" }
+
+   [notify.destinations.thread]
+   type   = "command"
+   argv   = ["drover", "t3", "thread", "--from-event"]
+   events = { needs_operator = "high", needs_supervisor = "default" }
+   ```
+
 5. Set [`[usage.weekly]`](#running-past-the-weekly-allotment) `notify_remaining` and `pause_remaining` in the per-user config, so no drive spends the end of the week for you.
 6. Handle each event in a fresh operator session.
 7. Read `drover status`, or the page `[[status.render]]` writes, whenever you like: reading it costs nothing.
