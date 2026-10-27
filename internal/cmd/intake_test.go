@@ -143,21 +143,7 @@ repo = "owner/name"
 // severityLine returns the frontmatter severity from the only body intake wrote.
 func severityLine(t *testing.T, dir string) string {
 	t.Helper()
-	bodies, err := filepath.Glob(filepath.Join(dir, "work", "*.md"))
-	if err != nil || len(bodies) != 1 {
-		t.Fatalf("intake wrote %v (%v), want exactly one body", bodies, err)
-	}
-	data, err := os.ReadFile(bodies[0]) // #nosec G304 -- a path this test just globbed
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, l := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(l, "severity:") {
-			return strings.TrimRight(l, " ")
-		}
-	}
-	t.Fatalf("%s carries no severity key:\n%s", bodies[0], data)
-	return ""
+	return frontmatterLine(t, dir, "severity")
 }
 
 // The unit table above proves scaffold reads Issue.Severity. This proves the
@@ -207,6 +193,98 @@ func TestIntakeScaffoldsTheTrackersSeverity(t *testing.T) {
 				t.Errorf("issue #%d scaffolded %q, want %q", c.number, got, c.want)
 			}
 		})
+	}
+}
+
+// frontmatterLine returns the named key's line from the only body intake wrote.
+func frontmatterLine(t *testing.T, dir, key string) string {
+	t.Helper()
+	bodies, err := filepath.Glob(filepath.Join(dir, "work", "*.md"))
+	if err != nil || len(bodies) != 1 {
+		t.Fatalf("intake wrote %v (%v), want exactly one body", bodies, err)
+	}
+	data, err := os.ReadFile(bodies[0]) // #nosec G304 -- a path this test just globbed
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(l, key+":") {
+			return strings.TrimRight(l, " ")
+		}
+	}
+	t.Fatalf("%s carries no %s key:\n%s", bodies[0], key, data)
+	return ""
+}
+
+// finish closes only what closes names, so a project whose items fix the
+// issue they came from opts into having intake write it there. Unset must
+// leave it empty: a split or partial fix closing its issue is the wrong answer.
+func TestIntakeSeedsClosesOnlyUnderTheSetting(t *testing.T) {
+	const issue = `{"number":44,"title":"ranked bug","body":"b","state":"OPEN",` +
+		`"labels":[{"name":"bug"},{"name":"severity:low"}]}`
+	for _, c := range []struct {
+		name, intake, want string
+	}{
+		{name: "unset", want: "closes:"},
+		{name: "issue", intake: "\n[intake]\ncloses = \"issue\"\n", want: "closes: 44"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := intakeProject(t, map[int]string{44: issue})
+			withCloses(t, dir, c.intake)
+			var err error
+			capture(t, func() { err = execute(t, "intake", "44") })
+			if err != nil {
+				t.Fatalf("intake 44: %v", err)
+			}
+			if got := frontmatterLine(t, dir, "closes"); got != c.want {
+				t.Errorf("scaffolded %q, want %q", got, c.want)
+			}
+			if got := frontmatterLine(t, dir, "issue"); got != "issue: 44" {
+				t.Errorf("scaffolded %q, want issue: 44", got)
+			}
+		})
+	}
+
+	t.Run("re-run rewrites nothing", func(t *testing.T) {
+		dir := intakeProject(t, map[int]string{44: issue})
+		withCloses(t, dir, "\n[intake]\ncloses = \"issue\"\n")
+		var err error
+		capture(t, func() { err = execute(t, "intake", "44") })
+		if err != nil {
+			t.Fatalf("intake 44: %v", err)
+		}
+		bodies, _ := filepath.Glob(filepath.Join(dir, "work", "*.md"))
+		if len(bodies) != 1 {
+			t.Fatalf("first intake wrote %v, want one body", bodies)
+		}
+		// A hand edit stands in for whoever removed the number from a partial
+		// fix: a re-run that rewrote closes would undo that decision.
+		edited := strings.Replace(read(t, bodies[0]), "closes: 44\n", "closes:\n", 1)
+		if err := os.WriteFile(bodies[0], []byte(edited), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		capture(t, func() { err = execute(t, "intake", "44") })
+		if err != nil {
+			t.Fatalf("second intake 44: %v", err)
+		}
+		after, _ := filepath.Glob(filepath.Join(dir, "work", "*.md"))
+		if len(after) != 1 {
+			t.Errorf("work holds %v after a re-run, want the one body", after)
+		}
+		if got := read(t, bodies[0]); got != edited {
+			t.Errorf("re-run rewrote the body:\n%s\nwant it untouched:\n%s", got, edited)
+		}
+	})
+}
+
+// withCloses declares closes in the fixture's frontmatter and appends the
+// given [intake] stanza to its config.
+func withCloses(t *testing.T, dir, intake string) {
+	t.Helper()
+	path := filepath.Join(dir, ".drover.toml")
+	conf := strings.Replace(read(t, path), `"issue", "severity"]`, `"issue", "closes", "severity"]`, 1)
+	if err := os.WriteFile(path, []byte(conf+intake), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

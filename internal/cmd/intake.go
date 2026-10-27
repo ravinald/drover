@@ -32,7 +32,9 @@ var intakeCmd = &cobra.Command{
 	Long: `Reads the issue, allocates the next free id in the matching namespace, writes a
 body with the frontmatter filled and the issue quoted as raw material. The
 body's issue key is the link back: the issue becomes the item's own, and no
-label is written to say so.
+label is written to say so. finish reads closes, not issue, so the closes key
+stays empty unless [intake] closes = "issue", which writes the number there
+too; remove it by hand when the item is a split or only partly fixes the issue.
 
 It does NOT write the requirements. The scaffold carries a stop marker and
 drover refuses to launch, or even preview, while it is present. Those numbered
@@ -495,10 +497,14 @@ func (s *session) scaffold(kind string, number int, issue gh.Issue, _ string) st
 	var b strings.Builder
 	// The issue key is intake's alone: it is what makes a re-run idempotent, and
 	// a hand-written item has no issue to name.
-	b.WriteString(s.scaffoldBody(kind, issue.Title, map[string]string{
+	seed := map[string]string{
 		"issue":            fmt.Sprintf("%d", number),
 		s.cfg.Severity.Key: seedSeverity(kind, issue.Severity),
-	}))
+	}
+	if s.cfg.Intake.Closes == config.IntakeClosesIssue {
+		seed[backlog.KeyCloses] = seed["issue"]
+	}
+	b.WriteString(s.scaffoldBody(kind, issue.Title, seed))
 	fmt.Fprintf(&b, "--- raw material: issue #%d — evidence, NOT requirements ---\n\n", number)
 	fmt.Fprintf(&b, "> %s\n>\n", issue.Title)
 	for _, line := range strings.Split(strings.ReplaceAll(issue.Body, "\r\n", "\n"), "\n") {
