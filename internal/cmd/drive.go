@@ -3615,10 +3615,7 @@ func (s *session) reconcile() (landed, left int, err error) {
 			return landed, left, err
 		}
 		fmt.Fprintf(errOut, "· %s merged since the last drive; finishing it\n", id)
-		queued, pr := s.ledger.MergeQueued(id), 0
-		if queued {
-			pr, _ = s.ledger.PR(id)
-		}
+		pr, queued := s.ledger.MergeQueued(id)
 		finishInDrive = true
 		lerr := finishCmd.RunE(finishCmd, []string{id})
 		finishInDrive = false

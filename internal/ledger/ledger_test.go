@@ -124,6 +124,43 @@ func TestTombstoneWithdrawsCompletionWithoutLosingAudit(t *testing.T) {
 	}
 }
 
+// A queued --auto merge stays outstanding until the item completes or moves to
+// another pull request. An outcome that queues nothing is a drive that left the
+// forge alone, and forgetting the request there loses the merge's only event.
+func TestMergeQueuedOutlivesOutcomesThatQueueNothing(t *testing.T) {
+	yes, no, exit := true, false, 0
+	end := func(drive string, o Outcome) Row {
+		return Row{ID: DriveRowID, Drive: drive, Exit: &exit, Outcomes: []Outcome{o}}
+	}
+	queued := end("D1", Outcome{ID: "1", Outcome: "ready_to_merge", MergeQueued: true, PR: 7})
+	cases := []struct {
+		name   string
+		rows   []Row
+		wantPR int
+		wantOK bool
+	}{
+		{"never queued", []Row{{ID: "1", PR: 7}, end("D1", Outcome{ID: "1", Outcome: "ready_to_merge"})}, 0, false},
+		{"queued", []Row{{ID: "1", PR: 7}, queued}, 7, true},
+		{"then held", []Row{{ID: "1", PR: 7}, queued, end("D2", Outcome{ID: "1", Outcome: "held"})}, 7, true},
+		{"then parked on the same pull request", []Row{{ID: "1", PR: 7}, queued, {ID: "1", PR: 7}, end("D2", Outcome{ID: "1", Outcome: "parked"})}, 7, true},
+		{"then another drive names only other items", []Row{{ID: "1", PR: 7}, queued, end("D2", Outcome{ID: "2", Outcome: "parked"})}, 7, true},
+		{"then merged", []Row{{ID: "1", PR: 7}, queued, {ID: "1", Merged: &yes}}, 0, false},
+		{"merged then withdrawn", []Row{{ID: "1", PR: 7}, queued, {ID: "1", Merged: &yes}, {ID: "1", Merged: &no}}, 0, false},
+		{"then a new pull request", []Row{{ID: "1", PR: 7}, queued, {ID: "1", PR: 9}, end("D2", Outcome{ID: "1", Outcome: "parked"})}, 0, false},
+		{"requeued on the new pull request", []Row{{ID: "1", PR: 7}, queued, {ID: "1", PR: 9}, end("D2", Outcome{ID: "1", Outcome: "ready_to_merge", MergeQueued: true, PR: 9})}, 9, true},
+		{"queued with no pull request on the outcome", []Row{{ID: "1", PR: 7}, end("D1", Outcome{ID: "1", Outcome: "ready_to_merge", MergeQueued: true})}, 7, true},
+		{"another item queued", []Row{{ID: "2", PR: 7}, end("D1", Outcome{ID: "2", Outcome: "ready_to_merge", MergeQueued: true, PR: 7})}, 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pr, ok := (&Ledger{Rows: tc.rows}).MergeQueued("1")
+			if pr != tc.wantPR || ok != tc.wantOK {
+				t.Errorf("MergeQueued = %d, %v, want %d, %v", pr, ok, tc.wantPR, tc.wantOK)
+			}
+		})
+	}
+}
+
 // The most recent audit wins, not the strongest: a sweep that claimed more than
 // it checked has to be correctable downward.
 func TestMostRecentAuditWins(t *testing.T) {

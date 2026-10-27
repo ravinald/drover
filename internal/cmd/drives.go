@@ -41,7 +41,7 @@ func (d *runningDrive) note(item DriveItem) {
 	if d == nil {
 		return
 	}
-	o := ledger.Outcome{ID: item.ID, Outcome: item.Outcome, MergeQueued: item.MergeQueued}
+	o := ledger.Outcome{ID: item.ID, Outcome: item.Outcome, MergeQueued: item.MergeQueued, PR: queuedPR(item)}
 	if item.Outcome == outcomeSkipped {
 		o.Reason = item.Reason
 	}
@@ -80,11 +80,20 @@ func (d *runningDrive) revise(item DriveItem) {
 	defer d.mu.Unlock()
 	for i := len(d.outcomes) - 1; i >= 0; i-- {
 		if d.outcomes[i].ID == item.ID {
-			d.outcomes[i].Outcome, d.outcomes[i].MergeQueued = item.Outcome, item.MergeQueued
+			d.outcomes[i].Outcome, d.outcomes[i].MergeQueued, d.outcomes[i].PR = item.Outcome, item.MergeQueued, queuedPR(item)
 			return
 		}
 	}
-	d.outcomes = append(d.outcomes, ledger.Outcome{ID: item.ID, Outcome: item.Outcome, MergeQueued: item.MergeQueued})
+	d.outcomes = append(d.outcomes, ledger.Outcome{ID: item.ID, Outcome: item.Outcome, MergeQueued: item.MergeQueued, PR: queuedPR(item)})
+}
+
+// queuedPR is the pull request an end row ties a queued merge to, and zero for
+// an item that queued none.
+func queuedPR(item DriveItem) int {
+	if !item.MergeQueued {
+		return 0
+	}
+	return item.PR
 }
 
 func (d *runningDrive) sawRegister(index gh.Index) {
