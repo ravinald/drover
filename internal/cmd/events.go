@@ -39,10 +39,14 @@ const (
 	// left for the supervising session, which reports what it did about it.
 	evNeedsSupervisor = "needs_supervisor"
 	evMerged          = "merged"
-	evCheck           = "check"
-	evExit            = "exit"
-	evPaused          = "paused"
-	evResumed         = "resumed"
+	// evMergeQueued is an --auto merge the forge accepted and had not carried
+	// out when drive read it back. merged follows once the forge merges, from
+	// the drive that reconciles it.
+	evMergeQueued = "merge_queued"
+	evCheck       = "check"
+	evExit        = "exit"
+	evPaused      = "paused"
+	evResumed     = "resumed"
 	// evReexecWaiting is a resume onto a replaced binary that has waited past
 	// a minute for running items to hold, naming them.
 	evReexecWaiting = "reexec_waiting"
@@ -483,8 +487,11 @@ func (es *eventSink) itemEvents(d DriveItem) {
 			es.needsOperator(d.ID, ev.Action, d.Reason, run, d.PR)
 		}
 	}
-	if d.Merged {
+	switch {
+	case d.Merged:
 		es.emit(DriveEvent{Event: evMerged, ID: d.ID, PR: d.PR, Title: d.ID + ": " + d.Title})
+	case d.MergeQueued:
+		es.emit(DriveEvent{Event: evMergeQueued, ID: d.ID, PR: d.PR, Title: d.ID + ": " + d.Title})
 	}
 }
 

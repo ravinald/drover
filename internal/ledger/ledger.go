@@ -295,6 +295,10 @@ type Outcome struct {
 	Outcome string `json:"outcome"`
 	// Reason is why a skipped item was skipped, absent on every other outcome.
 	Reason string `json:"reason,omitempty"`
+	// MergeQueued is a ready_to_merge item whose --auto merge the forge
+	// accepted and the drive did not see merge. The next drive's
+	// reconciliation reads it to report that merge once it lands.
+	MergeQueued bool `json:"merge_queued,omitempty"`
 }
 
 // Latest keeps one entry per id, the last one, at the position of that id's
@@ -405,6 +409,23 @@ func (l *Ledger) Drives() []Drive {
 		out = append(out, *d)
 	}
 	return out
+}
+
+// MergeQueued reports whether the latest drive end row that names id says its
+// merge was left queued at the forge.
+func (l *Ledger) MergeQueued(id string) bool {
+	queued := false
+	for _, r := range l.Rows {
+		if r.ID != DriveRowID || r.Exit == nil {
+			continue
+		}
+		for _, o := range r.Outcomes {
+			if o.ID == id {
+				queued = o.MergeQueued
+			}
+		}
+	}
+	return queued
 }
 
 // DriveOf is the drive named by the latest row for id that a drive wrote,

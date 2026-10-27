@@ -41,7 +41,7 @@ func (d *runningDrive) note(item DriveItem) {
 	if d == nil {
 		return
 	}
-	o := ledger.Outcome{ID: item.ID, Outcome: item.Outcome}
+	o := ledger.Outcome{ID: item.ID, Outcome: item.Outcome, MergeQueued: item.MergeQueued}
 	if item.Outcome == outcomeSkipped {
 		o.Reason = item.Reason
 	}
@@ -80,11 +80,11 @@ func (d *runningDrive) revise(item DriveItem) {
 	defer d.mu.Unlock()
 	for i := len(d.outcomes) - 1; i >= 0; i-- {
 		if d.outcomes[i].ID == item.ID {
-			d.outcomes[i].Outcome = item.Outcome
+			d.outcomes[i].Outcome, d.outcomes[i].MergeQueued = item.Outcome, item.MergeQueued
 			return
 		}
 	}
-	d.outcomes = append(d.outcomes, ledger.Outcome{ID: item.ID, Outcome: item.Outcome})
+	d.outcomes = append(d.outcomes, ledger.Outcome{ID: item.ID, Outcome: item.Outcome, MergeQueued: item.MergeQueued})
 }
 
 func (d *runningDrive) sawRegister(index gh.Index) {

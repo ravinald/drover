@@ -26,7 +26,7 @@ import (
 // may name.
 var driveEventNames = []string{
 	evStarted, evQueued, evDispatched, evSkipped, evPreflight, evStage, evCheck, evParked, evFiled,
-	evNeedsOperator, evMerged, evPaused, evResumed, evReexecWaiting, evConfigChanged, evUsageWarning, evThreadOpened, evExit,
+	evNeedsOperator, evMergeQueued, evMerged, evPaused, evResumed, evReexecWaiting, evConfigChanged, evUsageWarning, evThreadOpened, evExit,
 }
 
 // driveEventsPath is where a drive keeps its events, one object per line,
@@ -256,6 +256,7 @@ func eventLineTo(e DriveEvent, tint bool) string {
 	if e.Summary != nil {
 		add("ended", e.Summary.Ended)
 		add("merged", strconv.Itoa(e.Summary.Merged))
+		add("merge_queued", strconv.Itoa(e.Summary.MergeQueued))
 		add("parked", strconv.Itoa(e.Summary.Parked))
 		add("skipped", strconv.Itoa(e.Summary.Skipped))
 		add("held", strconv.Itoa(e.Summary.Held))

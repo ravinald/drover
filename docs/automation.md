@@ -275,7 +275,7 @@ A drive that exits before it holds the lease (a refusal, a preflight that fails)
 2026-10-18T09:12:03Z  dispatched     4 seq=2
 2026-10-18T09:12:03Z  stage          4 stage=implement log=~/.cache/drover/webapp/4-retry.20261018-021203.123456789.jsonl seq=3
 2026-10-18T09:40:51Z  parked         4 park=no_record detail=unknown seq=4 reason="the review recorded nothing"
-2026-10-18T09:40:52Z  exit           code=0 ended=drained merged=0 parked=1 skipped=0 held=0 seq=5
+2026-10-18T09:40:52Z  exit           code=0 ended=drained merged=0 merge_queued=0 parked=1 skipped=0 held=0 seq=5
 ```
 
 `--session` prints, beneath each `stage` event that carries a [`log`](#drive---events), what that session is doing as its log grows: one line per tool call or block of text, indented under the item and prefixed with its id, so items running at once under `--jobs` stay apart. `attach` follows each log by offset as it follows the event file, opened for reading only, and stops at the same item's next event, reading the log once more to its last whole line first. Replaying a drive already under way, it reads the logs of sessions still running when it started and of every session launched after; a session that finished before `attach` started keeps its `stage` line alone, so attaching to a long drive does not print hours of old logs. A log not written yet is waited for, and one that will not read is named once on stderr with the error while `attach` goes on with the events. What a line says depends on the runner: a Claude tool call is its name and the first of its `command`, `file_path`, `pattern` or `url` inputs, a codex one is a `command_execution` or `file_change` item, an agy one is the tool step it opens; Claude and codex text is each message the session writes, and agy, which streams text in fragments, yields none. Each summary is one line, cut at 160 characters with a trailing `...`.
@@ -947,9 +947,9 @@ Stdout carries the document and nothing else. Every count, warning and summary g
 
 Each park is said on stderr the moment it happens, before the next item starts, as an indented `! <id> parked <park> at <head>: <first line of the reason>`. `<head>` is the branch's commit, shortened, or `no head` where the branch has none. The summary after the queue drains repeats every park; the line is what an operator watching `--follow` sees in time to act on it.
 
-`outcome` is one of `ready_to_merge`, `merged_by_drover`, `merged_immediately`, `parked`, `skipped` or `held`. `held` is an item a [usage hold](#drive---events) kept from starting or finishing when the drive's `--for` or `--until` arrived first: the drive exits 0, `reason` names the hold, nothing parked and no park row is written, and the next drive picks the item up. Where the trunk has required status checks, drive asks the forge to merge with `--auto`, so the merge completes after drive has moved on and the next drive's reconciliation records it; that item reads `ready_to_merge` with `merged`, and stderr says the merge is queued. drive learns whether the trunk has required checks by reading `repos/{owner}/{repo}/branches/<trunk>/protection/required_status_checks` once per drive. Where `[drive] merge_gate` is declared and that read answers no required checks (404, or 403 on a plan that cannot protect the branch) or fails, drive skips `--auto` and merges on the merge gate's word, as `merged_by_drover` below, and says why on stderr. `merged` is the field that says drive asked, and it is absent on an item nothing merged: a park, a branch `protected_paths` refused, or a run under `--no-merge`.
+`outcome` is one of `ready_to_merge`, `merged_by_drover`, `merged_immediately`, `parked`, `skipped` or `held`. `held` is an item a [usage hold](#drive---events) kept from starting or finishing when the drive's `--for` or `--until` arrived first: the drive exits 0, `reason` names the hold, nothing parked and no park row is written, and the next drive picks the item up. Where the trunk has required status checks, drive asks the forge to merge with `--auto`, so the merge completes after drive has moved on and the next drive's reconciliation records it; that item reads `ready_to_merge` with `merge_queued`, never `merged`, emits a [`merge_queued`](#drive---events) event, counts under the exit summary's `merge_queued` as well as `ready_to_merge`, and stderr says the merge is queued. The drive's end row records it queued, so the drive whose reconciliation finishes it emits `merged` under its own id. drive learns whether the trunk has required checks by reading `repos/{owner}/{repo}/branches/<trunk>/protection/required_status_checks` once per drive. Where `[drive] merge_gate` is declared and that read answers no required checks (404, or 403 on a plan that cannot protect the branch) or fails, drive skips `--auto` and merges on the merge gate's word, as `merged_by_drover` below, and says why on stderr. `merged` says the forge reported the pull request merged, and `merge_queued` that it accepted the `--auto` request and drive did not see it merge; both are absent on an item nothing asked to merge: a park, a branch `protected_paths` refused, or a run under `--no-merge`.
 
-`gh pr merge --auto` also succeeds when the forge merges on the spot because nothing waits, so drive asks the forge afterwards whether the pull request merged. One that did reads `merged_immediately`, with `merged`, `pr`, and `finished` once drive finishes it in the same drive. With `[drive] merge_gate` declared, the merge gate then reads the merged head first; a refusal cannot undo the merge, so the item is left unfinished, the reason names the pull request and the merge gate's last lines, and the drive stops. A merge state drive cannot read leaves the item `ready_to_merge`, with a reason saying the next drive's reconciliation decides it.
+`gh pr merge --auto` also succeeds when the forge merges on the spot because nothing waits, so drive asks the forge afterwards whether the pull request merged. One that did reads `merged_immediately`, with `merged`, `pr`, and `finished` once drive finishes it in the same drive. With `[drive] merge_gate` declared, the merge gate then reads the merged head first; a refusal cannot undo the merge, so the item is left unfinished, the reason names the pull request and the merge gate's last lines, and the drive stops. A merge state drive cannot read leaves the item `ready_to_merge` with `merge_queued`, with a reason saying the next drive's reconciliation decides it.
 
 `merged_by_drover` is the merge drive made itself, because the forge refused auto-merge (`enablePullRequestAutoMerge`) and `[drive] merge_gate` passed the head once its checks finished: the merge gate is what authorizes a merge when the forge cannot. Such an item carries `merged`, `pr`, and `finished` when drive also recorded it in the same drive (ledger row, saved report and tracker closes, as `finish` does). `finished` is absent where the operator's checkout could not take the records cleanly, and the reason says the next drive finishes it. See [When the forge has no auto-merge](lifecycle.md#when-the-forge-has-no-auto-merge).
 
@@ -1280,7 +1280,7 @@ The branch update drive makes before an item's own implement session, or its `--
 }
 ```
 
-`merged`: an item's pull request merged, by the forge at once or by drover on the merge gate's word. `pr` is its number and `title` its title. A merge the forge queued is not one: the next drive's reconciliation finishes it.
+`merged`: an item's pull request merged, by the forge at once, by drover on the merge gate's word, or by the forge after an earlier drive queued it. `pr` is its number and `title` its title. A merge the forge queued is not one until it lands: the drive whose reconciliation finishes it emits `merged` then, carrying that drive's id.
 
 ```json
 {
@@ -1289,6 +1289,18 @@ The branch update drive makes before an item's own implement session, or its `--
   "id": "E36",
   "pr": 252,
   "title": "E36: retry a flaky gate once"
+}
+```
+
+`merge_queued`: the forge accepted an item's `gh pr merge --auto` and had not merged it when drive asked, or drive could not read whether it had. The item's outcome is `ready_to_merge`. `pr` is its number and `title` its title. No `merged` follows in the same drive; the next drive's reconciliation emits it once the forge has merged.
+
+```json
+{
+  "event": "merge_queued",
+  "ts": "2026-10-26T09:50:44Z",
+  "id": "B173",
+  "pr": 238,
+  "title": "B173: drive reads the trunk once"
 }
 ```
 
@@ -1391,6 +1403,7 @@ Every `exit` carries `summary`, what the drive left done and undone:
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `merged`         | Items whose pull request merged.                                                                                                                                                                                                                                                                                                                         |
 | `ready_to_merge` | Items reviewed and green that nothing merged, such as under `--no-merge` or a `protected_paths` hold.                                                                                                                                                                                                                                                    |
+| `merge_queued`   | The `ready_to_merge` items whose `--auto` merge the forge accepted and drive did not see merge. They count under `ready_to_merge` too, and never under `merged`.                                                                                                                                                                                         |
 | `parked`         | Items parked.                                                                                                                                                                                                                                                                                                                                            |
 | `skipped`        | Items not attempted: done, scaffolded, blocked or broken.                                                                                                                                                                                                                                                                                                |
 | `held`           | Items a usage hold kept from starting or finishing.                                                                                                                                                                                                                                                                                                      |
@@ -1408,6 +1421,7 @@ The summary counts each item once, by its latest outcome, so an item parked and 
   "code": 0,
   "summary": {
     "merged": 2,
+    "merge_queued": 0,
     "ready_to_merge": 0,
     "parked": 1,
     "skipped": 1,

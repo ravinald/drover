@@ -233,6 +233,7 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `needs_operator`   | Event: an action stopped at operator policy and waits on a person.                                                     |
 | `needs_supervisor` | Event: an action waits on the supervising session.                                                                     |
 | `merged`           | Event: an item's pull request merged.                                                                                  |
+| `merge_queued`     | Event: the forge accepted an item's auto-merge and has not merged it yet.                                              |
 | `paused`           | Event: the drive paused.                                                                                               |
 | `resumed`          | Event: the drive resumed, naming what changed.                                                                         |
 | `config_changed`   | Event: the `.drover.toml` on disk differs from the one the running drive uses, which it does not apply until a resume. |
