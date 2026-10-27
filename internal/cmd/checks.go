@@ -204,7 +204,7 @@ func (s *session) actOnReds(ctx context.Context, d *DriveItem, sha string, reds 
 			}
 			s.recordCheck(d.ID, sha, j, false, act)
 		}
-		return settled{park: parkTrunkRed, stop: errTrunkRed, reason: strings.Join(named, "\n") +
+		return settled{park: parkTrunkRed, stop: fmt.Errorf("%w: %s", errTrunkRed, strings.Join(named, "; ")), reason: strings.Join(named, "\n") +
 			"\nno branch can fix a check the trunk fails too, so nothing was sent back"}, nil
 	}
 	// A code failure goes to the gate, which sends it back, so rerunning the
@@ -472,24 +472,36 @@ func (f trunkFailure) evidence(trunk string) string {
 // failure behind them says nothing about the trunk now. The first commit it
 // cannot read ends the walk too, so an older failure never outvotes a newer
 // commit nobody could see.
+//
+// The walk starts from the commit the forge answered for the trunk's name,
+// never from a local ref: a fetch older than the forge's tip would otherwise
+// count its parents from the wrong commit and call one behind it the tip.
 func (s *session) trunkRed(ctx context.Context, trunk, name string) *trunkFailure {
-	for i, rev := range append([]string{trunk}, s.trunkCommits(trunk)...) {
+	rev := trunk
+	for behind := 0; behind <= trunkWindow; behind++ {
 		runs, err := s.commitRuns(ctx, rev)
 		if err != nil {
 			return nil
 		}
 		latest := latestCompleted(runs, name)
 		if latest == nil {
-			if slices.ContainsFunc(runs, func(r forgeCheck) bool { return r.Status != "completed" }) {
-				continue
+			if !slices.ContainsFunc(runs, func(r forgeCheck) bool { return r.Status != "completed" }) {
+				return nil
 			}
-			return nil
+			at := rev
+			if behind == 0 {
+				at = runsHead(runs)
+			}
+			if rev = s.firstParent(ctx, at); rev == "" {
+				return nil
+			}
+			continue
 		}
 		if !slices.Contains([]string{"failure", "timed_out", "startup_failure"}, latest.Conclusion) {
 			return nil
 		}
-		f := &trunkFailure{run: *latest, sha: latest.HeadSHA, behind: max(0, i-1)}
-		if i > 0 && f.sha == "" {
+		f := &trunkFailure{run: *latest, sha: latest.HeadSHA, behind: behind}
+		if behind > 0 && f.sha == "" {
 			f.sha = rev
 		}
 		return f
@@ -497,21 +509,39 @@ func (s *session) trunkRed(ctx context.Context, trunk, name string) *trunkFailur
 	return nil
 }
 
-// trunkCommits are the trunk's last trunkWindow first-parent commits, newest
-// first, read from origin's trunk the catch-up fetched and from the local one
-// where there is no origin. Reading git costs no forge call. The tip stays in
-// the list although trunkRed asked the forge for it by name: a fetch older than
-// the forge's tip makes the two different commits.
-func (s *session) trunkCommits(trunk string) []string {
-	ref := "origin/" + trunk
-	if gitAt(s.cfg.Root, "rev-parse", "--verify", "--quiet", ref+"^{commit}") != nil {
-		ref = trunk
+// runsHead is the commit runs were read from, "" when none of them says.
+func runsHead(runs []forgeCheck) string {
+	for _, r := range runs {
+		if r.HeadSHA != "" {
+			return r.HeadSHA
+		}
 	}
-	out, err := gitcmd.Command(s.cfg.Root, "rev-list", "--first-parent", "-n", strconv.Itoa(trunkWindow), ref).Output()
+	return ""
+}
+
+// firstParent is sha's first parent, read from git where the commit is local
+// and from the forge where the last fetch predates it. It is "" for a root
+// commit, an empty sha, or a parent neither can name.
+func (s *session) firstParent(ctx context.Context, sha string) string {
+	if sha == "" || strings.HasPrefix(sha, "-") {
+		return ""
+	}
+	if out, err := gitcmd.Command(s.cfg.Root, "rev-parse", "--verify", "--quiet", sha+"^1^{commit}").Output(); err == nil {
+		return strings.TrimSpace(string(out))
+	}
+	out, err := s.ghAPI(ctx, "repos/"+s.repo()+"/commits/"+url.PathEscape(sha))
 	if err != nil {
-		return nil
+		return ""
 	}
-	return strings.Fields(string(out))
+	var c struct {
+		Parents []struct {
+			SHA string `json:"sha"`
+		} `json:"parents"`
+	}
+	if json.Unmarshal(out, &c) != nil || len(c.Parents) == 0 {
+		return ""
+	}
+	return c.Parents[0].SHA
 }
 
 // commitRuns are every check run on rev, of every name, across every page:

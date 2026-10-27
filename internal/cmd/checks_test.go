@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,7 +19,10 @@ import (
 //	ratelimit  build fails on Docker Hub's rate limit until its run is rerun
 //	trunk      vuln fails, and fails on main's latest completed run too
 //	behind     vuln fails; main's tip, by name or $DROVER_TEST_TRUNK_TIP, is
-//	           still running it, and every commit before the tip failed it
+//	           still running it, and every commit before the tip failed it.
+//	           The forge names main's tip $DROVER_TEST_TRUNK_REMOTE, or
+//	           $DROVER_TEST_TRUNK_TIP without it, and answers its parent as
+//	           $DROVER_TEST_TRUNK_REMOTE_PARENT
 //	pending    vuln fails; no trunk commit has a completed run of it
 //	stale      vuln fails; main and every commit but $DROVER_TEST_TRUNK_OLD
 //	           completed build alone, and $DROVER_TEST_TRUNK_OLD failed vuln
@@ -68,7 +72,7 @@ case "$*" in
   *'/commits/main/check-runs'*)
     case "$DROVER_TEST_CHECKS_SCENARIO" in
       trunk|infratrunk) echo '{"total_count":1,"check_runs":[{"id":99,"name":"vuln","status":"completed","conclusion":"failure","html_url":"https://github.com/o/r/runs/99","completed_at":"2026-10-17T00:00:00Z"}]}' ;;
-      behind|pending) echo '{"total_count":1,"check_runs":[{"id":97,"name":"vuln","status":"in_progress","conclusion":null}]}' ;;
+      behind|pending) echo '{"total_count":1,"check_runs":[{"id":97,"name":"vuln","status":"in_progress","conclusion":null,"head_sha":"'"${DROVER_TEST_TRUNK_REMOTE:-$DROVER_TEST_TRUNK_TIP}"'"}]}' ;;
       paged)
         echo '{"total_count":101,"check_runs":[{"id":93,"name":"build","status":"completed","conclusion":"success","completed_at":"2026-10-17T00:00:00Z"}]}'
         case "$*" in
@@ -110,6 +114,8 @@ case "$*" in
       *) name=build ;;
     esac
     echo '{"total_count":1,"check_runs":[{"id":'$id',"name":"'$name'","status":"completed","conclusion":"failure","details_url":"https://github.com/o/r/actions/runs/500/job/'$id'"}]}' ;;
+  *"/commits/$DROVER_TEST_TRUNK_REMOTE")
+    echo '{"sha":"'"$DROVER_TEST_TRUNK_REMOTE"'","parents":[{"sha":"'"$DROVER_TEST_TRUNK_REMOTE_PARENT"'"}]}' ;;
   *) echo '[]' ;;
 esac
 `)
@@ -219,7 +225,7 @@ func TestAFailureRedOnTheTrunkBehindItsRunningTipParksTrunkRed(t *testing.T) {
 	t.Setenv("DROVER_TEST_TRUNK_TIP", git(t, ".", "rev-parse", "main"))
 	before := ledgerCounts(t).ChangesRequested
 
-	evs, _, err := driveEventsOf(t)
+	evs, stderr, err := driveEventsOf(t)
 	if Code(err) == 0 {
 		t.Errorf("drive exited 0 over a red trunk, want the stop a red trunk raises")
 	}
@@ -240,11 +246,51 @@ func TestAFailureRedOnTheTrunkBehindItsRunningTipParksTrunkRed(t *testing.T) {
 	if calls := strings.Join(ghCalls(t, ghLog), "\n"); !strings.Contains(calls, "/commits/"+parent+"/check-runs") {
 		t.Errorf("no check-runs read for %s, the commit before the tip:\n%s", parent, calls)
 	}
+	var stopLine string
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.HasSuffix(line, "; stopping the drive") {
+			stopLine = line
+		}
+	}
+	for _, want := range []string{parent[:7], "1 first-parent commit behind main's tip", "completed 2026-10-16T00:00:00Z"} {
+		if !strings.Contains(stopLine, want) {
+			t.Errorf("stop line %q does not name %q, so a stale read would not show where the drive stopped", stopLine, want)
+		}
+	}
 	if after := ledgerCounts(t).ChangesRequested; after != before {
 		t.Errorf("changes rows went from %d to %d, want none added", before, after)
 	}
 	if n := len(gateLog(t, ".")); n != 0 {
 		t.Errorf("the merge gate ran %d times over a trunk-red check, want none", n)
+	}
+}
+
+// The forge's main is one commit ahead of the last fetch: its tip, which this
+// checkout does not hold, is still running vuln, and the fetched tip is its
+// parent and failed vuln. That failure sits one commit behind main's tip, and
+// calling it the tip would hide that the read went back at all.
+func TestATrunkFailureBehindAForgeTipTheFetchLacksCountsFromTheForgeTip(t *testing.T) {
+	checksForge(t, "behind")
+	fetched := git(t, ".", "rev-parse", "main")
+	remote := strings.Repeat("ab", 20)
+	t.Setenv("DROVER_TEST_TRUNK_REMOTE", remote)
+	t.Setenv("DROVER_TEST_TRUNK_REMOTE_PARENT", fetched)
+	t.Setenv("DROVER_TEST_TRUNK_TIP", remote)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := &session{cfg: &config.Config{Root: cwd}}
+	f := s.trunkRed(context.Background(), "main", "vuln")
+	if f == nil {
+		t.Fatal("trunkRed found the trunk not red, want vuln's failure on the fetched tip")
+	}
+	if f.sha != fetched || f.behind != 1 {
+		t.Errorf("failure read at %s, %d behind, want %s one behind the forge's tip", f.sha, f.behind, fetched)
+	}
+	if ev := f.evidence("main"); !strings.Contains(ev, fetched[:7]+" (1 first-parent commit behind main's tip)") {
+		t.Errorf("evidence %q, want it to name %s one commit behind main's tip", ev, fetched[:7])
 	}
 }
 
