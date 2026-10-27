@@ -6516,6 +6516,98 @@ func TestTheTrunkIsCaughtUpAgainWhenItMovesBeforeTheGate(t *testing.T) {
 	}
 }
 
+// A catch-up before the gate spends the one retry, and the policy still owns
+// what follows: at operator, a gate that then refuses a trunk moved under it,
+// by exit 1 on a head behind it or by exit 4, hands off rather than parking as
+// an exhausted retry, and nothing is sent back.
+func TestAPolicyShortOfAutoHandsOffAfterACatchUpBeforeTheGate(t *testing.T) {
+	for _, exit := range []string{"1", "4"} {
+		t.Run("exit "+exit, func(t *testing.T) {
+			isolate(t)
+			ghLog := mergeProject(t)
+			dir, remote := forge(t, ghLog)
+			appendConfig(t, dir, "\n[supervise]\nretry_moved_trunk = \"operator\"\n")
+			moveTrunkAfter(t, remote, "gh", "api*check-runs*", "first.txt", "first")
+			gate, err := exec.LookPath("merge-gate")
+			if err != nil {
+				t.Fatal(err)
+			}
+			stub(t, gate, `#!/bin/sh
+echo "$1" >> "$DROVER_ROOT/merge-gate.log"
+tmp=$(mktemp -d)
+git clone -q "$DROVER_TEST_REMOTE" "$tmp/c"
+echo second > "$tmp/c/second.txt"
+git -C "$tmp/c" add -A
+git -C "$tmp/c" -c user.name=o -c user.email=o@example.invalid -c commit.gpgsign=false commit -q -m second
+git -C "$tmp/c" push -q origin HEAD:main
+rm -rf "$tmp"
+echo 'merge-gate: main moved; refusing' >&2
+exit `+exit+`
+`)
+
+			got, evs := gateDrive(t)
+			i := slices.IndexFunc(evs, func(e DriveEvent) bool { return e.Event == evNeedsOperator && e.ID == "1" })
+			if i < 0 || evs[i].Action != "retry_moved_trunk" {
+				t.Fatalf("no needs_operator for retry_moved_trunk: park=%s rounds=%d reason=%s", got.Park, got.Rounds, got.Reason)
+			}
+			if got.Park != parkGateRefused || got.Rounds != 0 {
+				t.Errorf("item 1 parked %q with rounds=%d (%s), want %q and 0", got.Park, got.Rounds, got.Reason, parkGateRefused)
+			}
+			if n := changesRows(t, dir, "1"); n != 0 {
+				t.Errorf("%d changes rows for item 1, want none", n)
+			}
+			if n := len(gateLog(t, dir)); n != 1 {
+				t.Errorf("[drive] merge_gate ran %d times, want once", n)
+			}
+		})
+	}
+}
+
+// The retry's catch-up waits on the new head's checks too, and the trunk can
+// move in that wait. With the one catch-up spent, drive parks on the fetch it
+// makes before the gate rather than hand the gate a head it already knows is
+// behind.
+func TestATrunkMovingDuringTheRetrysChecksParksBeforeTheGate(t *testing.T) {
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, remote := forge(t, ghLog)
+	t.Setenv("DROVER_TEST_GATE_BEHIND", "1")
+	t.Setenv("DROVER_TEST_GATE_ANCESTRY", "on")
+	moveTrunkAfter(t, remote, "gh", "api*check-runs*", "second.txt", "second")
+	gh, err := exec.LookPath("gh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile(gh) // #nosec G304 -- the wrapper moveTrunkAfter just stubbed
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first check read is the head the gate reads first; the second is the
+	// head the retry's catch-up left.
+	moved := strings.Replace(string(script), `if [ ! -e "$DROVER_TEST_MOVE_MARKER" ]; then`,
+		`if [ "$(cat "$DROVER_TEST_READS")" = 2 ] && [ ! -e "$DROVER_TEST_MOVE_MARKER" ]; then`, 1)
+	if moved == string(script) {
+		t.Fatal("the trunk-moving wrapper no longer carries the line this test rewrites")
+	}
+	// stub, never a write through the link: the wrapper's file is shared with
+	// every other test that moves the trunk.
+	stub(t, gh, moved)
+
+	got, _ := gateDrive(t)
+	if n := len(gateLog(t, dir)); n != 1 {
+		t.Errorf("[drive] merge_gate ran %d times, want once: the retry's head was already behind", n)
+	}
+	if got.Park != parkGateRefused || got.Rounds != 0 {
+		t.Fatalf("item 1 parked %q with rounds=%d (%s), want %q and 0", got.Park, got.Rounds, got.Reason, parkGateRefused)
+	}
+	if want := behindAgain(got.Branch, "main", "exit 4", ""); !strings.HasPrefix(got.Reason, strings.TrimSpace(want)) {
+		t.Errorf("reason %q, want behindAgain's", got.Reason)
+	}
+	if n := changesRows(t, dir, "1"); n != 0 {
+		t.Errorf("%d changes rows for item 1, want none", n)
+	}
+}
+
 // A merge made outside drive moves the trunk just the same, and --update-branches
 // brings every open drive pull request level with it, launching nothing.
 func TestCatchUpByHandFollowsAMergeMadeElsewhere(t *testing.T) {

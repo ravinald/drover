@@ -5161,12 +5161,15 @@ func (s *session) requestChangesFromVerify(it backlog.Item, header, out string, 
 // Exit 4 is the gate's to give, and a gate that refuses a moved trunk with
 // exit 1 would otherwise send back a branch with nothing to fix, so readGate
 // asks git before an exit 1 stands. And the head's checks can take most of an
-// hour to settle after the catch-up, so the trunk is fetched again just before
-// the gate reads the head and a moved one is caught up first. That catch-up is
-// the one retry: a trunk moving on every attempt parks rather than loops.
+// hour to settle after a catch-up, so the trunk is fetched again just before
+// every gate run, and a moved one is caught up rather than handed to the gate.
+// There is one catch-up, whoever finds the trunk moved: a trunk that moves
+// again once it is spent answers behind without the gate being run, so a trunk
+// moving on every attempt parks rather than loops.
 //
 // At any policy other than auto, a behind answer parks gate_refused at once,
-// with the hand-off emitted for whoever owns it.
+// with the hand-off emitted for whoever owns it, whether or not the catch-up
+// was already spent before the gate.
 //
 // checks is what the caller settled on the head the gate reads first. The
 // catch-up moves the head, so checks is replaced by what settles on the new one
@@ -5176,43 +5179,54 @@ func (s *session) gateAtHead(ctx context.Context, it backlog.Item, d *DriveItem,
 	trunk string, deadline time.Time, checks *settled,
 ) (code int, read, out string, res *DriveItem, err error) {
 	retried := false
-	past, ferr := false, error(nil)
-	if len(s.cfg.Loop.MergeGate) > 0 {
-		past, ferr = s.trunkPast(d.Branch, trunk)
-	}
-	switch {
-	case ferr != nil:
-		fmt.Fprintf(errOut, "  · %s: %s not fetched before the merge gate, so it reads %s as last caught up: %v\n", d.ID, trunk, d.Branch, ferr)
-	case past:
-		fmt.Fprintf(errOut, "  · %s: %s moved again since %s caught up; catching it up before the merge gate reads it\n", d.ID, trunk, d.Branch)
+	for {
+		past, ferr := false, error(nil)
+		if len(s.cfg.Loop.MergeGate) > 0 {
+			past, ferr = s.trunkPast(d.Branch, trunk)
+		}
+		switch {
+		case ferr != nil:
+			fmt.Fprintf(errOut, "  · %s: %s not fetched before the merge gate, so it reads %s as last caught up: %v\n", d.ID, trunk, d.Branch, ferr)
+		case past && !retried:
+			fmt.Fprintf(errOut, "  · %s: %s moved again since %s caught up; catching it up before the merge gate reads it\n", d.ID, trunk, d.Branch)
+			if res = s.catchUpForGate(ctx, it, d, park, trunk, deadline, checks); res != nil {
+				return code, read, out, res, nil
+			}
+			retried = true
+			continue
+		case past:
+			fmt.Fprintf(errOut, "  · %s: %s moved again after %s's one catch-up, so the merge gate is not run on it\n", d.ID, trunk, d.Branch)
+			if read == "" {
+				read = trunk + " moved again before the gate ran on the caught-up head"
+			}
+			code = gateBehind
+		}
+		if !past {
+			events.stage(d.ID, stageGate)
+			code, out, err = s.runGate(ctx, d.Branch, trunk)
+			code, read = s.readGate(d, trunk, code, err)
+			if err != nil || code != gateBehind {
+				return code, read, out, nil, err
+			}
+		}
+		const key = "retry_moved_trunk"
+		if p, _ := s.cfg.Policy(key); p != polAuto {
+			why := fmt.Sprintf("[drive] merge_gate refused %s because %s moved under it (%s), and [supervise] %s is %s, "+
+				"so drive did not retry; nothing was sent back:\n%s", d.Branch, trunk, read, key, p, lastLines(out, verifyTail))
+			events.handOff(key, p, DriveEvent{ID: d.ID, Branch: d.Branch, PR: d.PR, Reason: why})
+			r := park(parkGateRefused, why)
+			return code, read, out, &r, nil
+		}
+		if retried {
+			return code, read, out, nil, nil
+		}
+		fmt.Fprintf(errOut, "  · %s: [drive] merge_gate says %s is behind %s (%s); catching it up and asking once more\n",
+			d.ID, d.Branch, trunk, read)
 		if res = s.catchUpForGate(ctx, it, d, park, trunk, deadline, checks); res != nil {
 			return code, read, out, res, nil
 		}
 		retried = true
 	}
-	events.stage(d.ID, stageGate)
-	code, out, err = s.runGate(ctx, d.Branch, trunk)
-	code, read = s.readGate(d, trunk, code, err)
-	if err != nil || code != gateBehind || retried {
-		return code, read, out, nil, err
-	}
-	const key = "retry_moved_trunk"
-	if p, _ := s.cfg.Policy(key); p != polAuto {
-		why := fmt.Sprintf("[drive] merge_gate refused %s because %s moved under it (%s), and [supervise] %s is %s, "+
-			"so drive did not retry; nothing was sent back:\n%s", d.Branch, trunk, read, key, p, lastLines(out, verifyTail))
-		events.handOff(key, p, DriveEvent{ID: d.ID, Branch: d.Branch, PR: d.PR, Reason: why})
-		r := park(parkGateRefused, why)
-		return code, read, out, &r, nil
-	}
-	fmt.Fprintf(errOut, "  · %s: [drive] merge_gate says %s is behind %s (%s); catching it up and asking once more\n",
-		d.ID, d.Branch, trunk, read)
-	if res = s.catchUpForGate(ctx, it, d, park, trunk, deadline, checks); res != nil {
-		return code, read, out, res, nil
-	}
-	events.stage(d.ID, stageGate)
-	code, out, err = s.runGate(ctx, d.Branch, trunk)
-	code, read = s.readGate(d, trunk, code, err)
-	return code, read, out, nil, err
 }
 
 // readGate is the gate's answer as drive acts on it, and read names how a
