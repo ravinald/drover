@@ -336,6 +336,52 @@ func TestReadResultReadsACapturedCodexStream(t *testing.T) {
 	}
 }
 
+// codex counts both cache fields inside input_tokens, so the fixture's 27331
+// input is 405 uncached tokens and 26926 written to the cache.
+func TestReadResultCarriesCodexUsage(t *testing.T) {
+	rd, err := ReadResult(filepath.Join("testdata", "codex-stream.jsonl"))
+	if err != nil || !rd.Found {
+		t.Fatalf("found=%v err=%v", rd.Found, err)
+	}
+	want := Usage{Input: 405, CacheCreate: 26926, CacheRead: 0, Output: 5}
+	if rd.Result.Usage == nil || *rd.Result.Usage != want {
+		t.Fatalf("usage = %+v, want %+v", rd.Result.Usage, want)
+	}
+	const thread = "01a0b561-3923-7d13-9bac-316b8a767584"
+	if rd.Result.SessionID != thread || rd.SessionID != thread {
+		t.Errorf("session = %q (read %q), want the thread.started thread_id", rd.Result.SessionID, rd.SessionID)
+	}
+}
+
+func TestCodexTurnWithoutUsageLeavesItNil(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex.jsonl")
+	body := `{"type":"thread.started","thread_id":"t"}` + "\n" +
+		`{"type":"turn.started","session_id":"s"}` + "\n" +
+		`{"type":"turn.completed"}` + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rd, err := ReadResult(path)
+	if err != nil || !rd.Found {
+		t.Fatalf("found=%v err=%v", rd.Found, err)
+	}
+	if rd.Result.Usage != nil {
+		t.Errorf("usage = %+v, want nil for a turn with no usage object", *rd.Result.Usage)
+	}
+	if rd.SessionID != "s" {
+		t.Errorf("session = %q, want the session_id key over the thread_id", rd.SessionID)
+	}
+}
+
+// codex's breakdown overrunning its total floors uncached input at zero
+// rather than writing a negative count.
+func TestCodexUsageFloorsInputAtZero(t *testing.T) {
+	u := codexUsage{Input: 10, CacheRead: 8, CacheWrite: 8, Output: 1}.usage()
+	if u.Input != 0 {
+		t.Errorf("input = %d, want 0", u.Input)
+	}
+}
+
 // The error strings in this fixture are shortened: the live failure carried an
 // upstream proxy hostname and a trace URL. Every event name, nesting and key
 // is as captured.
