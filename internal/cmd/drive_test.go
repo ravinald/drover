@@ -4096,7 +4096,8 @@ func TestRecordHeadWritesOnlyForABranchOffTheTrunk(t *testing.T) {
 // DROVER_TEST_GATE_REFUSE_FROM refuses every gate run from that zero-based
 // count on, which lets the first gate pass and the one at the merge refuse.
 // DROVER_TEST_GATE_BEHIND makes that many first gate runs exit 4, a head
-// behind the trunk. DROVER_TEST_GATE_ANCESTRY makes every gate run exit 4 when
+// behind the trunk, and DROVER_TEST_GATE_STALE makes that many exit 1 saying
+// so, as a gate that never learned exit 4 does. DROVER_TEST_GATE_ANCESTRY makes every gate run exit 4 when
 // origin's main is not an ancestor of the head, the check merge-gate.sh makes,
 // skipped under DROVER_GATE_MERGED=1 unless the value is "ignore". Each run
 // appends the DROVER_GATE_MERGED it saw to merge-gate.merged. DROVER_TEST_OPEN names
@@ -4187,6 +4188,10 @@ case "${DROVER_TEST_GATE_ANCESTRY:-}:${DROVER_GATE_MERGED:-}" in
       exit 4
     fi ;;
 esac
+if [ -n "${DROVER_TEST_GATE_STALE:-}" ] && [ "$n" -lt "$DROVER_TEST_GATE_STALE" ]; then
+  echo "merge-gate: main has moved 9 commit(s) since $1 was checked. Refusing." >&2
+  exit 1
+fi
 if [ -n "${DROVER_TEST_GATE_BEHIND:-}" ] && [ "$n" -lt "$DROVER_TEST_GATE_BEHIND" ]; then
   echo "merge-gate: $1 is behind origin/main" >&2
   exit 4
@@ -6375,6 +6380,231 @@ func TestAGateSayingBehindIsRetriedOnceAfterACatchUp(t *testing.T) {
 				t.Errorf("%d pull requests opened over a merge gate that never passed", n)
 			}
 		})
+	}
+}
+
+// gateDrive runs drive over item 1 and splits what it printed into its events
+// and the item's account.
+func gateDrive(t *testing.T) (got DriveItem, evs []DriveEvent) {
+	t.Helper()
+	out := capture(t, func() {
+		if err := execute(t, "drive", "--json", "--events", "1"); err != nil {
+			t.Fatalf("drive: %v", err)
+		}
+	})
+	for _, line := range strings.Split(out, "\n") {
+		var e DriveEvent
+		if json.Unmarshal([]byte(line), &e) == nil && e.Event != "" {
+			evs = append(evs, e)
+			continue
+		}
+		_ = json.Unmarshal([]byte(line), &got)
+	}
+	return got, evs
+}
+
+// changesRows counts the changes rows drive wrote for id, past the one
+// mergeProject seeds.
+func changesRows(t *testing.T, dir, id string) int {
+	t.Helper()
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, r := range l.Rows {
+		if r.ID == id && r.Changes != "" && r.Changes != "earlier" {
+			n++
+		}
+	}
+	return n
+}
+
+// A gate that refuses a moved trunk with exit 1 rather than 4 is reporting the
+// trunk, not the diff, and drive asks git before believing it: a head the trunk
+// moved past is caught up and gated again, a caught-up head is still sent back,
+// and a policy short of auto parks the reread refusal as it would an exit 4.
+func TestAGateExitingOneOnAHeadBehindTheTrunkIsReadAsBehind(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		moved    bool
+		policy   string
+		park     string
+		rounds   int
+		changes  int
+		gateRuns int
+	}{
+		{"behind is caught up and gated again", true, "", "", 0, 0, 2},
+		{"caught up is still sent back", false, "", parkGateRefused, 1, 1, 1},
+		{"operator parks with the hand-off", true, "operator", parkGateRefused, 0, 0, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			ghLog := mergeProject(t)
+			dir, remote := forge(t, ghLog)
+			if c.policy != "" {
+				appendConfig(t, dir, "\n[supervise]\nretry_moved_trunk = \""+c.policy+"\"\n")
+			}
+			t.Setenv("DROVER_TEST_GATE_STALE", "1")
+			if c.moved {
+				moveTrunkAfter(t, remote, "merge-gate", "*", "elsewhere.txt", "theirs")
+			}
+
+			got, evs := gateDrive(t)
+			if n := len(gateLog(t, dir)); n != c.gateRuns {
+				t.Errorf("[drive] merge_gate ran %d times, want %d", n, c.gateRuns)
+			}
+			if got.Park != c.park || got.Rounds != c.rounds {
+				t.Fatalf("item 1 parked %q with rounds=%d (%s), want %q and %d", got.Park, got.Rounds, got.Reason, c.park, c.rounds)
+			}
+			if n := changesRows(t, dir, "1"); n != c.changes {
+				t.Errorf("%d changes rows for item 1, want %d", n, c.changes)
+			}
+			const read = "exit 1 on a head behind main, which drover read as behind"
+			switch {
+			case c.park == "":
+				git(t, dir, "fetch", "-q", "origin")
+				moved := git(t, dir, "rev-parse", "origin/main")
+				if !got.Merged || got.CatchUp == nil || got.CatchUp.To != moved {
+					t.Errorf("item 1 is %q with update_branch %+v (%s), want the retry's merge of %s merged",
+						got.Outcome, got.CatchUp, got.Reason, moved)
+				}
+			case c.policy != "":
+				if !strings.Contains(got.Reason, read) {
+					t.Errorf("reason %q does not say drover read the exit 1 as behind", got.Reason)
+				}
+				i := slices.IndexFunc(evs, func(e DriveEvent) bool { return e.Event == evNeedsOperator && e.ID == "1" })
+				if i < 0 || evs[i].Action != "retry_moved_trunk" || !strings.Contains(evs[i].Reason, read) {
+					t.Errorf("no needs_operator for retry_moved_trunk naming the reread exit 1 in %+v", evs)
+				}
+			default:
+				if strings.Contains(got.Reason, read) {
+					t.Errorf("reason %q reads a caught-up head as behind", got.Reason)
+				}
+			}
+		})
+	}
+}
+
+// The head's checks can take most of an hour after the catch-up, so the trunk
+// is fetched again just before the gate reads the head. A trunk that moved in
+// that wait is caught up first, and a gate that checks ancestry is asked once.
+func TestTheTrunkIsCaughtUpAgainWhenItMovesBeforeTheGate(t *testing.T) {
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, remote := forge(t, ghLog)
+	t.Setenv("DROVER_TEST_GATE_ANCESTRY", "on")
+	moveTrunkAfter(t, remote, "gh", "api*check-runs*", "elsewhere.txt", "theirs")
+
+	got, evs := gateDrive(t)
+	var steps []string
+	for _, e := range evs {
+		if e.Event == evStage && e.ID == "1" && e.Result == "" && (e.Stage == stageGate || e.Stage == stageCatchUp) {
+			steps = append(steps, e.Stage)
+		}
+	}
+	if want := []string{stageCatchUp, stageCatchUp, stageGate}; !slices.Equal(steps[:min(3, len(steps))], want) {
+		t.Errorf("the trunk steps ran %q, want %q first", steps, want)
+	}
+	if n := len(gateLog(t, dir)); n != 1 {
+		t.Errorf("[drive] merge_gate ran %d times, want once, on the head caught up again", n)
+	}
+	git(t, dir, "fetch", "-q", "origin")
+	moved := git(t, dir, "rev-parse", "origin/main")
+	if !got.Merged || got.CatchUp == nil || got.CatchUp.To != moved {
+		t.Errorf("item 1 is %q with update_branch %+v (%s), want %s merged in before the gate", got.Outcome, got.CatchUp, got.Reason, moved)
+	}
+}
+
+// A catch-up before the gate spends the one retry, and the policy still owns
+// what follows: at operator, a gate that then refuses a trunk moved under it,
+// by exit 1 on a head behind it or by exit 4, hands off rather than parking as
+// an exhausted retry, and nothing is sent back.
+func TestAPolicyShortOfAutoHandsOffAfterACatchUpBeforeTheGate(t *testing.T) {
+	for _, exit := range []string{"1", "4"} {
+		t.Run("exit "+exit, func(t *testing.T) {
+			isolate(t)
+			ghLog := mergeProject(t)
+			dir, remote := forge(t, ghLog)
+			appendConfig(t, dir, "\n[supervise]\nretry_moved_trunk = \"operator\"\n")
+			moveTrunkAfter(t, remote, "gh", "api*check-runs*", "first.txt", "first")
+			gate, err := exec.LookPath("merge-gate")
+			if err != nil {
+				t.Fatal(err)
+			}
+			stub(t, gate, `#!/bin/sh
+echo "$1" >> "$DROVER_ROOT/merge-gate.log"
+tmp=$(mktemp -d)
+git clone -q "$DROVER_TEST_REMOTE" "$tmp/c"
+echo second > "$tmp/c/second.txt"
+git -C "$tmp/c" add -A
+git -C "$tmp/c" -c user.name=o -c user.email=o@example.invalid -c commit.gpgsign=false commit -q -m second
+git -C "$tmp/c" push -q origin HEAD:main
+rm -rf "$tmp"
+echo 'merge-gate: main moved; refusing' >&2
+exit `+exit+`
+`)
+
+			got, evs := gateDrive(t)
+			i := slices.IndexFunc(evs, func(e DriveEvent) bool { return e.Event == evNeedsOperator && e.ID == "1" })
+			if i < 0 || evs[i].Action != "retry_moved_trunk" {
+				t.Fatalf("no needs_operator for retry_moved_trunk: park=%s rounds=%d reason=%s", got.Park, got.Rounds, got.Reason)
+			}
+			if got.Park != parkGateRefused || got.Rounds != 0 {
+				t.Errorf("item 1 parked %q with rounds=%d (%s), want %q and 0", got.Park, got.Rounds, got.Reason, parkGateRefused)
+			}
+			if n := changesRows(t, dir, "1"); n != 0 {
+				t.Errorf("%d changes rows for item 1, want none", n)
+			}
+			if n := len(gateLog(t, dir)); n != 1 {
+				t.Errorf("[drive] merge_gate ran %d times, want once", n)
+			}
+		})
+	}
+}
+
+// The retry's catch-up waits on the new head's checks too, and the trunk can
+// move in that wait. With the one catch-up spent, drive parks on the fetch it
+// makes before the gate rather than hand the gate a head it already knows is
+// behind.
+func TestATrunkMovingDuringTheRetrysChecksParksBeforeTheGate(t *testing.T) {
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, remote := forge(t, ghLog)
+	t.Setenv("DROVER_TEST_GATE_BEHIND", "1")
+	t.Setenv("DROVER_TEST_GATE_ANCESTRY", "on")
+	moveTrunkAfter(t, remote, "gh", "api*check-runs*", "second.txt", "second")
+	gh, err := exec.LookPath("gh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile(gh) // #nosec G304 -- the wrapper moveTrunkAfter just stubbed
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first check read is the head the gate reads first; the second is the
+	// head the retry's catch-up left.
+	moved := strings.Replace(string(script), `if [ ! -e "$DROVER_TEST_MOVE_MARKER" ]; then`,
+		`if [ "$(cat "$DROVER_TEST_READS")" = 2 ] && [ ! -e "$DROVER_TEST_MOVE_MARKER" ]; then`, 1)
+	if moved == string(script) {
+		t.Fatal("the trunk-moving wrapper no longer carries the line this test rewrites")
+	}
+	// stub, never a write through the link: the wrapper's file is shared with
+	// every other test that moves the trunk.
+	stub(t, gh, moved)
+
+	got, _ := gateDrive(t)
+	if n := len(gateLog(t, dir)); n != 1 {
+		t.Errorf("[drive] merge_gate ran %d times, want once: the retry's head was already behind", n)
+	}
+	if got.Park != parkGateRefused || got.Rounds != 0 {
+		t.Fatalf("item 1 parked %q with rounds=%d (%s), want %q and 0", got.Park, got.Rounds, got.Reason, parkGateRefused)
+	}
+	if want := behindAgain(got.Branch, "main", "exit 4", ""); !strings.HasPrefix(got.Reason, strings.TrimSpace(want)) {
+		t.Errorf("reason %q, want behindAgain's", got.Reason)
+	}
+	if n := changesRows(t, dir, "1"); n != 0 {
+		t.Errorf("%d changes rows for item 1, want none", n)
 	}
 }
 

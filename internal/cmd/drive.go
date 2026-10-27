@@ -4080,7 +4080,7 @@ func (s *session) driveFinish(ctx context.Context, it backlog.Item, d *DriveItem
 func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveItem,
 	park func(cause, why string) DriveItem, trunk string, deadline time.Time, checks *settled,
 ) DriveItem {
-	code, out, res, err := s.gateAtHead(ctx, it, d, park, trunk, deadline, checks)
+	code, read, out, res, err := s.gateAtHead(ctx, it, d, park, trunk, deadline, checks)
 	if res != nil {
 		return *res
 	}
@@ -4114,7 +4114,7 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 		s.leaveItem(d)
 		return *d
 	case code == gateBehind:
-		return park(parkGateRefused, behindAgain(d.Branch, trunk, out))
+		return park(parkGateRefused, behindAgain(d.Branch, trunk, read, out))
 	case code == gateForge:
 		d.Outcome, d.Park = outcomeParked, "forge_down"
 		d.Reason = noneFirst(checks.none, "the merge gate reported a failure this diff did not cause; stopping the drive")
@@ -4325,7 +4325,7 @@ func (s *session) mergeByGate(ctx context.Context, it backlog.Item, d *DriveItem
 		}
 		return park(checks.park, checks.reason)
 	}
-	code, out, res, gerr := s.gateAtHead(ctx, it, d, park, trunk, deadline, &checks)
+	code, read, out, res, gerr := s.gateAtHead(ctx, it, d, park, trunk, deadline, &checks)
 	if res != nil {
 		return *res
 	}
@@ -4337,7 +4337,7 @@ func (s *session) mergeByGate(ctx context.Context, it backlog.Item, d *DriveItem
 	case gerr != nil:
 		return park("gate_unrunnable", gerr.Error())
 	case code == gateBehind:
-		return park(parkGateRefused, behindAgain(d.Branch, trunk, out)+", so the pull request stays open")
+		return park(parkGateRefused, behindAgain(d.Branch, trunk, read, out)+", so the pull request stays open")
 	case code == gateForge:
 		// Still a refusal of this merge, and still a forge that will refuse the
 		// next item's for the same reason, so the drive stops as it does at the
@@ -5155,10 +5155,21 @@ func (s *session) requestChangesFromVerify(it backlog.Item, header, out string, 
 // that sees the trunk move under a branch is reporting drive's own merges, not
 // a fault in the item, and treating it as one parks the item behind its own
 // supervisor's merge chain. res is the item's account
-// when it ended here, and nil when the gate's answer stands.
+// when it ended here, and nil when the gate's answer stands. read says how
+// drive came to read a behind answer, for the park reason that carries it.
 //
-// At any policy other than auto, exit 4 parks gate_refused at once, with the
-// hand-off emitted for whoever owns it.
+// Exit 4 is the gate's to give, and a gate that refuses a moved trunk with
+// exit 1 would otherwise send back a branch with nothing to fix, so readGate
+// asks git before an exit 1 stands. And the head's checks can take most of an
+// hour to settle after a catch-up, so the trunk is fetched again just before
+// every gate run, and a moved one is caught up rather than handed to the gate.
+// There is one catch-up, whoever finds the trunk moved: a trunk that moves
+// again once it is spent answers behind without the gate being run, so a trunk
+// moving on every attempt parks rather than loops.
+//
+// At any policy other than auto, a behind answer parks gate_refused at once,
+// with the hand-off emitted for whoever owns it, whether or not the catch-up
+// was already spent before the gate.
 //
 // checks is what the caller settled on the head the gate reads first. The
 // catch-up moves the head, so checks is replaced by what settles on the new one
@@ -5166,50 +5177,130 @@ func (s *session) requestChangesFromVerify(it backlog.Item, header, out string, 
 // head the gate reads, rather than sent back to the item by the gate.
 func (s *session) gateAtHead(ctx context.Context, it backlog.Item, d *DriveItem, park func(cause, why string) DriveItem,
 	trunk string, deadline time.Time, checks *settled,
-) (code int, out string, res *DriveItem, err error) {
-	events.stage(d.ID, stageGate)
-	code, out, err = s.runGate(ctx, d.Branch, trunk)
-	if err != nil || code != gateBehind {
-		return code, out, nil, err
+) (code int, read, out string, res *DriveItem, err error) {
+	retried := false
+	for {
+		past, ferr := false, error(nil)
+		if len(s.cfg.Loop.MergeGate) > 0 {
+			past, ferr = s.trunkPast(d.Branch, trunk)
+		}
+		switch {
+		case ferr != nil:
+			fmt.Fprintf(errOut, "  · %s: %s not fetched before the merge gate, so it reads %s as last caught up: %v\n", d.ID, trunk, d.Branch, ferr)
+		case past && !retried:
+			fmt.Fprintf(errOut, "  · %s: %s moved again since %s caught up; catching it up before the merge gate reads it\n", d.ID, trunk, d.Branch)
+			if res = s.catchUpForGate(ctx, it, d, park, trunk, deadline, checks); res != nil {
+				return code, read, out, res, nil
+			}
+			retried = true
+			continue
+		case past:
+			fmt.Fprintf(errOut, "  · %s: %s moved again after %s's one catch-up, so the merge gate is not run on it\n", d.ID, trunk, d.Branch)
+			if read == "" {
+				read = trunk + " moved again before the gate ran on the caught-up head"
+			}
+			code = gateBehind
+		}
+		if !past {
+			events.stage(d.ID, stageGate)
+			code, out, err = s.runGate(ctx, d.Branch, trunk)
+			code, read = s.readGate(d, trunk, code, err)
+			if err != nil || code != gateBehind {
+				return code, read, out, nil, err
+			}
+		}
+		const key = "retry_moved_trunk"
+		if p, _ := s.cfg.Policy(key); p != polAuto {
+			why := fmt.Sprintf("[drive] merge_gate refused %s because %s moved under it (%s), and [supervise] %s is %s, "+
+				"so drive did not retry; nothing was sent back:\n%s", d.Branch, trunk, read, key, p, lastLines(out, verifyTail))
+			events.handOff(key, p, DriveEvent{ID: d.ID, Branch: d.Branch, PR: d.PR, Reason: why})
+			r := park(parkGateRefused, why)
+			return code, read, out, &r, nil
+		}
+		if retried {
+			return code, read, out, nil, nil
+		}
+		fmt.Fprintf(errOut, "  · %s: [drive] merge_gate says %s is behind %s (%s); catching it up and asking once more\n",
+			d.ID, d.Branch, trunk, read)
+		if res = s.catchUpForGate(ctx, it, d, park, trunk, deadline, checks); res != nil {
+			return code, read, out, res, nil
+		}
+		retried = true
 	}
-	const key = "retry_moved_trunk"
-	if p, _ := s.cfg.Policy(key); p != polAuto {
-		why := fmt.Sprintf("[drive] merge_gate refused %s because %s moved under it (exit 4), and [supervise] %s is %s, "+
-			"so drive did not retry; nothing was sent back:\n%s", d.Branch, trunk, key, p, lastLines(out, verifyTail))
-		events.handOff(key, p, DriveEvent{ID: d.ID, Branch: d.Branch, PR: d.PR, Reason: why})
-		r := park(parkGateRefused, why)
-		return code, out, &r, nil
+}
+
+// readGate is the gate's answer as drive acts on it, and read names how a
+// behind answer was reached. An exit 1 on a head the freshly fetched trunk has
+// moved past is read as exit 4. A fetch that fails, or a head that holds the
+// trunk, leaves the exit 1 standing as the diff's.
+func (s *session) readGate(d *DriveItem, trunk string, code int, err error) (int, string) {
+	if err != nil || code != gateDiff {
+		return code, "exit 4"
 	}
-	fmt.Fprintf(errOut, "  · %s: [drive] merge_gate says %s is behind %s (exit 4); catching it up and asking once more\n",
+	past, ferr := s.trunkPast(d.Branch, trunk)
+	if ferr != nil {
+		fmt.Fprintf(errOut, "  · %s: %s not fetched, so the merge gate's exit 1 stands as this diff's: %v\n", d.ID, trunk, ferr)
+		return code, ""
+	}
+	if !past {
+		return code, ""
+	}
+	read := "exit 1 on a head behind " + trunk + ", which drover read as behind"
+	fmt.Fprintf(errOut, "  · %s: [drive] merge_gate exited 1 on %s, a head behind %s; drover read it as behind, not as the diff's\n",
 		d.ID, d.Branch, trunk)
+	return gateBehind, read
+}
+
+// trunkPast fetches the trunk and reports whether origin's copy holds a commit
+// branch does not. A trunk origin does not carry answers false: there is
+// nothing to be behind.
+func (s *session) trunkPast(branch, trunk string) (bool, error) {
+	remote := "origin/" + trunk
+	if err := gitAt(s.cfg.Root, "fetch", "--quiet", "origin", trunk); err != nil {
+		return false, err
+	}
+	if gitAt(s.cfg.Root, "rev-parse", "--verify", "--quiet", remote) != nil {
+		return false, nil
+	}
+	in, err := isAncestor(s.cfg.Root, remote, branch)
+	if err != nil {
+		return false, err
+	}
+	return !in, nil
+}
+
+// catchUpForGate brings the branch level with the trunk again and settles the
+// checks on the head that leaves, returning the item's account when either
+// parks it.
+func (s *session) catchUpForGate(ctx context.Context, it backlog.Item, d *DriveItem, park func(cause, why string) DriveItem,
+	trunk string, deadline time.Time, checks *settled,
+) *DriveItem {
 	events.stage(d.ID, stageCatchUp)
 	c, p, why := s.catchUp(ctx, it, d, trunk)
 	if r, stopped := s.routeCatchUp(it, d, park, c, p, why, trunk); stopped {
-		return code, out, &r, nil
+		return &r
 	}
 	head, err := revParse(s.cfg.Root, d.Branch)
 	if err != nil {
 		r := park("branch_failed", err.Error())
-		return code, out, &r, nil
+		return &r
 	}
 	if *checks = s.settleChecks(ctx, d, head, deadline); checks.park != "" {
 		if checks.stop != nil {
 			d.stop = checks.stop
 		}
 		r := park(checks.park, checks.reason)
-		return code, out, &r, nil
+		return &r
 	}
-	events.stage(d.ID, stageGate)
-	code, out, err = s.runGate(ctx, d.Branch, trunk)
-	return code, out, nil, err
+	return nil
 }
 
 // behindAgain is the park reason for a gate that still says the head is behind
 // after the one catch-up a merge is allowed: the trunk is moving faster than
 // this item can merge, which nobody fixes by sending the work back.
-func behindAgain(branch, trunk, out string) string {
-	return fmt.Sprintf("[drive] merge_gate refused %s because %s moved under it (exit 4), and again after a branch update; "+
-		"nothing was sent back:\n%s", branch, trunk, lastLines(out, verifyTail))
+func behindAgain(branch, trunk, read, out string) string {
+	return fmt.Sprintf("[drive] merge_gate refused %s because %s moved under it (%s), and again after a branch update; "+
+		"nothing was sent back:\n%s", branch, trunk, read, lastLines(out, verifyTail))
 }
 
 // What a catch-up of another open pull request came to, beside the CatchUp gate
