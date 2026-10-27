@@ -4467,11 +4467,15 @@ func (s *session) catchUp(ctx context.Context, it backlog.Item, d *DriveItem, tr
 	fmt.Fprintf(errOut, "  · %s: %s moved since %s was pushed; merging it in\n", d.ID, trunk, d.Branch)
 	if err := gitAt(dir, "merge", "--no-edit", remote); err != nil {
 		conflicted, _ := gitNames(dir, "diff", "-z", "--name-only", "--diff-filter=U")
+		merged, _ := revParse(dir, "MERGE_HEAD")
 		_ = gitAt(dir, "merge", "--abort")
 		if len(conflicted) == 0 {
 			return c, "branch_failed", "merging " + remote + " into " + d.Branch + " failed: " + err.Error()
 		}
-		c.conflicts = conflicted
+		if merged == "" {
+			merged = to
+		}
+		c.conflicts = mergePair{ours: before, theirs: merged, paths: conflicted}
 		return c, parkTrunkConflict, "merging " + remote + " into " + d.Branch + " conflicts on " + displayPaths(conflicted) +
 			"; the merge was aborted and nothing was pushed"
 	}
@@ -4583,6 +4587,8 @@ func (s *session) dispatchCatchUp(d *DriveItem, park func(cause, why string) Dri
 		_ = gitAt(dir, "merge", "--abort")
 		return park("branch_failed", "merging "+remote+" into "+d.Branch+" failed: "+err.Error()), true
 	}
+	ours, _ := revParse(dir, "HEAD")
+	failed := mergePair{ours: ours, theirs: to, paths: paths}
 	conflict := "merging " + remote + " at " + shortSHA(to) + " into " + d.Branch + " conflicts on " + displayPaths(paths)
 	hold := func(who config.Policy, why string) (DriveItem, bool) {
 		if err := gitAt(dir, "merge", "--abort"); err != nil {
@@ -4590,7 +4596,7 @@ func (s *session) dispatchCatchUp(d *DriveItem, park func(cause, why string) Dri
 		}
 		report(catchUpParked, why, paths)
 		d.Outcome, d.Park, d.Reason, d.handed = outcomeParked, parkTrunkConflict, why, true
-		d.setDetail(conflictDetail(s.cfg.Root, d.Branch, remote, paths))
+		d.setDetail(conflictDetail(s.cfg.Root, failed))
 		events.handOff(key, who, DriveEvent{ID: d.ID, Reason: why, PR: d.PR, Branch: d.Branch, Tree: s.tree, Paths: paths})
 		return *d, true
 	}
@@ -4782,7 +4788,16 @@ func (s *session) trunkOwners(self, base, to string) map[string]string {
 type caughtUp struct {
 	row       *CatchUp
 	out       string
-	conflicts []string
+	conflicts mergePair
+}
+
+// mergePair is a merge that conflicted: the commits it joined, and the files it
+// stopped on. Commit ids rather than ref names, because origin's trunk can move
+// between the failed merge and the read of its evidence: a sibling's fetch
+// would otherwise have merge-tree describe a merge nobody attempted.
+type mergePair struct {
+	ours, theirs string
+	paths        []string
 }
 
 // trunkResult is the gate's word on a trunk commit alone.
@@ -4949,7 +4964,7 @@ func (s *session) routeCatchUp(it backlog.Item, d *DriveItem, park func(cause, w
 		d.stop = errTrunkRed
 		return park(p, why), true
 	case p == parkTrunkConflict:
-		d.setDetail(conflictDetail(s.cfg.Root, d.Branch, "origin/"+trunk, c.conflicts))
+		d.setDetail(conflictDetail(s.cfg.Root, c.conflicts))
 		return park(p, why), true
 	case p != "":
 		return park(p, why), true
@@ -5592,15 +5607,15 @@ func mergeConflicts(root, a, b string) ([]string, error) {
 }
 
 // conflictDetail is a trunk_conflict park's detail: the files, and git's own
-// account of merging remote into branch, read with merge-tree for the same
-// pair mergeConflicts reads. No session caused the park, so it names no log.
-func conflictDetail(root, branch, remote string, paths []string) parkDetail {
-	out, err := gitcmd.Command(root, "merge-tree", "--write-tree", "--name-only", "--messages", branch, remote).Output()
+// account of the merge m names, read with merge-tree for the commits that merge
+// joined. No session caused the park, so it names no log.
+func conflictDetail(root string, m mergePair) parkDetail {
+	out, err := gitcmd.Command(root, "merge-tree", "--write-tree", "--name-only", "--messages", m.ours, m.theirs).Output()
 	ev := lastLines(strings.TrimSpace(string(out)), tailLines)
 	if ev == "" && err != nil {
-		ev = "git merge-tree " + branch + " " + remote + " named no conflict: " + err.Error()
+		ev = "git merge-tree " + m.ours + " " + m.theirs + " named no conflict: " + err.Error()
 	}
-	return parkDetail{Detail: displayPaths(paths), Evidence: ev}
+	return parkDetail{Detail: displayPaths(m.paths), Evidence: ev}
 }
 
 // catchUpByHand is --update-branches: every open drive pull request caught up as a
