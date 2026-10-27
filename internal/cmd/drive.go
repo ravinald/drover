@@ -4471,6 +4471,7 @@ func (s *session) catchUp(ctx context.Context, it backlog.Item, d *DriveItem, tr
 		if len(conflicted) == 0 {
 			return c, "branch_failed", "merging " + remote + " into " + d.Branch + " failed: " + err.Error()
 		}
+		c.conflicts = conflicted
 		return c, parkTrunkConflict, "merging " + remote + " into " + d.Branch + " conflicts on " + displayPaths(conflicted) +
 			"; the merge was aborted and nothing was pushed"
 	}
@@ -4589,6 +4590,7 @@ func (s *session) dispatchCatchUp(d *DriveItem, park func(cause, why string) Dri
 		}
 		report(catchUpParked, why, paths)
 		d.Outcome, d.Park, d.Reason, d.handed = outcomeParked, parkTrunkConflict, why, true
+		d.setDetail(conflictDetail(s.cfg.Root, d.Branch, remote, paths))
 		events.handOff(key, who, DriveEvent{ID: d.ID, Reason: why, PR: d.PR, Branch: d.Branch, Tree: s.tree, Paths: paths})
 		return *d, true
 	}
@@ -4775,10 +4777,12 @@ func (s *session) trunkOwners(self, base, to string) map[string]string {
 }
 
 // caughtUp is what catchUp did. row is nil when nothing merged; out is the
-// verify's output on the merged tree, kept for request-changes.
+// verify's output on the merged tree, kept for request-changes; conflicts is
+// the files a trunk_conflict park conflicted on.
 type caughtUp struct {
-	row *CatchUp
-	out string
+	row       *CatchUp
+	out       string
+	conflicts []string
 }
 
 // trunkResult is the gate's word on a trunk commit alone.
@@ -4943,6 +4947,9 @@ func (s *session) routeCatchUp(it backlog.Item, d *DriveItem, park func(cause, w
 		return *d, true
 	case p == parkTrunkRed:
 		d.stop = errTrunkRed
+		return park(p, why), true
+	case p == parkTrunkConflict:
+		d.setDetail(conflictDetail(s.cfg.Root, d.Branch, "origin/"+trunk, c.conflicts))
 		return park(p, why), true
 	case p != "":
 		return park(p, why), true
@@ -5582,6 +5589,18 @@ func mergeConflicts(root, a, b string) ([]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+// conflictDetail is a trunk_conflict park's detail: the files, and git's own
+// account of merging remote into branch, read with merge-tree for the same
+// pair mergeConflicts reads. No session caused the park, so it names no log.
+func conflictDetail(root, branch, remote string, paths []string) parkDetail {
+	out, err := gitcmd.Command(root, "merge-tree", "--write-tree", "--name-only", "--messages", branch, remote).Output()
+	ev := lastLines(strings.TrimSpace(string(out)), tailLines)
+	if ev == "" && err != nil {
+		ev = "git merge-tree " + branch + " " + remote + " named no conflict: " + err.Error()
+	}
+	return parkDetail{Detail: displayPaths(paths), Evidence: ev}
 }
 
 // catchUpByHand is --update-branches: every open drive pull request caught up as a

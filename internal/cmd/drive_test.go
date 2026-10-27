@@ -5379,6 +5379,31 @@ func TestATrunkConflictParksAndForcesNothing(t *testing.T) {
 	if len(gateLog(t, dir)) != 0 {
 		t.Error("the merge gate ran over a branch that never updated")
 	}
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Counts("1").ByStage[ledger.StageReview] == 0 {
+		t.Fatal("no review session ran before the conflict, so its log could not have been mistaken for the evidence")
+	}
+	conflictParkRow(t, dir, "1", "implemented.txt")
+}
+
+// conflictParkRow asserts id's ledger park row names the conflicted file as its
+// detail, carries merge-tree's account of it, and points at no session log.
+func conflictParkRow(t *testing.T, dir, id, path string) {
+	t.Helper()
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pk, ok := l.Parked(id)
+	if !ok || pk.Park != parkTrunkConflict || pk.Detail != path || pk.Log != "" {
+		t.Fatalf("ledger park row = %+v (found %v), want %s (%s) and no log", pk, ok, parkTrunkConflict, path)
+	}
+	if !strings.Contains(pk.Evidence, "CONFLICT") || !strings.Contains(pk.Evidence, path) {
+		t.Errorf("evidence %q is not merge-tree's account of %s", pk.Evidence, path)
+	}
 }
 
 // --follow appends what a finish unblocked. Item 3 depends on item 1, so it is
@@ -7332,6 +7357,7 @@ func TestAConflictAtDispatchParksAtSupervisor(t *testing.T) {
 	if st := git(t, h.Tree, "status", "--porcelain"); st != "" {
 		t.Errorf("the worktree was left mid-merge:\n%s", st)
 	}
+	conflictParkRow(t, dir, "1", "shared.txt")
 }
 
 // A conflict round counts against max_review_rounds, so an item already at the cap
