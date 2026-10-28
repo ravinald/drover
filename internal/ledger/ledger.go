@@ -1393,7 +1393,7 @@ func appendLocked(path string, r Row, skip func(*Ledger) bool) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return false, fmt.Errorf("create ledger directory: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return false, fmt.Errorf("open %s: %w", path, err)
 	}
@@ -1422,10 +1422,36 @@ func appendLocked(path string, r Row, skip func(*Ledger) bool) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("encode row: %w", err)
 	}
-	if _, err := f.Write(append(line, '\n')); err != nil {
+	out := append(line, '\n')
+	unterminated, err := endsUnterminated(f)
+	if err != nil {
+		return false, fmt.Errorf("read the end of %s: %w", path, err)
+	}
+	if unterminated {
+		out = append([]byte{'\n'}, out...)
+	}
+	if _, err := f.Write(out); err != nil {
 		return false, fmt.Errorf("append to %s: %w", path, err)
 	}
 	return true, f.Sync()
+}
+
+// endsUnterminated reports whether f holds a last line with no newline, as a
+// row appended by hand with printf or an editor can leave it. Appending to that
+// would join the two rows into one line that parses as neither.
+func endsUnterminated(f *os.File) (bool, error) {
+	info, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	if info.Size() == 0 {
+		return false, nil
+	}
+	last := make([]byte, 1)
+	if _, err := f.ReadAt(last, info.Size()-1); err != nil {
+		return false, err
+	}
+	return last[0] != '\n', nil
 }
 
 // Stamp defaults a row's date and time to now, leaving whatever the writer set.

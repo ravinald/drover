@@ -224,6 +224,96 @@ func TestAppendStampsDateAndIsAppendOnly(t *testing.T) {
 	}
 }
 
+// A row appended by hand with printf or an editor can leave the last line
+// unterminated; the next append must not join it into one line parsing as
+// neither, or the hand-written merged row reads as an item that never merged.
+func TestAppendTerminatesAnUnterminatedLastLine(t *testing.T) {
+	appends := map[string]func(string, Row) error{
+		"Append": Append,
+		"AppendUnless": func(path string, r Row) error {
+			wrote, err := AppendUnless(path, r, func(*Ledger) bool { return false })
+			if err == nil && !wrote {
+				t.Error("AppendUnless reported no write with a skip returning false")
+			}
+			return err
+		},
+	}
+	for name, appendRow := range appends {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ledger.jsonl")
+			if err := os.WriteFile(path, []byte(`{"id":"1","merged":true,"date":"2026-01-01"}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := appendRow(path, Row{ID: "2", Level: LevelClaimed, CodeBy: CodeAgent, Note: "x"}); err != nil {
+				t.Fatal(err)
+			}
+			l, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(l.Malformed) != 0 {
+				t.Fatalf("malformed lines: %+v", l.Malformed)
+			}
+			if len(l.Rows) != 2 {
+				t.Fatalf("got %d rows, want 2", len(l.Rows))
+			}
+			if !l.State("1").Merged {
+				t.Error("the hand-written merged row no longer reads as merged")
+			}
+		})
+	}
+}
+
+func TestAppendToEmptyOrMissingFileWritesOneLine(t *testing.T) {
+	for name, seed := range map[string]bool{"empty": true, "missing": false} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "ledger.jsonl")
+			if seed {
+				if err := os.WriteFile(path, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := Append(path, Row{ID: "1", Level: LevelClaimed, CodeBy: CodeAgent}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if data[0] == '\n' {
+				t.Error("file opens with a blank line")
+			}
+			if n := strings.Count(string(data), "\n"); n != 1 || data[len(data)-1] != '\n' {
+				t.Errorf("file holds %d newlines, want exactly one terminated line: %q", n, data)
+			}
+		})
+	}
+}
+
+func TestAppendAfterATerminatedLineAddsOnlyTheRow(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ledger.jsonl")
+	before := []byte(`{"id":"1","merged":true,"date":"2026-01-01"}` + "\n")
+	if err := os.WriteFile(path, before, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := Row{ID: "2", Level: LevelClaimed, CodeBy: CodeAgent, Date: "2026-01-02", TS: "2026-01-02T00:00:00Z"}
+	if err := Append(path, r); err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = append(append(slices.Clone(before), want...), '\n')
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("file after append:\n got %q\nwant %q", got, want)
+	}
+}
+
 // A truncated or hand-mangled line must be reported, not skipped. prompt.sh's
 // `fromjson? // empty` made a lost row look identical to one never written.
 func TestLoadReportsMalformedLines(t *testing.T) {
