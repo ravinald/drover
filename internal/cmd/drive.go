@@ -283,7 +283,7 @@ func (s *session) launch(ctx context.Context, it backlog.Item, stage, name, logB
 			return runner.Outcome{Exit: -1}, err
 		}
 	}
-	at, err := s.launched(it, stage, name)
+	at, err := s.launched(it, "drive", stage, name)
 	if err != nil {
 		return runner.Outcome{Exit: -1}, err
 	}

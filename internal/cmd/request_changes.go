@@ -173,7 +173,7 @@ change the numbered requirements, refuses evidence whose only findings are
 		if err := os.WriteFile(it.Path, written, 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", it.Path, err)
 		}
-		if err := s.wroteBody(it.ID.Bare(), written); err != nil {
+		if err := s.wroteBody(it.ID.Bare(), "request-changes", written); err != nil {
 			return err
 		}
 		// The section this just overwrote is gone from the tree, and with it the

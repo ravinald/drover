@@ -219,7 +219,7 @@ func TestAStubExitsWithTheCodeItsEnvironmentCarries(t *testing.T) {
 // on a machine nobody could reproduce from CI. runner.SessionEnv is the part a
 // launched session exports, kept there so a variable Run gains reaches this list
 // without anyone remembering to add it.
-var clearedEnv = append(slices.Clone(runner.SessionEnv), "COLUMNS")
+var clearedEnv = append(slices.Clone(runner.SessionEnv), "COLUMNS", envClaudeCode, envCodexThread)
 
 // ambient is what the pin sets in the child, one value per name that changes an
 // answer if it survives: the actor gate seals six commands against DROVER_ACTOR,
@@ -236,6 +236,8 @@ var ambient = map[string]string{
 	runner.EnvRoot:    "/nonexistent",
 	runner.EnvSession: "ambient-session",
 	"COLUMNS":         "40",
+	envClaudeCode:     "1",
+	envCodexThread:    "ambient-thread",
 }
 
 // envRelaunch marks the child process the pin starts, so it runs the assertion

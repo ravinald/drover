@@ -317,7 +317,7 @@ func TestIntakeSeesAnUnreadableBodyLinkingTheIssue(t *testing.T) {
 
 // oneMerged is the ledger every promotion fixture reads: item 1 merged and item
 // 2 open, so one row is dormant and one is live off the same register.
-const oneMerged = `{"id":"1","merged":true,"runner":"upstream","date":"2026-01-01"}`
+const oneMerged = `{"id":"1","merged":true,"runner":"upstream","date":"2026-01-01"}` + "\n"
 
 // promotionProject writes a project whose gh stub holds the register in a
 // directory of files, one per row, so removing the follow-up label removes the row.

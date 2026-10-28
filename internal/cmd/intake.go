@@ -16,6 +16,7 @@ import (
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/gh"
 	"github.com/ravinald/drover/internal/idalloc"
+	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/sev"
 	"github.com/spf13/cobra"
 )
@@ -146,7 +147,8 @@ business and appears neither there nor in ` + "`drover follow-ups`" + `.`,
 		if slug == "" {
 			slug = fmt.Sprintf("issue-%d", number)
 		}
-		id, path, err := s.mint(prefix, slug, s.scaffold(kind, number, issue, slug), nil)
+		id, path, err := s.mint(prefix, slug, s.scaffold(kind, number, issue, slug),
+			ledger.Origin{Cmd: "intake", Issue: number}, nil)
 		if err != nil {
 			return err
 		}
@@ -373,7 +375,13 @@ var idDeadline = 30 * time.Second
 // overwrites.
 //
 // vet sees the id before anything is written, and may refuse it.
-func (s *session) mint(prefix, slug, body string, vet func(backlog.ID) error) (backlog.ID, string, error) {
+//
+// origin is how the caller came to create it; mint fills in who did, and
+// records it once the body exists. A ledger that refuses that row fails the
+// command and leaves the body where it is, as a body row that will not write
+// does: deleting a body the operator may already have opened would lose more
+// than the row.
+func (s *session) mint(prefix, slug, body string, origin ledger.Origin, vet func(backlog.ID) error) (backlog.ID, string, error) {
 	dir := s.cfg.Abs(s.cfg.Paths.Backlog)
 	unlock, err := idalloc.Lock(dir)
 	if err != nil {
@@ -412,6 +420,10 @@ func (s *session) mint(prefix, slug, body string, vet func(backlog.ID) error) (b
 	}
 	if err := f.Close(); err != nil {
 		return backlog.ID{}, "", fmt.Errorf("write scaffold: %w", err)
+	}
+	if err := s.recordOrigin(id.Bare(), origin); err != nil {
+		return backlog.ID{}, "", fmt.Errorf("%s is written at %s, but the ledger would not record where it came from: %w",
+			id.Bare(), rel(s.cfg.Root, path), err)
 	}
 	return id, path, nil
 }

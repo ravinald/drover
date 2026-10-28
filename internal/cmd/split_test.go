@@ -60,10 +60,10 @@ func TestSplitBlocksTheItemItSplits(t *testing.T) {
 	}
 }
 
-// split's one ledger row is the digest of the body whose deps line it widened.
+// split's one body row is the digest of the body whose deps line it widened.
 // It says drover wrote that body, so a review that splits mid-pass is not read as
 // one that edited the body by hand; the scaffold gets none, because no review of
-// it is under way.
+// it is under way. The scaffold gets its origin row instead.
 //
 // Both help surfaces are audited against what the run did rather than against
 // that decision, so reversing it stays one edit with three failures: losing the
@@ -90,15 +90,18 @@ func TestSplitWritesOneBodyRow(t *testing.T) {
 		t.Fatalf("the seeded row did not survive the split, so this reads no ledger: %+v", l.Rows)
 	}
 	wrote := len(l.Rows) > 1
-	if len(l.Rows) != 2 || l.Rows[1].ID != "1" || l.Rows[1].Body == "" {
-		t.Fatalf("want one body row for the split item, got %+v", l.Rows[1:])
+	if len(l.Rows) != 3 || l.Rows[1].ID != "B2" || l.Rows[1].Origin == nil || l.Rows[2].ID != "1" || l.Rows[2].Body == "" {
+		t.Fatalf("want the scaffold's origin row, then one body row for the split item, got %+v", l.Rows[1:])
 	}
 	sum, err := bodyDigest(filepath.Join(dir, "work", "01-first.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l.Rows[1].Body != sum {
-		t.Errorf("the body row carries %s, the body on disk digests %s", l.Rows[1].Body, sum)
+	if l.Rows[2].Body != sum {
+		t.Errorf("the body row carries %s, the body on disk digests %s", l.Rows[2].Body, sum)
+	}
+	if l.Rows[2].Cmd != "split" || l.Rows[2].Actor != "operator" {
+		t.Errorf("the body row names %q by %q, want split by operator", l.Rows[2].Cmd, l.Rows[2].Actor)
 	}
 
 	for _, s := range []struct{ where, text string }{

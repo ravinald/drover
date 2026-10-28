@@ -2776,7 +2776,7 @@ func mergedLaunched(t *testing.T, s *session, id, branch string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.launched(it, ledger.StageImplement, "impl"); err != nil {
+	if _, err := s.launched(it, "run", ledger.StageImplement, "impl"); err != nil {
 		t.Fatal(err)
 	}
 	// Recorded before the merge, as a drive records it before the push: after the
@@ -3990,7 +3990,7 @@ func TestReconciliationRefusesAMergedBranchThatNeverHeldACommit(t *testing.T) {
 	}
 	// The branch a killed run leaves: created from the trunk, never committed to.
 	git(t, dir, "branch", branch, "main")
-	if _, err := s.launched(it, ledger.StageImplement, "impl"); err != nil {
+	if _, err := s.launched(it, "run", ledger.StageImplement, "impl"); err != nil {
 		t.Fatal(err)
 	}
 	// The trunk moves on, so the branch is behind it rather than level with it and

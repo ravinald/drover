@@ -132,6 +132,9 @@ func openFrom(cfg *config.Config) (*session, error) {
 // A usage row takes no waiting verify time, which belongs to the item's next
 // row of work, and lands in the loaded ledger's Usage where Load would put it.
 func (s *session) record(row ledger.Row) error {
+	if row.Body != "" && row.Cmd == "" {
+		return fmt.Errorf("internal: a body row for %s names no command; build it with ledger.BodyRow", row.ID)
+	}
 	if row.Usage == nil {
 		row = s.verifyStamp(row)
 	}
@@ -204,7 +207,7 @@ func (s *session) recordDone(row ledger.Row) (bool, error) {
 //
 // It returns where the session runs, carrying the launch id the row recorded,
 // so the caller hands runner.Run the id the ledger already holds.
-func (s *session) launched(it backlog.Item, stage, name string) (runner.Where, error) {
+func (s *session) launched(it backlog.Item, cmd, stage, name string) (runner.Where, error) {
 	at := s.where()
 	at.Session = runner.NewSession()
 	row := ledger.Row{ID: it.ID.Bare(), Stage: stage, Runner: name, Session: at.Session, Date: ledger.Today(),
@@ -214,7 +217,8 @@ func (s *session) launched(it backlog.Item, stage, name string) (runner.Where, e
 		if err != nil {
 			return at, err
 		}
-		row.Body = sum
+		by := ledger.BodyRow(it.ID.Bare(), sum, s.author(cmd))
+		row.Body, row.Cmd, row.Actor, row.Agent = by.Body, by.Cmd, by.Actor, by.Agent
 	}
 	if err := s.record(row); err != nil {
 		return at, err
@@ -229,8 +233,60 @@ func (s *session) launched(it backlog.Item, stage, name string) (runner.Where, e
 // comparison reads the write as drover's own rather than a hand edit. Called
 // after the write succeeds, never before: a row for a write that failed would
 // vouch for bytes that are not on disk.
-func (s *session) wroteBody(id string, written []byte) error {
-	return s.record(ledger.Row{ID: id, Body: bodySum(written), Date: ledger.Today()})
+//
+// cmd is the drover command doing the writing, named by the caller rather than
+// read off the process: drive writes through request-changes in-process, and
+// the body is request-changes' however it was reached.
+func (s *session) wroteBody(id, cmd string, written []byte) error {
+	return s.record(ledger.BodyRow(id, bodySum(written), s.author(cmd)))
+}
+
+// Variables an interactive agent sets in the shell it runs commands from, the
+// one way a command typed into an operator's terminal can tell that an agent
+// typed it. codex sets CODEX_THREAD_ID for every command its threads run
+// (codex-rs/protocol/src/shell_environment.rs, create_env).
+const (
+	envClaudeCode  = "CLAUDECODE"
+	envCodexThread = "CODEX_THREAD_ID"
+)
+
+// author is who a row this process writes is by. A session drover launched
+// names its agent from the runner its stage row recorded, which is what drover
+// itself resolved; the environment answers only for a terminal drover did not
+// start, where nothing else can.
+func (s *session) author(cmd string) ledger.Author {
+	a := ledger.Author{Cmd: cmd, Actor: runner.ActorOperator}
+	if !runner.Launched() {
+		a.Agent = interactiveAgent()
+		return a
+	}
+	a.Actor = runner.ActorAgent
+	if runner.Supervising() {
+		a.Actor = runner.ActorSupervisor
+	}
+	if st, ok := s.ledger.StageOf(runner.Session()); ok {
+		a.Agent = st.Runner
+	}
+	return a
+}
+
+// interactiveAgent names the agent driving this terminal, empty for a person
+// or an agent that marks its shell with nothing drover knows.
+func interactiveAgent() string {
+	switch {
+	case os.Getenv(envClaudeCode) == "1":
+		return "claude"
+	case os.Getenv(envCodexThread) != "":
+		return "codex"
+	}
+	return ""
+}
+
+// recordOrigin writes the origin row for an item mint just created.
+func (s *session) recordOrigin(id string, o ledger.Origin) error {
+	a := s.author(o.Cmd)
+	o.Actor, o.Agent, o.Session = a.Actor, a.Agent, runner.Session()
+	return s.record(ledger.Row{ID: id, Origin: &o, Date: ledger.Today()})
 }
 
 // bodyDigest is the digest of an item file as it stands on disk.
