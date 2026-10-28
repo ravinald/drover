@@ -257,6 +257,27 @@ func TestAFailureRedOnTheTrunkBehindItsRunningTipParksTrunkRed(t *testing.T) {
 			t.Errorf("stop line %q does not name %q, so a stale read would not show where the drive stopped", stopLine, want)
 		}
 	}
+	l, err := ledger.Load("ledger.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row *ledger.Row
+	for _, r := range l.Rows {
+		if r.ID == "1" && r.Park == parkTrunkRed {
+			row = &r
+		}
+	}
+	if row == nil {
+		t.Fatal("no trunk_red park row for item 1 in the ledger")
+	}
+	if row.Detail != ledger.ClassTrunk {
+		t.Errorf("park row detail = %q, want %q", row.Detail, ledger.ClassTrunk)
+	}
+	for _, want := range []string{parent[:7], "1 first-parent commit behind main's tip", "completed 2026-10-16T00:00:00Z"} {
+		if !strings.Contains(row.Evidence, want) {
+			t.Errorf("park row evidence %q does not name %q, so status and show would hide a stale read", row.Evidence, want)
+		}
+	}
 	if after := ledgerCounts(t).ChangesRequested; after != before {
 		t.Errorf("changes rows went from %d to %d, want none added", before, after)
 	}

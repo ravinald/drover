@@ -123,9 +123,11 @@ type judged struct {
 // settled is what settleChecks concluded about a head before the gate reads
 // it. A park stops the item; none reports a head no workflow ran on, for a
 // verify refusal that follows to say so; code is the red checks left for the
-// gate, for a refusal that follows to say what failed.
+// gate, for a refusal that follows to say what failed. detail is what a park's
+// ledger row carries, the checks that caused it.
 type settled struct {
 	park, reason string
+	detail       parkDetail
 	stop         error
 	none         string
 	code         []judged
@@ -167,6 +169,12 @@ func (s *session) settleChecks(ctx context.Context, d *DriveItem, sha string, de
 		}
 		out, rerun := s.actOnReds(ctx, d, sha, reds)
 		if len(rerun) == 0 {
+			// Set here rather than by each caller, so no path that parks on
+			// this result records the last session's log in place of the
+			// check that caused the park.
+			if out.park != "" {
+				d.setDetail(out.detail)
+			}
 			return out
 		}
 		for _, id := range rerun {
@@ -205,7 +213,8 @@ func (s *session) actOnReds(ctx context.Context, d *DriveItem, sha string, reds 
 			s.recordCheck(d.ID, sha, j, false, act)
 		}
 		return settled{park: parkTrunkRed, stop: fmt.Errorf("%w: %s", errTrunkRed, strings.Join(named, "; ")), reason: strings.Join(named, "\n") +
-			"\nno branch can fix a check the trunk fails too, so nothing was sent back"}, nil
+			"\nno branch can fix a check the trunk fails too, so nothing was sent back",
+			detail: parkDetail{Detail: ledger.ClassTrunk, Evidence: strings.Join(named, "\n")}}, nil
 	}
 	// A code failure goes to the gate, which sends it back, so rerunning the
 	// infra failures beside it would spend reruns on a head that is going back.
@@ -241,7 +250,8 @@ func (s *session) actOnReds(ctx context.Context, d *DriveItem, sha string, reds 
 			lines = append(lines, j.run.Name+": "+j.evidence)
 		}
 		return settled{park: parkInfraFailure, reason: "a check failed on the forge's infrastructure, and rerun_infra_failure is " +
-			string(infraPol) + ", so drive did not rerun it:\n" + strings.Join(lines, "\n")}, nil
+			string(infraPol) + ", so drive did not rerun it:\n" + strings.Join(lines, "\n"),
+			detail: parkDetail{Detail: ledger.ClassInfra, Evidence: strings.Join(lines, "\n")}}, nil
 	}
 
 	var ids []int64
