@@ -11,6 +11,7 @@ import (
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/gitcmd"
 	"github.com/ravinald/drover/internal/ledger"
+	"github.com/ravinald/drover/internal/prompts"
 	"github.com/ravinald/drover/internal/runlog"
 	"github.com/ravinald/drover/internal/runner"
 )
@@ -279,8 +280,8 @@ func (s *session) recordPark(d *DriveItem, last *runner.Outcome, lastErr error) 
 
 // loopDetail is the detail of a park the review loop ended on, repeating or
 // at_limit: what repeated or what the cap turned away, and as evidence the
-// first paragraph of the last request for changes drover kept. The session
-// finished cleanly, so its log tail would explain nothing.
+// first paragraph of the last request for changes. The session finished
+// cleanly, so its log tail would explain nothing.
 func (s *session) loopDetail(it backlog.Item, v string, p pass) parkDetail {
 	c := p.after
 	n := c.ChangesRequested
@@ -297,25 +298,66 @@ func (s *session) loopDetail(it backlog.Item, v string, p pass) parkDetail {
 	default:
 		pd.Detail = fmt.Sprintf("%s still open after rounds %d and %d", requirementList(c.StillOpenReqs), n-1, n)
 	}
-	if rounds, err := s.rounds(it); err == nil && len(rounds) > 0 {
-		last := rounds[len(rounds)-1].Path
-		pd.Evidence, pd.Log = firstParagraph(s.cfg.Abs(last)), last
-	}
+	pd.Evidence, pd.Log = s.lastRequest(it)
 	return pd
 }
 
-// firstParagraph is a kept round's evidence up to its first blank line after
-// prose, so a finding that opens on its heading carries the sentence under it.
-// drover's own header line is skipped.
-func firstParagraph(path string) string {
-	raw, err := os.ReadFile(path) // #nosec G304 — drover's own reports directory
+// lastRequest is the first paragraph of the item's latest request for changes,
+// with the kept round it came from when there is one. A kept round counts only
+// when its evidence digests to the latest changes row's: request-changes records
+// that row even when keeping the round failed, and the newest file on disk is
+// then an older request, which a park line would present as the current one.
+// Otherwise the body's own section is read off the file, since request-changes
+// writes it before the row and the loaded item predates the review that wrote
+// it; that carries no log, because no kept round holds it.
+func (s *session) lastRequest(it backlog.Item) (evidence, log string) {
+	want := ""
+	for _, r := range s.ledger.Rows {
+		if r.ID == it.ID.Bare() && r.Changes != "" {
+			want = r.Changes
+		}
+	}
+	if want == "" {
+		return "", ""
+	}
+	if rounds, err := s.rounds(it); err == nil && len(rounds) > 0 {
+		last := rounds[len(rounds)-1].Path
+		if raw, err := os.ReadFile(s.cfg.Abs(last)); err == nil { // #nosec G304 — drover's own reports directory
+			if text := dropRoundHeader(string(raw)); digest(text) == want {
+				return firstParagraph(text), last
+			}
+		}
+	}
+	raw, err := os.ReadFile(it.Path)
 	if err != nil {
+		return "", ""
+	}
+	_, body, err := splitFrontmatter(string(raw))
+	if err != nil {
+		return "", ""
+	}
+	if d := (prompts.Data{Body: body}); !d.Cleared() {
+		return firstParagraph(d.Changes()), ""
+	}
+	return "", ""
+}
+
+// dropRoundHeader is a kept round's evidence without the header line keepRound
+// writes above it.
+func dropRoundHeader(raw string) string {
+	if strings.HasPrefix(raw, "# ") {
+		if _, rest, ok := strings.Cut(raw, "\n"); ok {
+			return rest
+		}
 		return ""
 	}
-	lines := strings.Split(string(raw), "\n")
-	if len(lines) > 0 && strings.HasPrefix(lines[0], "# ") {
-		lines = lines[1:]
-	}
+	return raw
+}
+
+// firstParagraph is evidence up to its first blank line after prose, so a
+// finding that opens on its heading carries the sentence under it.
+func firstParagraph(text string) string {
+	lines := strings.Split(text, "\n")
 	var out []string
 	prose := false
 	for _, line := range lines {
