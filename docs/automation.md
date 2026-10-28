@@ -1879,6 +1879,8 @@ An agent that ran an item in a sandbox with no drover and no network records the
 {"id":"16","level":"reviewed","reviewer":"sam","code_by":"agent","independent":true,"date":"2026-07-15","note":"…"}
 ```
 
+End each line with a newline. Before it appends, drover reads the file's last byte and writes a newline first when the last line has none, so a row written by `printf` or an editor that left it unterminated stays a row of its own. That repair happens only at the next drover append: until then the file ends mid-line, and any other reader that splits on newlines, or a second hand-written line, sees the two run together.
+
 Every row drover writes carries `ts` beside `date`: the instant it was written, RFC 3339 with the writer's offset (`"ts":"2026-07-14T09:12:03-07:00"`). `date` stays, so a reader keyed on it and every row written before `ts` existed still parse. A row without `ts` is day-only: anything drover derives from times, `status`'s `started`, `stage_started`, `finished` and `eta`, reads it as absent rather than as midnight. A line appended by hand may carry either.
 
 `reviewer` on an audit row is who looked, as the operator attributes it, and it is how a human reviewer is recorded at all. Omit it and the row says nobody was named; drover never fills it in, because a reviewer the tool invented is one nobody can go and ask. `agent` on a completion row means who the record credits with the work, which `mark-merged` and `finish` do default. `level` is the only key drover reads as an audit level; a row carrying an `audit` key instead is not read as an audit row. `independent` is an assertion when written by hand, as `--code-by` is when typed.
