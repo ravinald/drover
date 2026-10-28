@@ -526,6 +526,17 @@ func TestBodyHolds(t *testing.T) {
 		{"hold line", "OPERATOR DECISION PENDING: do not accept until a provider is chosen", []string{`the hold marker "OPERATOR DECISION PENDING"`}},
 		{"hold mid-line", "OPERATOR STEP BEFORE ACCEPT: measure X", []string{`the hold marker "BEFORE ACCEPT"`}},
 		{"hold quoted in a command span", "Set `hold_markers = [\"BEFORE ACCEPT\"]` here.", nil},
+		{"lone element span", "Render the `<h1>`.", nil},
+		{"lone element span, select", "Fill the `<select>`.", nil},
+		{"lone element span, selectedcontent", "Show the `<selectedcontent>`.", nil},
+		{"lone element span, lowercase-first mixed case", "Show the `<selectedContent>`.", nil},
+		{"lone SVG element span, camel case", "Clip with `<clipPath>`.", nil},
+		{"lone component span", "Open the `<Dialog>`.", nil},
+		{"lone tag naming no element", "Pick `<provider>`.", []string{"the placeholder <provider>"}},
+		{"slot inside a path span", "Edit `internal/<provider>/client.go`.", []string{"the placeholder <provider>"}},
+		{"element name inside a longer span", "Edit `components/<label>/index.tsx`.", []string{"the placeholder <label>"}},
+		{"element name in prose", "Style the page's <h1>.", []string{"the placeholder <h1>"}},
+		{"braces in a path span", "Edit `internal/{provider}/client.go`.", nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -635,6 +646,18 @@ func TestCheckReportsHoldsOnAcceptedUnmergedItems(t *testing.T) {
 	}
 	if got := kindsOf(t, "HOLD MARKER"); len(got) != 1 || !strings.HasPrefix(got[0], "work/B01-accepted.md:8 ") {
 		t.Errorf("HOLD MARKER = %q, want B1's line 8 alone", got)
+	}
+}
+
+// check reads through bodyHolds, so a body accept passes for a lone element
+// span is not reported here either.
+func TestCheckSkipsALoneElementSpan(t *testing.T) {
+	body := "---\ntitle: Accepted\ndeps:\n---\n\nRender the `<h1>` inside the `<Dialog>`, then the `<selectedcontent>`.\n\n1. Do it.\n"
+	dir := markerProject(t, map[string]string{"B01-accepted.md": body})
+	t.Chdir(dir)
+
+	if got := kindsOf(t, "PLACEHOLDER"); len(got) != 0 {
+		t.Errorf("PLACEHOLDER = %q, want none", got)
 	}
 }
 
