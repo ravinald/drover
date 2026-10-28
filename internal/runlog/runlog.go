@@ -246,6 +246,10 @@ type Schema struct {
 	// an item event, so a Result read from the terminal line alone has no text
 	// and a result written from it has no report.
 	Carry func(line []byte, r *Result)
+	// Merge folds a later terminal event into the one before it, for a schema
+	// whose log can hold several. Nil means the last terminal event stands
+	// alone, which is right for a runner that ends on exactly one.
+	Merge func(prev, next Result) Result
 	// Activity reads one event for what the session was doing when it wrote
 	// it, which is what attach --session shows while the log grows. Nil for a
 	// schema that carries nothing of the kind.
@@ -277,6 +281,7 @@ func Schemas() []Schema {
 			Terminal: []string{"result"},
 			Read:     readClaude,
 			Carry:    carryClaude,
+			Merge:    mergeClaude,
 			Activity: claudeActivity,
 		},
 		{
@@ -358,6 +363,36 @@ func readClaude(line []byte) (Result, bool) {
 		r.Usage = &u
 	}
 	return r, true
+}
+
+// mergeClaude folds one result event into the segments before it. A headless
+// session that ends a turn and resumes writes one result event per segment,
+// and they do not all count the same way: duration_ms, num_turns and usage
+// cover that segment alone, while total_cost_usd is already the running total.
+// bodega's F98 implement log wrote three:
+//
+//	idx 0 dur 1290960 cost 2.7194234 turns 39 out 30065
+//	idx 1 dur 11485   cost 2.8116694 turns 2  out 228
+//	idx 2 dur 45038   cost 2.9683816 turns 3  out 1638
+//
+// Read off the last event alone, that is 45 seconds and 3 turns for a
+// 22-minute, 44-turn session. So the per-segment fields are summed, and
+// everything else, cost and outcome included, is next's: a session whose
+// final segment failed still reads as failed.
+func mergeClaude(prev, next Result) Result {
+	next.DurationMS += prev.DurationMS
+	next.NumTurns += prev.NumTurns
+	switch {
+	case prev.Usage == nil:
+	case next.Usage == nil:
+		u := *prev.Usage
+		next.Usage = &u
+	default:
+		u := *next.Usage
+		u.Add(*prev.Usage)
+		next.Usage = &u
+	}
+	return next
 }
 
 // carryClaude keeps the fullest context any assistant message reported, the
@@ -658,6 +693,9 @@ func ReadResult(path string) (Read, error) {
 			case s.terminates(kind):
 				if r, matched := s.Read([]byte(line)); matched {
 					r.Schema = s.Name
+					if rd.Found && s.Merge != nil && rd.Result.Schema == s.Name {
+						r = s.Merge(rd.Result, r)
+					}
 					rd.Result, rd.Found = Classify(r), true
 				}
 			case s.Carry != nil:
