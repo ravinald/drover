@@ -480,8 +480,8 @@ func TestEvidenceCannotSplitTheSectionItIsWrittenInto(t *testing.T) {
 // same problem one level up: spliceSection ends a section at any "## " line.
 func TestEvidenceHeadingsSinkBelowTheBodysOwn(t *testing.T) {
 	out, numbered, headings := demoteEvidence("# Report\n\n## Finding\n\n1. The first.\n\n### Detail\n\nprose\n")
-	if headings != 2 {
-		t.Errorf("demoted %d headings, want 2 (# and ##)", headings)
+	if headings != 3 {
+		t.Errorf("demoted %d headings, want 3 (every one, by the same amount)", headings)
 	}
 	if numbered != 1 {
 		t.Errorf("demoted %d numbered lines, want 1", numbered)
@@ -491,12 +491,32 @@ func TestEvidenceHeadingsSinkBelowTheBodysOwn(t *testing.T) {
 			t.Errorf("a heading survived at the body's own level (%q):\n%s", gone, out)
 		}
 	}
-	// Already deep enough, so untouched: demotion is a floor, not a shift.
-	if !strings.Contains(out, "### Detail") {
-		t.Errorf("a ### heading moved when it did not need to:\n%s", out)
+	// A shift, not a floor: a floor would put all three at ### and make Detail a
+	// sibling of the Finding it belongs to.
+	for _, want := range []string{"\n### Report\n", "\n#### Finding\n", "\n##### Detail\n"} {
+		if !strings.Contains("\n"+out, want) {
+			t.Errorf("the headings lost their relative depth (want %q):\n%s", strings.TrimSpace(want), out)
+		}
 	}
-	if !strings.Contains(out, "### Report") || !strings.Contains(out, "### Finding") {
-		t.Errorf("the demoted headings are not at ###:\n%s", out)
+}
+
+// Evidence whose shallowest heading is already ### is the depth a body expects,
+// so nothing moves; a fenced "## " still sinks, because spliceSection reads
+// fenced lines too; and a "#62" opening a line is prose, not a heading.
+func TestEvidenceHeadingsShiftOnlyWhenTheyMust(t *testing.T) {
+	in := "### R3 cannot be met\n\n#### Reason\n\nprose\n\n```md\n## quoted\n```\n\n#62 fixed the rest\n"
+	out, _, headings := demoteEvidence(in)
+	if headings != 1 {
+		t.Errorf("demoted %d headings, want 1 (the fenced one)", headings)
+	}
+	for _, want := range []string{"### R3 cannot be met\n", "\n#### Reason\n", "\n### quoted\n", "\n#62 fixed the rest"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lost %q:\n%s", strings.TrimSpace(want), out)
+		}
+	}
+	body := "1. Do it.\n\n" + prompts.ChangesHeading + "\n\nolder\n"
+	if again := spliceSection(spliceSection(body, out), "Nothing is outstanding."); strings.Contains(again, "quoted") {
+		t.Errorf("a fenced heading split the section:\n%s", again)
 	}
 }
 

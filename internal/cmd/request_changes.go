@@ -343,13 +343,27 @@ func headings(lines []string) []heading {
 	var hs []heading
 	var f fence
 	for i, l := range lines {
-		t := strings.TrimSpace(l)
-		if f.skip(l) || !strings.HasPrefix(t, "#") {
+		if f.skip(l) {
 			continue
 		}
-		hs = append(hs, heading{line: i, depth: len(t) - len(strings.TrimLeft(t, "#")), text: t})
+		if d := headingDepth(l); d > 0 {
+			hs = append(hs, heading{line: i, depth: d, text: strings.TrimSpace(l)})
+		}
 	}
 	return hs
+}
+
+// headingDepth is the number of leading #s on an ATX heading line, and zero for
+// anything else: the run has to end the line or be followed by a space or tab,
+// so "#62 fixed this" stays prose.
+func headingDepth(line string) int {
+	t := strings.TrimLeft(line, " \t")
+	rest := strings.TrimLeft(t, "#")
+	d := len(t) - len(rest)
+	if d == 0 || rest != "" && rest[0] != ' ' && rest[0] != '\t' {
+		return 0
+	}
+	return d
 }
 
 // proseParagraph is the first run of non-blank lines in lines that are neither
@@ -727,16 +741,46 @@ var topLevelNumbered = regexp.MustCompile(`(?m)^(\d+)\.[ \t]+`)
 // two apart. A project's implement template writes its own "## " sections into a
 // body and those have to survive a request-changes, which is what
 // TestSpliceSectionReplacesRatherThanAppends pins.
+//
+// Headings outside a fence all move by the same amount, so the shallowest lands
+// at ### and each keeps its depth relative to the rest. operatorReasons reads a
+// finding as everything under its heading down to the next one as shallow, and
+// a floor that lifted "## R3" and "### Reason" both to ### would make the reason
+// a sibling of its finding and drop it. Fenced lines are code, not structure,
+// but spliceSection does not know fences, so a "# " or "## " there still sinks
+// to ###.
 func demoteHeadings(text string) (string, int) {
 	lines := strings.Split(text, "\n")
-	n := 0
-	for i, l := range lines {
-		trimmed := strings.TrimLeft(l, "#")
-		hashes := len(l) - len(trimmed)
-		if hashes == 0 || hashes > 2 || !strings.HasPrefix(trimmed, " ") {
+	shallowest := 0
+	var f fence
+	for _, l := range lines {
+		if f.skip(l) {
 			continue
 		}
-		lines[i] = "###" + trimmed
+		if d := headingDepth(l); d > 0 && (shallowest == 0 || d < shallowest) {
+			shallowest = d
+		}
+	}
+	shift := 0
+	if shallowest > 0 && shallowest < 3 {
+		shift = 3 - shallowest
+	}
+	n := 0
+	f = fence{}
+	for i, l := range lines {
+		if f.skip(l) {
+			trimmed := strings.TrimLeft(l, "#")
+			if hashes := len(l) - len(trimmed); hashes > 0 && hashes <= 2 && strings.HasPrefix(trimmed, " ") {
+				lines[i] = "###" + trimmed
+				n++
+			}
+			continue
+		}
+		if shift == 0 || headingDepth(l) == 0 {
+			continue
+		}
+		at := strings.Index(l, "#")
+		lines[i] = l[:at] + strings.Repeat("#", shift) + l[at:]
 		n++
 	}
 	if n == 0 {

@@ -7943,6 +7943,11 @@ func TestAReviewHandingARequirementToTheOperatorParksForADecision(t *testing.T) 
 	const nestedR3 = "### R3 needs a release upstream never made\n\n#### Reason\n\n" +
 		"osquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one. " +
 		"Amend R3 to pin the commit, or wait for the release.\n"
+	// The same finding written one level shallower, which request-changes has to
+	// demote: the reason stays under R3 only when both headings move together.
+	const shallowR3 = "## R3 needs a release upstream never made\n\n### Reason\n\n" +
+		"osquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one. " +
+		"Amend R3 to pin the commit, or wait for the release.\n"
 	const r2 = "### R2 answers 200 on a refused object\n\n`curl -i /refused` printed 200.\n\n"
 	for _, c := range []struct {
 		name     string
@@ -7953,6 +7958,9 @@ func TestAReviewHandingARequirementToTheOperatorParksForADecision(t *testing.T) 
 		{name: "mixed with an ordinary finding", evidence: r2 + r3, body: []string{"printed 200", "no tagged release past v0.3.1"}},
 		{name: "reason under a subordinate heading", evidence: nestedR3, body: []string{"no tagged release past v0.3.1"}},
 		{name: "mixed, reason under a subordinate heading", evidence: r2 + nestedR3,
+			body: []string{"printed 200", "no tagged release past v0.3.1"}},
+		{name: "reason under a heading request-changes demotes", evidence: shallowR3, body: []string{"no tagged release past v0.3.1"}},
+		{name: "mixed, reason under a heading request-changes demotes", evidence: r2 + shallowR3,
 			body: []string{"printed 200", "no tagged release past v0.3.1"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
