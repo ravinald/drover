@@ -61,7 +61,7 @@ const (
 )
 
 var (
-	reviewLaunch = ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: launchBody, Date: "2026-10-01"}
+	reviewLaunch = ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: launchBody, Date: "2026-10-01"}
 	reviewAudit  = ledger.Row{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-01"}
 	reviewClear  = ledger.Row{ID: "1", Body: guardBody, Cleared: true, Date: "2026-10-01"}
 )
@@ -1542,7 +1542,7 @@ func TestOpenPRWithoutADriveNamesTheAuthorityThatAnswered(t *testing.T) {
 		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Date: "2026-09-18"},
 		{ID: "1", Changes: "abc123", Date: "2026-09-18"},
 		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-09-19"},
-		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: bodyAtLaunch, Date: "2026-09-20"},
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: bodyAtLaunch, Date: "2026-09-20"},
 		{ID: "1", Level: ledger.LevelReviewed, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-09-20"},
 	} {
 		if err := ledger.Append(path, stamp(t, s, row)); err != nil {
@@ -1602,7 +1602,7 @@ func unrequestedPassRows() []ledger.Row {
 		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Date: "2026-09-22"},
 		{ID: "1", Changes: "second", Date: "2026-09-22"},
 		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-09-22"},
-		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: bodyAtLaunch, Date: "2026-09-22"},
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: bodyAtLaunch, Date: "2026-09-22"},
 		{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-09-22"},
 	}
 }
@@ -1706,7 +1706,7 @@ func TestAStalePassHandsTheFallbackItsOwnRefusals(t *testing.T) {
 		name: "the body changed outside drover",
 		want: "changed outside drover",
 		rows: append(unrequestedPassRows()[:4],
-			ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: "0123456789ab", Date: "2026-09-22"},
+			ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: "0123456789ab", Date: "2026-09-22"},
 			ledger.Row{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-09-22"}),
 	}} {
 		t.Run(c.name, func(t *testing.T) {
@@ -1732,7 +1732,7 @@ func TestAStalePassHandsTheFallbackItsOwnRefusals(t *testing.T) {
 func TestACleanFirstReviewOpensAPullRequestWithoutForce(t *testing.T) {
 	out, err := reviewPassedOver(t, "", []ledger.Row{
 		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-10-01"},
-		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: bodyAtLaunch, Date: "2026-10-01"},
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: bodyAtLaunch, Date: "2026-10-01"},
 		{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-01"},
 	})
 	if err != nil {
@@ -5723,7 +5723,7 @@ func TestAnExactBytesDigestStillMatches(t *testing.T) {
 	}
 	exact := digestBytes(raw)
 
-	launch := ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: exact, Date: "2026-10-01"}
+	launch := ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: exact, Date: "2026-10-01"}
 	audit := ledger.Row{ID: "1", Level: ledger.LevelReviewed, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-01"}
 	p := pass{before: rowCounts(), after: rowCounts(launch, audit), logged: true, res: ok}
 	p.readBody(it.Path)

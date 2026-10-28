@@ -132,9 +132,6 @@ func openFrom(cfg *config.Config) (*session, error) {
 // A usage row takes no waiting verify time, which belongs to the item's next
 // row of work, and lands in the loaded ledger's Usage where Load would put it.
 func (s *session) record(row ledger.Row) error {
-	if row.Body != "" && row.Cmd == "" {
-		return fmt.Errorf("internal: a body row for %s names no command; build it with ledger.BodyRow", row.ID)
-	}
 	if row.Usage == nil {
 		row = s.verifyStamp(row)
 	}

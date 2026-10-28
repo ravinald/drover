@@ -179,7 +179,9 @@ type Row struct {
 	// the drover command, the actor it ran as and the interactive agent driving
 	// it, the Author BodyRow stamps. Every row carrying Body carries them, and a
 	// row written before they existed carries none, which a reader reports as
-	// unrecorded rather than as the operator.
+	// unrecorded rather than as the operator. Append refuses a digest without
+	// Cmd and Actor, and MarshalJSON keeps an empty Agent on such a row, so "no
+	// agent" reads as recorded rather than as a key nobody wrote.
 	Cmd   string `json:"cmd,omitempty"`
 	Actor string `json:"actor,omitempty"`
 	Agent string `json:"agent,omitempty"`
@@ -326,6 +328,21 @@ type Author struct {
 // date here rather than leaving them to the append.
 func BodyRow(id, digest string, by Author) Row {
 	return Stamp(Row{ID: id, Body: digest, Cmd: by.Cmd, Actor: by.Actor, Agent: by.Agent})
+}
+
+// MarshalJSON writes an attributed body row's agent key even when it is
+// empty, the one departure from each field's omitempty. A row without Actor
+// is a body row written before attribution existed, or no body row at all,
+// and encodes as it always has.
+func (r Row) MarshalJSON() ([]byte, error) {
+	type plain Row
+	if r.Body == "" || r.Actor == "" {
+		return json.Marshal(plain(r))
+	}
+	return json.Marshal(struct {
+		plain
+		Agent string `json:"agent"`
+	}{plain(r), r.Agent})
 }
 
 // StageOf is the stage row drover wrote for the launch session names, false
@@ -1264,6 +1281,9 @@ func Append(path string, r Row) error {
 func AppendUnless(path string, r Row, skip func(*Ledger) bool) (bool, error) {
 	if r.ID == "" && r.Usage == nil {
 		return false, fmt.Errorf("row has no id")
+	}
+	if r.Body != "" && (r.Cmd == "" || r.Actor == "") {
+		return false, fmt.Errorf("internal: the body row for %s names no command or no actor (cmd %q, actor %q); build it with ledger.BodyRow and an Author naming both", r.ID, r.Cmd, r.Actor)
 	}
 	return appendLocked(path, r, skip)
 }

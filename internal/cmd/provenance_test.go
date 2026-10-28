@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ravinald/drover/internal/ledger"
@@ -196,5 +198,94 @@ func TestTouchRecordsTheOperator(t *testing.T) {
 	last := l.Provenance("B1").LastBody
 	if last == nil || last.Cmd != "touch" || last.Actor != runner.ActorOperator || last.Agent != "codex" {
 		t.Errorf("touch recorded %+v, want cmd touch by operator, agent codex", last)
+	}
+}
+
+// rawRows decodes every line of the ledger at path into its keys as written,
+// which is the only way to see a key the encoder omitted: a Row decoded from a
+// line without "agent" and one with "agent":"" are the same value.
+func rawRows(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	var rows []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(read(t, path)), "\n") {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(line), &m); err != nil {
+			t.Fatalf("decode %q: %v", line, err)
+		}
+		rows = append(rows, m)
+	}
+	return rows
+}
+
+// assertAttributed fails unless raw names who wrote its digest under every
+// key a body row owes: an operator with no agent still writes "agent":"".
+func assertAttributed(t *testing.T, raw map[string]any, cmd, actor string) {
+	t.Helper()
+	for _, k := range []string{"body", "cmd", "actor", "agent", "ts"} {
+		if _, ok := raw[k]; !ok {
+			t.Errorf("body row %v has no %q key", raw, k)
+		}
+	}
+	if raw["cmd"] != cmd || raw["actor"] != actor {
+		t.Errorf("body row %v names cmd %v actor %v, want %s and %s", raw, raw["cmd"], raw["actor"], cmd, actor)
+	}
+}
+
+// A body row is refused at the ledger itself when it cannot say who wrote the
+// digest, whichever path built it, and leaves the file as it was.
+func TestABodyRowWithoutAttributionIsRefused(t *testing.T) {
+	dir := markerProject(t, map[string]string{"B01-scaffold.md": scaffold})
+	ledgerPath := filepath.Join(dir, "ledger.jsonl")
+	s := openIn(t, dir)
+	for _, by := range []ledger.Author{{Cmd: "accept"}, {Actor: runner.ActorOperator}, {}} {
+		if err := s.record(ledger.BodyRow("B1", "aaaaaaaaaaaa", by)); err == nil {
+			t.Errorf("a body row by %+v was recorded", by)
+		}
+		if err := ledger.Append(ledgerPath, ledger.Row{ID: "B1", Body: "aaaaaaaaaaaa", Cmd: by.Cmd, Actor: by.Actor}); err == nil {
+			t.Errorf("ledger.Append wrote a body row by %+v", by)
+		}
+	}
+	if b, err := os.ReadFile(ledgerPath); err == nil && len(b) > 0 {
+		t.Errorf("a refused body row reached the ledger: %s", b)
+	}
+
+	if err := s.record(ledger.BodyRow("B1", "bbbbbbbbbbbb", s.author("accept"))); err != nil {
+		t.Fatal(err)
+	}
+	rows := rawRows(t, ledgerPath)
+	if len(rows) != 1 {
+		t.Fatalf("want one row, got %v", rows)
+	}
+	assertAttributed(t, rows[0], "accept", runner.ActorOperator)
+	if rows[0]["agent"] != "" {
+		t.Errorf("an operator with no agent recorded agent %v, want empty", rows[0]["agent"])
+	}
+}
+
+// The review stage row carries the body as the session found it, so it owes
+// the same attribution as a body row, and rows without a digest gain no key.
+func TestTheReviewStageRowIsAttributed(t *testing.T) {
+	dir := markerProject(t, map[string]string{"B01-scaffold.md": scaffold})
+	ledgerPath := filepath.Join(dir, "ledger.jsonl")
+	s := openIn(t, dir)
+	it, err := s.item("B1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.launched(it, "review", ledger.StageReview, "codex"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.launched(it, "run", ledger.StageImplement, "claude"); err != nil {
+		t.Fatal(err)
+	}
+	rows := rawRows(t, ledgerPath)
+	if len(rows) != 2 {
+		t.Fatalf("want two stage rows, got %v", rows)
+	}
+	assertAttributed(t, rows[0], "review", runner.ActorOperator)
+	for _, k := range []string{"body", "cmd", "actor", "agent"} {
+		if _, ok := rows[1][k]; ok {
+			t.Errorf("the implement stage row %v carries %q", rows[1], k)
+		}
 	}
 }
