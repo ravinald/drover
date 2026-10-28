@@ -25,6 +25,7 @@ var (
 	requestChangesOverLimit bool
 	requestChangesYes       bool
 	requestChangesStillOpen []int
+	requestChangesOperator  []int
 )
 
 var requestChangesCmd = &cobra.Command{
@@ -81,11 +82,23 @@ number. The changes row records the list as still_open, and drive parks the
 item repeating once two rows in a row mark the same requirement. Only the
 reviewer can tell a carried-over finding from a new one, so drover never
 infers it from the numbers alone. It refuses a number the previous request did
-not name, and refuses the flag on a first request.`,
+not name, and refuses the flag on a first request.
+
+--operator names the requirements whose finding no implementing session can
+meet as written: one that depends on a release upstream never made, on a
+decision nobody has taken, or on evidence no source publishes. The reason goes
+in the evidence under a heading naming that requirement. Each number must name
+a requirement in the body's list and a finding in the evidence, or the request
+is refused. The changes row records them as operator, and drive parks the item
+needs_decision rather than sending it back to a session that cannot discharge
+it. Findings against other requirements in the same evidence are written to the
+body as always, for the run after the operator amends the contract or signs the
+requirement off.`,
 	Example: `  drover request-changes B1 -f findings.md
   drover review B1 | ...                       # write the evidence, then:
   cat findings.md | drover request-changes B1 -f -      # or from stdin
   drover request-changes B1 -f findings.md --still-open 3   # R3's earlier finding reproduced
+  drover request-changes B1 -f findings.md --operator 3     # R3 waits on a decision, not a run
 
   Nothing enforces that a review requests changes. drover cannot tell a pass that found
   nothing from one that found something and did not write it down, so the
@@ -117,6 +130,10 @@ change the numbered requirements, refuses evidence whose only findings are
 		}
 
 		stillOpen, err := s.stillOpenAgainstLast(it.ID.Bare(), requestChangesStillOpen)
+		if err != nil {
+			return err
+		}
+		operator, err := operatorAgainstBody(it, text, requestChangesOperator)
 		if err != nil {
 			return err
 		}
@@ -204,7 +221,7 @@ change the numbered requirements, refuses evidence whose only findings are
 		// failed reports the error and leaves the body correct.
 		if err := s.record(ledger.Row{
 			ID: it.ID.Bare(), Changes: digest(text), Reqs: findingRequirements(it, text), StillOpen: stillOpen,
-			Date: ledger.Today(),
+			Operator: operator, Date: ledger.Today(),
 		}); err != nil {
 			return err
 		}
@@ -214,6 +231,11 @@ change the numbered requirements, refuses evidence whose only findings are
 			fmt.Printf("round kept: %s\n", rel(s.cfg.Root, round))
 		}
 		reportDemotions(demoted, sunk)
+		if len(operator) > 0 {
+			fmt.Printf("handed to the operator: %s; drive parks %s %s rather than launching another run\n",
+				requirementList(operator), it.ID.Bare(), passNeedsDecision)
+			return nil
+		}
 		fmt.Printf("The next run reads it: drover run %s --dry-run\n", it.ID.Bare())
 		return nil
 	},
@@ -241,6 +263,149 @@ func (s *session) stillOpenAgainstLast(id string, nums []int) ([]int, error) {
 		}
 	}
 	return out, nil
+}
+
+// operatorAgainstBody checks --operator against the body's list and the
+// evidence's findings and returns it sorted and deduplicated. A number the list
+// lacks hands the operator nothing to decide, and one no finding names leaves
+// the park with no reason to carry.
+func operatorAgainstBody(it backlog.Item, text string, nums []int) ([]int, error) {
+	if len(nums) == 0 {
+		return nil, nil
+	}
+	out := slices.Clone(nums)
+	slices.Sort(out)
+	out = slices.Compact(out)
+	reqs := requirementsByNum(it)
+	named := findingRequirements(it, text)
+	for _, n := range out {
+		if _, ok := reqs[n]; !ok {
+			return nil, Refusal{fmt.Errorf("--operator %d: %s has %d numbered requirement(s), so R%d names none of them; "+
+				"pass the number of the requirement the code cannot meet as written", n, it.ID.Bare(), len(reqs), n)}
+		}
+		if !slices.Contains(named, n) {
+			return nil, Refusal{fmt.Errorf("--operator %d: no finding in the evidence names R%d, and the reason it cannot be met goes under that requirement; "+
+				"add a heading naming R%d with the reason, then run this again", n, n, n)}
+		}
+	}
+	return out, nil
+}
+
+// operatorReasons is the first sentence of the evidence under each requirement
+// in nums, as "R3: <sentence>", in nums' order. The evidence is the section of
+// the first heading naming R<n>: every line below it until a heading at the
+// same depth or shallower, so a subordinate "#### Reason" stays inside the
+// finding it explains. With no heading the whole text is the section. The
+// reason is the section's first prose paragraph, skipping subordinate headings
+// and fenced code, and only a section with no prose falls back to its title.
+func operatorReasons(text string, nums []int) []string {
+	lines := strings.Split(text, "\n")
+	heads := headings(lines)
+	out := make([]string, 0, len(nums))
+	for _, n := range nums {
+		reason := ""
+		if len(heads) == 0 {
+			if namesRequirement(text, n, false) {
+				reason = firstSentence(proseParagraph(lines))
+			}
+		}
+		for i, h := range heads {
+			if !namesRequirement(h.text, n, true) {
+				continue
+			}
+			end := len(lines)
+			for _, next := range heads[i+1:] {
+				if next.depth <= h.depth {
+					end = next.line
+					break
+				}
+			}
+			reason = firstSentence(proseParagraph(lines[h.line+1 : end]))
+			if reason == "" {
+				reason = strings.TrimSpace(strings.TrimLeft(h.text, "#"))
+			}
+			break
+		}
+		out = append(out, "R"+strconv.Itoa(n)+": "+reason)
+	}
+	return out
+}
+
+// heading is one Markdown heading outside a code fence: its line index, its
+// depth in leading #s, and its trimmed text.
+type heading struct {
+	line, depth int
+	text        string
+}
+
+// headings is every heading in lines outside a code fence, in order.
+func headings(lines []string) []heading {
+	var hs []heading
+	var f fence
+	for i, l := range lines {
+		if f.skip(l) {
+			continue
+		}
+		if d := headingDepth(l); d > 0 {
+			hs = append(hs, heading{line: i, depth: d, text: strings.TrimSpace(l)})
+		}
+	}
+	return hs
+}
+
+// headingDepth is the number of leading #s on an ATX heading line, and zero for
+// anything else: the run has to end the line or be followed by a space or tab,
+// so "#62 fixed this" stays prose.
+func headingDepth(line string) int {
+	t := strings.TrimLeft(line, " \t")
+	rest := strings.TrimLeft(t, "#")
+	d := len(t) - len(rest)
+	if d == 0 || rest != "" && rest[0] != ' ' && rest[0] != '\t' {
+		return 0
+	}
+	return d
+}
+
+// proseParagraph is the first run of non-blank lines in lines that are neither
+// headings nor fenced code, joined by newlines.
+func proseParagraph(lines []string) string {
+	var out []string
+	var f fence
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if f.skip(l) || headingDepth(l) > 0 || t == "" {
+			if len(out) > 0 {
+				break
+			}
+			continue
+		}
+		out = append(out, t)
+	}
+	return strings.Join(out, "\n")
+}
+
+// namesRequirement reports a finding naming R<n>: its heading when it has one,
+// since that is where findingRequirements traces it, and its text otherwise.
+func namesRequirement(finding string, n int, headed bool) bool {
+	if headed {
+		finding, _, _ = strings.Cut(finding, "\n")
+	}
+	for _, m := range requirementRef.FindAllStringSubmatch(finding, -1) {
+		if m[1] == strconv.Itoa(n) {
+			return true
+		}
+	}
+	return false
+}
+
+// firstSentence is text up to and including its first full stop followed by
+// whitespace, on one line, or the whole of it when it has none.
+func firstSentence(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if i := strings.Index(text, ". "); i >= 0 {
+		return text[:i+1]
+	}
+	return text
 }
 
 // intList renders nums as [3, 5], and an empty list as [] rather than nothing.
@@ -312,7 +477,7 @@ func operatorOnlyFindings(it backlog.Item, text string) (ops []backlog.Requireme
 func findingTexts(text string) (findings []string, headed bool) {
 	var f fence
 	for _, l := range strings.Split(text, "\n") {
-		if t := strings.TrimSpace(l); !f.skip(l) && strings.HasPrefix(t, "#") {
+		if t := strings.TrimSpace(l); !f.skip(l) && headingDepth(l) > 0 {
 			findings = append(findings, t)
 		}
 	}
@@ -576,16 +741,46 @@ var topLevelNumbered = regexp.MustCompile(`(?m)^(\d+)\.[ \t]+`)
 // two apart. A project's implement template writes its own "## " sections into a
 // body and those have to survive a request-changes, which is what
 // TestSpliceSectionReplacesRatherThanAppends pins.
+//
+// Headings outside a fence all move by the same amount, so the shallowest lands
+// at ### and each keeps its depth relative to the rest. operatorReasons reads a
+// finding as everything under its heading down to the next one as shallow, and
+// a floor that lifted "## R3" and "### Reason" both to ### would make the reason
+// a sibling of its finding and drop it. Fenced lines are code, not structure,
+// but spliceSection does not know fences, so a "# " or "## " there still sinks
+// to ###.
 func demoteHeadings(text string) (string, int) {
 	lines := strings.Split(text, "\n")
-	n := 0
-	for i, l := range lines {
-		trimmed := strings.TrimLeft(l, "#")
-		hashes := len(l) - len(trimmed)
-		if hashes == 0 || hashes > 2 || !strings.HasPrefix(trimmed, " ") {
+	shallowest := 0
+	var f fence
+	for _, l := range lines {
+		if f.skip(l) {
 			continue
 		}
-		lines[i] = "###" + trimmed
+		if d := headingDepth(l); d > 0 && (shallowest == 0 || d < shallowest) {
+			shallowest = d
+		}
+	}
+	shift := 0
+	if shallowest > 0 && shallowest < 3 {
+		shift = 3 - shallowest
+	}
+	n := 0
+	f = fence{}
+	for i, l := range lines {
+		if f.skip(l) {
+			trimmed := strings.TrimLeft(l, "#")
+			if hashes := len(l) - len(trimmed); hashes > 0 && hashes <= 2 && strings.HasPrefix(trimmed, " ") {
+				lines[i] = "###" + trimmed
+				n++
+			}
+			continue
+		}
+		if shift == 0 || headingDepth(l) == 0 {
+			continue
+		}
+		at := strings.Index(l, "#")
+		lines[i] = l[:at] + strings.Repeat("#", shift) + l[at:]
 		n++
 	}
 	if n == 0 {
@@ -695,5 +890,7 @@ func init() {
 		"with --over-limit, write evidence drover warned contradicts the item's requirements")
 	requestChangesCmd.Flags().IntSliceVar(&requestChangesStillOpen, "still-open", nil,
 		"requirement numbers whose finding from the previous request for changes is still open, as N[,N...]; never a new defect under the same requirement")
+	requestChangesCmd.Flags().IntSliceVar(&requestChangesOperator, "operator", nil,
+		"requirement numbers whose finding no implementing session can meet as written, as N[,N...]; the reason goes in the evidence under each, and drive parks the item needs_decision")
 	root.AddCommand(requestChangesCmd)
 }

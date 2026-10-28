@@ -381,6 +381,22 @@ Then:
   the destination is `SPLIT-OUT` rather than another round.
 {{- end }}
 {{ end }}
+{{- if .Path }}
+- Before any destination, ask whether a session could meet the requirement at
+  all. A finding that traces to a requirement the code cannot meet as written,
+  because it depends on something outside the repository (a release upstream
+  never made), on a decision nobody has made yet, or on evidence that does not
+  exist, is recorded with `--operator` and not sent back as an ordinary finding:
+
+      drover request-changes {{ .ID }} -f <file> --operator N[,N...]
+
+  Put the reason under a heading naming that requirement. drive parks the item
+  `needs_decision` for the operator to amend the contract or meet it by hand,
+  and launches no implementing session for it meanwhile: sent back as an
+  ordinary round, the implementer cannot discharge it, and the loop spends
+  rounds until it parks anyway. Findings against other requirements in the same
+  evidence still go to the body for the run after the decision.
+{{- end }}
 - Send each finding where its owner is. Four questions, in this order: does a
   numbered requirement reach it, would it break something in use, can you
   correct it here without a verify command noticing, and does any existing item own it.

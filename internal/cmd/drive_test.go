@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -7917,6 +7918,140 @@ cd "$DROVER_ROOT" && DROVER_TEST_AS_DROVER=1 "$DROVER_TEST_SELF" request-changes
 			if c.log != "" {
 				if _, err := os.Stat(filepath.Join(dir, "reports", "01-first."+c.log)); err != nil {
 					t.Errorf("the older round this case depends on was never kept: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// A review that hands a requirement to the operator parks the item for a
+// decision on that pass, and drive launches no implementing session after it:
+// one sent back as an ordinary round is one the implementer cannot discharge.
+// Each review is the real request-changes, run as drover in a process of its
+// own, so the row drive reads is the one the flag writes.
+func TestAReviewHandingARequirementToTheOperatorParksForADecision(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const sixRequirements = "---\ntitle: First\ndeps:\n---\n\n" +
+		"1. One.\n2. Two.\n3. Pin the tagged osquery-go release.\n4. Four.\n5. Five.\n6. Six.\n"
+	const pinReason = "osquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one."
+	// A line opening on an issue reference is prose, not a heading, so it is
+	// the reason at every stage that tells the two apart.
+	const issueReason = "#62 tracks the missing upstream release, so nothing in this repository can supply it."
+	const title = "R3 needs a release upstream never made"
+	const rest = " Amend R3 to pin the commit, or wait for the release.\n"
+	flat := func(reason string) string { return "### " + title + "\n\n" + reason + rest }
+	// A subordinate heading belongs to the finding above it, so the reason is
+	// the prose under it rather than the R3 heading's title.
+	nested := func(reason string) string { return "### " + title + "\n\n#### Reason\n\n" + reason + rest }
+	// The same finding written one level shallower, which request-changes has to
+	// demote: the reason stays under R3 only when both headings move together.
+	shallow := func(reason string) string { return "## " + title + "\n\n### Reason\n\n" + reason + rest }
+	const r2 = "### R2 answers 200 on a refused object\n\n`curl -i /refused` printed 200.\n\n"
+	type decisionCase struct {
+		name     string
+		evidence string
+		reason   string
+		body     []string
+	}
+	var cases []decisionCase
+	for _, r := range []struct{ label, reason, inBody string }{
+		{"", pinReason, "no tagged release past v0.3.1"},
+		{", reason opening on an issue reference", issueReason, "tracks the missing upstream release"},
+	} {
+		for _, f := range []struct {
+			label string
+			form  func(string) string
+		}{
+			{"one operator finding", flat},
+			{"reason under a subordinate heading", nested},
+			{"reason under a heading request-changes demotes", shallow},
+		} {
+			cases = append(cases,
+				decisionCase{name: f.label + r.label, evidence: f.form(r.reason), reason: r.reason, body: []string{r.inBody}},
+				decisionCase{name: "mixed, " + f.label + r.label, evidence: r2 + f.form(r.reason), reason: r.reason,
+					body: []string{"printed 200", r.inBody}})
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			ghLog := mergeProject(t)
+			dir, _ := forge(t, ghLog)
+			write(t, filepath.Join(dir, "work", "01-first.md"), sixRequirements)
+			rev, err := exec.LookPath("rev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			reviews := t.TempDir()
+			t.Setenv("DROVER_TEST_REVIEWS", reviews)
+			t.Setenv("DROVER_TEST_SELF", self)
+			write(t, filepath.Join(reviews, "ev"), c.evidence)
+			stub(t, rev, `#!/bin/sh
+echo '{"type":"result","subtype":"success","is_error":false}'
+n=$(cat "$DROVER_TEST_REVIEWS/1" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "$DROVER_TEST_REVIEWS/1"
+cd "$DROVER_ROOT" && DROVER_TEST_AS_DROVER=1 "$DROVER_TEST_SELF" request-changes 1 -f "$DROVER_TEST_REVIEWS/ev" --operator 3 >> "$DROVER_TEST_REVIEWS/out" 2>&1
+`)
+
+			var summary bytes.Buffer
+			orig := errOut
+			errOut = &summary
+			t.Cleanup(func() { errOut = orig })
+			got, evs := gateDrive(t)
+			out, _ := os.ReadFile(filepath.Join(reviews, "out"))
+			if n := reviewCount(t, reviews, "1"); n != 1 {
+				t.Fatalf("%d reviews ran, want 1\nrequest-changes:\n%s", n, out)
+			}
+			l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := l.Counts("1").Of(ledger.StageImplement); n != 1 {
+				t.Errorf("%d implement sessions launched, want 1: none after the decision park", n)
+			}
+			pk, ok := l.Parked("1")
+			if !ok || pk.Park != passNeedsDecision || pk.Detail != "R3 needs an operator decision" {
+				t.Fatalf("park row = %+v, want needs_decision naming R3\nrequest-changes:\n%s", pk, out)
+			}
+			reason := c.reason
+			if !strings.Contains(pk.Evidence, "R3: "+reason) {
+				t.Errorf("park evidence lacks R3's reason: %q", pk.Evidence)
+			}
+			if got.Park != passNeedsDecision {
+				t.Errorf("item 1 parked %q (%s), want %s", got.Park, got.Reason, passNeedsDecision)
+			}
+			for _, want := range []string{"Next steps: decide R3:", `drover signoff 1 3 "<what was checked>"`} {
+				if !strings.Contains(summary.String(), want) {
+					t.Errorf("drive summary lacks %q:\n%s", want, summary.String())
+				}
+			}
+			raw, _ := os.ReadFile(filepath.Join(dir, "work", "01-first.md"))
+			for _, want := range c.body {
+				if !strings.Contains(string(raw), want) {
+					t.Errorf("the body lacks the finding %q:\n%s", want, raw)
+				}
+			}
+			i := slices.IndexFunc(evs, func(e DriveEvent) bool { return e.Event == evNeedsOperator && e.ID == "1" })
+			if i < 0 {
+				t.Fatalf("no needs_operator for item 1 in %+v", evs)
+			}
+			e := evs[i]
+			if e.Action != "decide_requirement" || e.Policy != string(polOperator) {
+				t.Errorf("needs_operator action %q at %q, want decide_requirement at operator", e.Action, e.Policy)
+			}
+			for _, want := range []string{"R3", reason} {
+				if !strings.Contains(e.Reason, want) {
+					t.Errorf("needs_operator reason lacks %q: %s", want, e.Reason)
+				}
+			}
+			if strings.Contains(e.Reason, "Amend R3 to pin") {
+				t.Errorf("needs_operator reason carries more than the first sentence: %s", e.Reason)
+			}
+			for _, want := range []string{"decide R3", `drover amend 1 -f <file> --reason "<why>"`, `drover signoff 1 3 "<what was checked>"`} {
+				if !strings.Contains(e.Run, want) {
+					t.Errorf("needs_operator run lacks %q: %s", want, e.Run)
 				}
 			}
 		})

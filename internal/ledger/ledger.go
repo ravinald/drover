@@ -105,6 +105,12 @@ type Row struct {
 	// Only the reviewer can tell the two apart, so it says so; drover never
 	// infers it from Reqs. Absent where every finding is new.
 	StillOpen []int `json:"still_open,omitempty"`
+	// Operator is the requirement numbers whose finding the reviewer judged no
+	// implementing session can meet as written: an upstream release that does
+	// not exist, a decision nobody has made, evidence no source publishes. drive
+	// parks the item for the operator instead of sending it back. Absent where
+	// every finding is the implementer's.
+	Operator []int `json:"operator,omitempty"`
 	// Pass is the sixth shape: one row per review pass drive read a result
 	// from, carrying the token it computed. Every token is recorded and not
 	// only the one that merges, because a file holding passes alone cannot tell
@@ -957,7 +963,8 @@ type Counts struct {
 	// StillOpen marks the last two each carrying a still_open list and the two
 	// sharing a requirement: two consecutive runs were sent the same finding and
 	// neither closed it. Reqs is the last one's list, and StillOpenReqs the
-	// requirements the two lists share.
+	// requirements the two lists share. Operator is the last one's operator
+	// list, the requirements it handed to the operator.
 	//
 	// An equal Reqs pair alone is not a repeat. A requirement such as "every
 	// refused object answers 403" admits any number of distinct defects, and a
@@ -969,6 +976,7 @@ type Counts struct {
 	StillOpen        bool
 	StillOpenReqs    []int
 	Reqs             []int
+	Operator         []int
 	// Refusals is how many requests for changes the cap turned away over the item's history.
 	// A reader deciding about one pass wants RefusedSince instead. RefusedReqs
 	// is the requirements the last refused request named.
@@ -1025,6 +1033,7 @@ func (l *Ledger) Counts(id string) Counts {
 			c.StillOpenReqs = shared(prevStillOpen, r.StillOpen)
 			c.StillOpen = len(c.StillOpenReqs) > 0
 			c.Reqs, prevStillOpen = r.Reqs, r.StillOpen
+			c.Operator = r.Operator
 			c.LastChanges, last = r.Date, r.Changes
 		}
 		if r.Refused != "" {

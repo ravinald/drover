@@ -191,6 +191,7 @@ Drive's reading of one review session, stored as `review_result`.
 | `no_record`         | The review recorded nothing.                                                           |
 | `repeating`         | The review returned the same evidence twice, or marked one finding still open twice.   |
 | `at_limit`          | The review wanted to send work back and `max_review_rounds` refused it.                |
+| `needs_decision`    | The review handed a requirement no run can meet as written to the operator.            |
 | `died`              | The session left no terminal event.                                                    |
 | `unreadable`        | The session left a stream drover has no schema for.                                    |
 | `faulted`           | The service or the account failed, not the work.                                       |
@@ -408,6 +409,7 @@ The `[supervise]` keys, each an action drive or a supervisor may take, and the p
 | `close_changes`               | Close a sent-back section whose findings a later pass closed.                             |
 | `accept`                      | Accept an item's requirements.                                                            |
 | `override_review_limit`       | Send an item back past `[review] max_review_rounds`.                                      |
+| `decide_requirement`          | Decide a requirement a review found no run can meet as written.                           |
 | `move_requirement`            | Move a numbered requirement from one item to another.                                     |
 | `signoff`                     | Meet a requirement only a person can meet.                                                |
 | `enqueue`                     | Queue the next drive.                                                                     |
