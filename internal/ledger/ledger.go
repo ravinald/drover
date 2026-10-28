@@ -94,10 +94,23 @@ type Row struct {
 	// somebody has to resolve.
 	Changes string `json:"changes,omitempty"`
 	// Reqs is the requirement numbers the evidence's findings name, sorted, on a
-	// changes row. The digest compares wording, so a reviewer rewording one
+	// changes row, and on a refused row the ones the request the cap turned away
+	// named. The digest compares wording, so a reviewer rewording one
 	// unmet requirement round after round writes a new digest every time; the
 	// numbers are the substance it misses. Absent where no finding names one.
 	Reqs []int `json:"reqs,omitempty"`
+	// StillOpen is the requirement numbers, a subset of the previous changes
+	// row's Reqs, whose finding from that request the reviewer reproduced as
+	// still open, as opposed to a new defect found under the same requirement.
+	// Only the reviewer can tell the two apart, so it says so; drover never
+	// infers it from Reqs. Absent where every finding is new.
+	StillOpen []int `json:"still_open,omitempty"`
+	// Operator is the requirement numbers whose finding the reviewer judged no
+	// implementing session can meet as written: an upstream release that does
+	// not exist, a decision nobody has made, evidence no source publishes. drive
+	// parks the item for the operator instead of sending it back. Absent where
+	// every finding is the implementer's.
+	Operator []int `json:"operator,omitempty"`
 	// Pass is the sixth shape: one row per review pass drive read a result
 	// from, carrying the token it computed. Every token is recorded and not
 	// only the one that merges, because a file holding passes alone cannot tell
@@ -987,19 +1000,28 @@ type Counts struct {
 	// the same evidence digest, which is a review that has stopped finding
 	// anything new.
 	//
-	// RepeatedRequirements marks the last two naming the same requirements,
-	// however the evidence is worded, and Reqs is the last one's list. An equal
-	// set and not an overlap: a second round finding a different gap in one
-	// shared requirement is progress. A row without reqs, which an older binary
-	// writes, matches nothing on either side.
-	ChangesRequested     int
-	LastChanges          string
-	RepeatedChanges      bool
-	RepeatedRequirements bool
-	Reqs                 []int
+	// StillOpen marks the last two each carrying a still_open list and the two
+	// sharing a requirement: two consecutive runs were sent the same finding and
+	// neither closed it. Reqs is the last one's list, and StillOpenReqs the
+	// requirements the two lists share. Operator is the last one's operator
+	// list, the requirements it handed to the operator.
+	//
+	// An equal Reqs pair alone is not a repeat. A requirement such as "every
+	// refused object answers 403" admits any number of distinct defects, and a
+	// reviewer writing new probes each round sends the same number back while
+	// the branch improves; [review] max_review_rounds is the bound on that.
+	ChangesRequested int
+	LastChanges      string
+	RepeatedChanges  bool
+	StillOpen        bool
+	StillOpenReqs    []int
+	Reqs             []int
+	Operator         []int
 	// Refusals is how many requests for changes the cap turned away over the item's history.
-	// A reader deciding about one pass wants RefusedSince instead.
-	Refusals int
+	// A reader deciding about one pass wants RefusedSince instead. RefusedReqs
+	// is the requirements the last refused request named.
+	Refusals    int
+	RefusedReqs []int
 	// LastBody is the body digest from the most recent row carrying one, review
 	// stage row or body row, in file order. Empty for an item no drover that
 	// records digests has touched.
@@ -1034,6 +1056,7 @@ func (c Counts) Launches() int {
 func (l *Ledger) Counts(id string) Counts {
 	c := Counts{ByStage: map[string]int{}}
 	var last string
+	var prevStillOpen []int
 	for _, r := range l.Rows {
 		if r.ID != id {
 			continue
@@ -1047,18 +1070,32 @@ func (l *Ledger) Counts(id string) Counts {
 		if r.Changes != "" {
 			c.ChangesRequested++
 			c.RepeatedChanges = last != "" && r.Changes == last
-			c.RepeatedRequirements = len(c.Reqs) > 0 && slices.Equal(r.Reqs, c.Reqs)
-			c.Reqs = r.Reqs
+			c.StillOpenReqs = shared(prevStillOpen, r.StillOpen)
+			c.StillOpen = len(c.StillOpenReqs) > 0
+			c.Reqs, prevStillOpen = r.Reqs, r.StillOpen
+			c.Operator = r.Operator
 			c.LastChanges, last = r.Date, r.Changes
 		}
 		if r.Refused != "" {
 			c.Refusals++
+			c.RefusedReqs = r.Reqs
 		}
 		if r.Body != "" {
 			c.LastBody = r.Body
 		}
 	}
 	return c
+}
+
+// shared is the numbers in both a and b, in a's order.
+func shared(a, b []int) []int {
+	var out []int
+	for _, n := range a {
+		if slices.Contains(b, n) {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // RefusedSince reports whether the cap turned a request for changes away after the row count

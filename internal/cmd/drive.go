@@ -89,6 +89,7 @@ const (
 	passSilent            = "no_record"         // it recorded nothing at all
 	passCapped            = "at_limit"          // request for changes refused, and it wanted to send work back
 	passRepeating         = "repeating"         // the same evidence twice
+	passNeedsDecision     = "needs_decision"    // a requirement no run can meet as written, handed to the operator
 	passChangesRequested  = "changes_requested" // work went back to the branch
 	passStanding          = "findings_open"     // an audit, no request for changes, and an earlier round's block still open in the body
 	passChangesUnrecorded = "no_digest"         // an audit, no request for changes, and no body digest to read it against
@@ -187,7 +188,15 @@ func rowResult(p pass) string {
 	// in for.
 	case p.cap > 0 && p.refused:
 		return passCapped
-	case changes >= 1 && (p.after.RepeatedChanges || p.after.RepeatedRequirements):
+	// Ahead of repeating and changes_requested, because both relaunch or park
+	// on a loop the implementer could close, and a requirement the reviewer
+	// judged unmeetable as written is one no implementing session can: every
+	// round spent on it is a round nobody can win.
+	case changes >= 1 && len(p.after.Operator) > 0:
+		return passNeedsDecision
+	// Never on an equal reqs set alone: one requirement can yield a new defect
+	// every round while the branch improves, and max_review_rounds bounds that.
+	case changes >= 1 && (p.after.RepeatedChanges || p.after.StillOpen):
 		return passRepeating
 	case changes >= 1:
 		return passChangesRequested
@@ -526,6 +535,9 @@ type DriveItem struct {
 	// signoff is the same for an [operator] requirement park: which ones, and
 	// the command that records them.
 	signoff string
+	// decision is the same for a needs_decision park: the requirements the
+	// review handed over and the commands that change or meet them.
+	decision string
 	// blockedBy is the unmerged dependencies of an item skipped as blocked,
 	// which the exit summary names with what each came to.
 	blockedBy []string
@@ -2235,6 +2247,13 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 		case passStanding:
 			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath)+
 				". "+standingNext(d.ID, s.ledger.State(d.ID).Note))
+		case passRepeating, passCapped:
+			d.setDetail(s.loopDetail(it, v, rp))
+			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath))
+		case passNeedsDecision:
+			d.setDetail(decisionDetail(rp))
+			d.decision = decisionNext(d.ID, rp.after.Operator)
+			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath))
 		default:
 			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath))
 		}
@@ -2445,11 +2464,15 @@ func passSentence(v, stage string, p pass, subject, runnerName, logPath string) 
 	case passCapped:
 		return fmt.Sprintf("%s wanted to send work back, and the item is at [review] max_review_rounds (%d)", subject, p.cap)
 	case passRepeating:
-		if !p.after.RepeatedChanges && p.after.RepeatedRequirements {
-			return subject + " sent back " + requirementList(p.after.Reqs) +
-				" unmet twice in a row; the contract may need narrowing, splitting or an override"
+		if !p.after.RepeatedChanges && p.after.StillOpen {
+			return subject + " marked the finding under " + requirementList(p.after.StillOpenReqs) +
+				" still open after two runs aimed at it; the contract may need narrowing, splitting or an override"
 		}
-		return subject + " sent back the same evidence as the request for changes before it, so the last run changed nothing it checks"
+		return subject + " sent back evidence identical to the previous round's request for changes"
+	case passNeedsDecision:
+		return subject + " found " + requirementList(p.after.Operator) +
+			" cannot be met as written, so no implementing session can discharge it: " +
+			strings.Join(operatorReasons(prompts.Data{Body: p.text}.Changes(), p.after.Operator), " ")
 	}
 	return subject + " ended as " + v
 }
@@ -2933,6 +2956,20 @@ func requirementList(nums []int) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
+// decisionNext is what resolves a needs_decision park: amend the contract the
+// review found unmeetable, or, where a person can meet the requirement, amend it
+// to an [operator] one and sign it off, since signoff refuses any other. Then
+// the item is driven again.
+func decisionNext(id string, reqs []int) string {
+	signoffs := make([]string, len(reqs))
+	for i, n := range reqs {
+		signoffs[i] = "drover signoff " + id + " " + strconv.Itoa(n) + " \"<what was checked>\""
+	}
+	return "decide " + requirementList(reqs) + ": drover amend " + id + " -f <file> --reason \"<why>\" to change the contract, " +
+		"or where a person can meet it, amend it to an " + backlog.OperatorTag + " requirement and " + strings.Join(signoffs, ", ") +
+		"; then drover drive " + id
+}
+
 // reviewAgain is the command that relaunches a headless review with the runner
 // the last one used, so a copied next step reproduces the pass it follows. Only
 // a headless pass is reported, so it is the only mode this names.
@@ -2956,6 +2993,8 @@ func passFollowUp(token string, p pass, id, item, runnerName, logPath, again str
 		}
 	case passRepeating:
 		return followUp{outcome, repeatingNext(id, body, p.sentBack)}
+	case passNeedsDecision:
+		return followUp{outcome, decisionNext(id, p.after.Operator)}
 	case passCapped:
 		return followUp{
 			outcome,
@@ -3098,13 +3137,17 @@ func driveFollowUp(d DriveItem, item string, drafted bool, maxReviewRounds int, 
 	}
 
 	switch d.Park {
-	case passChangesRequested, passRepeating, passCapped, passStanding, passChangesUnrecorded, passEdited, passSilent, passDied, passUnreadable:
+	case passChangesRequested, passRepeating, passNeedsDecision, passCapped, passStanding, passChangesUnrecorded, passEdited, passSilent, passDied, passUnreadable:
 		// The park's reason is passSentence already, worded with the runner, the
 		// log and any denial in hand; the summary has none of those to word it
 		// again.
 		f := passFollowUp(d.Park, pass{cap: maxReviewRounds}, id, item, "", "", again)
 		if d.Reason != "" {
 			f.Outcome = d.Reason
+		}
+		// The bare pass carries no requirements; the park recorded them.
+		if d.Park == passNeedsDecision && d.decision != "" {
+			f.Next = d.decision
 		}
 		return f
 	case parkImplementDied, parkImplementUnreadable:
@@ -5194,7 +5237,7 @@ func (s *session) requestChangesFromVerify(it backlog.Item, header, out string, 
 	if err := f.Close(); err != nil {
 		return err
 	}
-	requestChangesFile = f.Name()
+	requestChangesFile, requestChangesStillOpen, requestChangesOperator = f.Name(), nil, nil
 	defer func() { requestChangesFile = "" }()
 	// request-changes reports on stdout, and stdout under --json carries one object per
 	// line and nothing else.

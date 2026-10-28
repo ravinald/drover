@@ -689,3 +689,43 @@ func TestARunnerWithoutTheEventCarriesNoReading(t *testing.T) {
 		t.Errorf("a codex session reads %+v", rd.Result.RateLimit)
 	}
 }
+
+// claude-segments.jsonl carries the per-segment figures of bodega's F98
+// implement log, a headless session that wrote three result events. The
+// error variant ends on a failed segment.
+func TestReadResultSumsClaudeSegments(t *testing.T) {
+	for _, c := range []struct {
+		fixture string
+		failed  bool
+	}{
+		{"claude-segments.jsonl", false},
+		{"claude-segments-error.jsonl", true},
+	} {
+		t.Run(c.fixture, func(t *testing.T) {
+			rd, err := ReadResult(filepath.Join("testdata", c.fixture))
+			if err != nil || !rd.Found {
+				t.Fatalf("found=%v err=%v", rd.Found, err)
+			}
+			r := rd.Result
+			if r.DurationMS != 1347483 {
+				t.Errorf("DurationMS = %d, want 1347483", r.DurationMS)
+			}
+			if r.NumTurns != 44 {
+				t.Errorf("NumTurns = %d, want 44", r.NumTurns)
+			}
+			want := Usage{Input: 130, Output: 31931, CacheCreate: 204000, CacheRead: 3210000}
+			if r.Usage == nil || *r.Usage != want {
+				t.Errorf("Usage = %+v, want %+v", r.Usage, want)
+			}
+			if r.Cost != 2.9683816 {
+				t.Errorf("Cost = %v, want 2.9683816, the last event's running total", r.Cost)
+			}
+			if r.Succeeded() == c.failed {
+				t.Errorf("Succeeded() = %v, want %v: the outcome is the last segment's", r.Succeeded(), !c.failed)
+			}
+			if !c.failed && r.Text != "done" {
+				t.Errorf("Text = %q, want the last segment's", r.Text)
+			}
+		})
+	}
+}

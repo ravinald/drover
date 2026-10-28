@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -402,29 +403,31 @@ func TestCountsCountsRatherThanFolds(t *testing.T) {
 	}
 }
 
-// Two send-backs naming the same requirements are one finding however each is
-// worded, so only an equal pair of lists repeats. A row an older binary wrote
-// carries none and breaks the pair it sits between.
-func TestCountsRepeatedRequirementsWantsAnEqualPair(t *testing.T) {
+// A repeat is the reviewer saying two runs in a row were sent one finding and
+// neither closed it. Two send-backs naming the same requirements with no
+// still_open are two different defects under one number, which is progress.
+func TestCountsStillOpenWantsTwoMarkedRowsSharingARequirement(t *testing.T) {
+	type row struct{ reqs, open []int }
 	for _, c := range []struct {
 		name string
-		reqs [][]int
-		want bool
+		rows []row
+		want []int
 	}{
-		{"equal", [][]int{{4, 7}, {4, 7}}, true},
-		{"overlap", [][]int{{4, 7}, {4}}, false},
-		{"an older row between", [][]int{{4, 7}, nil, {4, 7}}, false},
-		{"neither names one", [][]int{nil, nil}, false},
+		{"equal reqs, nothing marked", []row{{[]int{2}, nil}, {[]int{2}, nil}}, nil},
+		{"both marked, shared", []row{{[]int{3}, []int{3}}, {[]int{3}, []int{3}}}, []int{3}},
+		{"both marked, disjoint", []row{{[]int{3, 4}, []int{4}}, {[]int{3}, []int{3}}}, nil},
+		{"only the last marked", []row{{[]int{3}, nil}, {[]int{3}, []int{3}}}, nil},
+		{"an unmarked row between", []row{{[]int{3}, []int{3}}, {[]int{3}, nil}, {[]int{3}, []int{3}}}, nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			l := &Ledger{}
-			for i, r := range c.reqs {
-				l.Rows = append(l.Rows, Row{ID: "16", Changes: []string{"a", "b", "c"}[i], Reqs: r})
+			for i, r := range c.rows {
+				l.Rows = append(l.Rows, Row{ID: "16", Changes: []string{"a", "b", "c"}[i], Reqs: r.reqs, StillOpen: r.open})
 			}
-			l.Rows = append(l.Rows, Row{ID: "17", Changes: "other", Reqs: []int{9}})
+			l.Rows = append(l.Rows, Row{ID: "17", Changes: "other", Reqs: []int{3}, StillOpen: []int{3}})
 			got := l.Counts("16")
-			if got.RepeatedRequirements != c.want {
-				t.Errorf("RepeatedRequirements = %v, want %v", got.RepeatedRequirements, c.want)
+			if got.StillOpen != (c.want != nil) || !slices.Equal(got.StillOpenReqs, c.want) {
+				t.Errorf("StillOpen = %v %v, want %v", got.StillOpen, got.StillOpenReqs, c.want)
 			}
 			if got.RepeatedChanges {
 				t.Error("distinct digests read as RepeatedChanges")

@@ -238,6 +238,31 @@ func TestAFindingReachesTheSurfaceThatMustActOnIt(t *testing.T) {
 			reviewBrief: {"Nobody may act on this round again"},
 		},
 	}, {
+		channel:  "a finding the previous round sent back",
+		why:      "only the reviewer can say a finding carried over, and drive parks repeating on that word alone",
+		register: noRegister,
+		setup: func(t *testing.T, dir string) {
+			path := filepath.Join(dir, "evidence.md")
+			write(t, path, changesEvidence)
+			drove(t, "request-changes", item, "-f", path)
+		},
+		reach: map[surface][]string{
+			reviewBrief: {"drover request-changes B2 -f <file> --still-open N[,N...]",
+				"Only for the same finding, reproduced again. A new defect under a requirement"},
+		},
+		absent: map[surface][]string{runBrief: {"--still-open"}},
+	}, {
+		channel:  "a requirement no session can meet as written",
+		why:      "sent back as an ordinary round, an unmeetable requirement spent five implement sessions before a repeat check parked it",
+		register: noRegister,
+		setup:    func(*testing.T, string) {},
+		reach: map[surface][]string{
+			reviewBrief: {"drover request-changes B2 -f <file> --operator N[,N...]",
+				"on a decision nobody has made yet, or on evidence that does not",
+				"`needs_decision`"},
+		},
+		absent: map[surface][]string{runBrief: {"--operator"}},
+	}, {
 		channel:  "source files the contract never named",
 		why:      "an item about one storage file whose branch rewrote three backends read exactly like one that stayed put",
 		register: noRegister,

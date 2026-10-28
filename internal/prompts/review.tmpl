@@ -381,6 +381,22 @@ Then:
   the destination is `SPLIT-OUT` rather than another round.
 {{- end }}
 {{ end }}
+{{- if .Path }}
+- Before any destination, ask whether a session could meet the requirement at
+  all. A finding that traces to a requirement the code cannot meet as written,
+  because it depends on something outside the repository (a release upstream
+  never made), on a decision nobody has made yet, or on evidence that does not
+  exist, is recorded with `--operator` and not sent back as an ordinary finding:
+
+      drover request-changes {{ .ID }} -f <file> --operator N[,N...]
+
+  Put the reason under a heading naming that requirement. drive parks the item
+  `needs_decision` for the operator to amend the contract or meet it by hand,
+  and launches no implementing session for it meanwhile: sent back as an
+  ordinary round, the implementer cannot discharge it, and the loop spends
+  rounds until it parks anyway. Findings against other requirements in the same
+  evidence still go to the body for the run after the decision.
+{{- end }}
 - Send each finding where its owner is. Four questions, in this order: does a
   numbered requirement reach it, would it break something in use, can you
   correct it here without a verify command noticing, and does any existing item own it.
@@ -423,6 +439,21 @@ Then:
   the numbered requirements, which are the contract, and demotes a top-level
   "N." in your evidence to a bullet, because the body reads one as requirement
   eight.
+{{- if and .Changes (not .Cleared) }}
+
+  Compare each finding you send back against the previous round's block in the
+  `{{ .ChangesHeading }}` section above, and name the requirements whose earlier
+  finding you reproduced as still open:
+
+      drover request-changes {{ .ID }} -f <file> --still-open N[,N...]
+
+  Only for the same finding, reproduced again. A new defect under a requirement
+  the last round also named is not still open, and passing it there parks the
+  item `repeating` once a second round says the same: drover cannot tell the two
+  apart, and reads an equal set of requirement numbers alone as progress, which
+  `[review] max_review_rounds` bounds. `--still-open` refuses a number the last
+  request did not name.
+{{- end }}
 {{- end }}
 {{- if and .Path .Changes (not .Cleared) }}
 

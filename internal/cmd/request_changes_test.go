@@ -254,6 +254,58 @@ func TestRequestChangesRowRecordsTheRequirementsItsFindingsName(t *testing.T) {
 	}
 }
 
+// --still-open carries a finding over from the previous request only, so it
+// refuses a number that request did not name, and a first request outright.
+// Either refusal writes no changes row; one that holds records the list.
+func TestRequestChangesStillOpenNamesOnlyThePreviousRequestsRequirements(t *testing.T) {
+	t.Cleanup(func() { requestChangesFile, requestChangesStillOpen = "", nil })
+	dir, evidence := capProject(t, 0)
+	write(t, filepath.Join(dir, "work", "01-first.md"), sevenRequirements)
+	send := func(text string, args ...string) error {
+		write(t, evidence, text)
+		requestChangesFile, requestChangesStillOpen = "", nil
+		return execute(t, append([]string{"request-changes", "1", "-f", evidence}, args...)...)
+	}
+
+	err := send("### R3 answers 200\n\nProbe one.\n", "--still-open", "3")
+	if Code(err) != ExitRefused || !strings.Contains(fmt.Sprint(err), "has none") {
+		t.Errorf("--still-open on a first request = %v (exit %d), want exit 3 saying there is no previous one", err, Code(err))
+	}
+	if n := requestChangesRows(t, dir); n != 0 {
+		t.Fatalf("%d changes rows after the refusal, want 0", n)
+	}
+	if err := send("### R3 answers 200\n\nProbe one.\n"); err != nil {
+		t.Fatal(err)
+	}
+	err = send("### R5 answers 200\n\nProbe two.\n", "--still-open", "5")
+	if Code(err) != ExitRefused || !strings.Contains(fmt.Sprint(err), "named [3]") {
+		t.Errorf("--still-open 5 against reqs [3] = %v (exit %d), want exit 3 naming [3]", err, Code(err))
+	}
+	if n := requestChangesRows(t, dir); n != 1 {
+		t.Fatalf("%d changes rows after the refusal, want 1", n)
+	}
+	if err := send("### R3 still answers 200\n\nProbe one again.\n", "--still-open", "3,3"); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var open [][]int
+	for _, r := range l.Rows {
+		if r.ID == "1" && r.Changes != "" {
+			open = append(open, r.StillOpen)
+		}
+	}
+	if len(open) != 2 || open[0] != nil || !slices.Equal(open[1], []int{3}) {
+		t.Errorf("still_open per changes row = %v, want [[] [3]]", open)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "ledger.jsonl"))
+	if n := strings.Count(string(raw), `"still_open"`); n != 1 {
+		t.Errorf("%d rows carry a still_open key, want 1: an empty list is omitted", n)
+	}
+}
+
 // Exit 3 promises the tree and the ledger are untouched, and that is asserted
 // rather than assumed.
 func TestRequestChangesRefusesPastTheLimitAndWritesNothing(t *testing.T) {
@@ -428,8 +480,8 @@ func TestEvidenceCannotSplitTheSectionItIsWrittenInto(t *testing.T) {
 // same problem one level up: spliceSection ends a section at any "## " line.
 func TestEvidenceHeadingsSinkBelowTheBodysOwn(t *testing.T) {
 	out, numbered, headings := demoteEvidence("# Report\n\n## Finding\n\n1. The first.\n\n### Detail\n\nprose\n")
-	if headings != 2 {
-		t.Errorf("demoted %d headings, want 2 (# and ##)", headings)
+	if headings != 3 {
+		t.Errorf("demoted %d headings, want 3 (every one, by the same amount)", headings)
 	}
 	if numbered != 1 {
 		t.Errorf("demoted %d numbered lines, want 1", numbered)
@@ -439,12 +491,32 @@ func TestEvidenceHeadingsSinkBelowTheBodysOwn(t *testing.T) {
 			t.Errorf("a heading survived at the body's own level (%q):\n%s", gone, out)
 		}
 	}
-	// Already deep enough, so untouched: demotion is a floor, not a shift.
-	if !strings.Contains(out, "### Detail") {
-		t.Errorf("a ### heading moved when it did not need to:\n%s", out)
+	// A shift, not a floor: a floor would put all three at ### and make Detail a
+	// sibling of the Finding it belongs to.
+	for _, want := range []string{"\n### Report\n", "\n#### Finding\n", "\n##### Detail\n"} {
+		if !strings.Contains("\n"+out, want) {
+			t.Errorf("the headings lost their relative depth (want %q):\n%s", strings.TrimSpace(want), out)
+		}
 	}
-	if !strings.Contains(out, "### Report") || !strings.Contains(out, "### Finding") {
-		t.Errorf("the demoted headings are not at ###:\n%s", out)
+}
+
+// Evidence whose shallowest heading is already ### is the depth a body expects,
+// so nothing moves; a fenced "## " still sinks, because spliceSection reads
+// fenced lines too; and a "#62" opening a line is prose, not a heading.
+func TestEvidenceHeadingsShiftOnlyWhenTheyMust(t *testing.T) {
+	in := "### R3 cannot be met\n\n#### Reason\n\nprose\n\n```md\n## quoted\n```\n\n#62 fixed the rest\n"
+	out, _, headings := demoteEvidence(in)
+	if headings != 1 {
+		t.Errorf("demoted %d headings, want 1 (the fenced one)", headings)
+	}
+	for _, want := range []string{"### R3 cannot be met\n", "\n#### Reason\n", "\n### quoted\n", "\n#62 fixed the rest"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lost %q:\n%s", strings.TrimSpace(want), out)
+		}
+	}
+	body := "1. Do it.\n\n" + prompts.ChangesHeading + "\n\nolder\n"
+	if again := spliceSection(spliceSection(body, out), "Nothing is outstanding."); strings.Contains(again, "quoted") {
+		t.Errorf("a fenced heading split the section:\n%s", again)
 	}
 }
 
@@ -546,5 +618,76 @@ func TestRequestChangesDocCommentsOpenWithTheirOwnName(t *testing.T) {
 			first, _, _ := strings.Cut(doc, "\n")
 			t.Errorf("func %s has a doc comment opening %q", name, first)
 		}
+	}
+}
+
+// --operator names requirements of the body's list, each carrying its reason
+// under a heading in the evidence. A number past the list, or one no finding
+// names, is refused and writes no row; one that holds records the list.
+func TestRequestChangesOperatorNamesOnlyTheBodysRequirements(t *testing.T) {
+	t.Cleanup(func() { requestChangesFile, requestChangesOperator = "", nil })
+	dir, evidence := capProject(t, 0)
+	write(t, filepath.Join(dir, "work", "01-first.md"),
+		"---\ntitle: First\ndeps:\n---\n\n1. One.\n2. Two.\n3. Three.\n4. Four.\n5. Five.\n6. Six.\n")
+	send := func(text string, args ...string) error {
+		write(t, evidence, text)
+		requestChangesFile, requestChangesOperator = "", nil
+		return execute(t, append([]string{"request-changes", "1", "-f", evidence}, args...)...)
+	}
+
+	err := send("### R9 needs a decision\n\nNobody has made it.\n", "--operator", "9")
+	if Code(err) != ExitRefused || !strings.Contains(fmt.Sprint(err), "has 6 numbered requirement(s)") {
+		t.Errorf("--operator 9 on six requirements = %v (exit %d), want exit 3 naming the count", err, Code(err))
+	}
+	err = send("### R2 answers 200\n\nProbe one.\n", "--operator", "3")
+	if Code(err) != ExitRefused || !strings.Contains(fmt.Sprint(err), "no finding in the evidence names R3") {
+		t.Errorf("--operator 3 with no R3 finding = %v (exit %d), want exit 3", err, Code(err))
+	}
+	if n := requestChangesRows(t, dir); n != 0 {
+		t.Fatalf("%d changes rows after the refusals, want 0", n)
+	}
+	if err := send("### R2 answers 200\n\nProbe one.\n\n### R3 needs a decision\n\nNobody has made it.\n", "--operator", "3,3"); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []ledger.Row
+	for _, r := range l.Rows {
+		if r.ID == "1" && r.Changes != "" {
+			rows = append(rows, r)
+		}
+	}
+	if len(rows) != 1 || !slices.Equal(rows[0].Operator, []int{3}) || !slices.Equal(rows[0].Reqs, []int{2, 3}) {
+		t.Errorf("changes rows = %+v, want one with operator [3] and reqs [2 3]", rows)
+	}
+}
+
+// The reason handed to the operator is the prose of the section a heading
+// naming the requirement opens: subordinate headings and fenced code stay in
+// that section without becoming the reason, a sibling heading ends it, and a
+// section with no prose is its own title.
+func TestOperatorReasonsReadTheWholeSectionOfTheFinding(t *testing.T) {
+	for _, c := range []struct {
+		name, text string
+		nums       []int
+		want       []string
+	}{
+		{"unheaded", "R3 needs a release. More.", []int{3}, []string{"R3: R3 needs a release."}},
+		{"subordinate heading", "### R3 title\n\n#### Reason\n\nNo release exists. Amend it.\n", []int{3},
+			[]string{"R3: No release exists."}},
+		{"fence before prose", "### R3 title\n\n```\n# not a heading. Nor this.\n```\n\nThe prose. Rest.\n", []int{3},
+			[]string{"R3: The prose."}},
+		{"sibling ends the section", "### R3 title\n\n### R4 other\n\nR4's reason. Rest.\n", []int{3, 4},
+			[]string{"R3: R3 title", "R4: R4's reason."}},
+		{"named in a subordinate heading", "## Findings\n\n### R3 title\n\nIts reason. Rest.\n\n## Settled\n\nNot it.\n", []int{3},
+			[]string{"R3: Its reason."}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := operatorReasons(c.text, c.nums); !slices.Equal(got, c.want) {
+				t.Errorf("operatorReasons = %q, want %q", got, c.want)
+			}
+		})
 	}
 }

@@ -483,6 +483,8 @@ func (es *eventSink) itemEvents(d DriveItem) {
 				run = d.login + ", then drover drive " + d.ID
 			case ev.Action == "signoff":
 				run = d.signoff
+			case ev.Action == "decide_requirement":
+				run = d.decision
 			}
 			es.needsOperator(d.ID, ev.Action, d.Reason, run, d.PR)
 		}

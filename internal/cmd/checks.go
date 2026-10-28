@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	goversion "go/version"
+	"io"
 	"net/url"
 	"os/exec"
 	"regexp"
@@ -28,6 +30,7 @@ type forgeCheck struct {
 	HTMLURL     string `json:"html_url"`
 	DetailsURL  string `json:"details_url"`
 	CompletedAt string `json:"completed_at"`
+	HeadSHA     string `json:"head_sha"`
 }
 
 // red reports a completed check whose conclusion is a failure of some kind. A
@@ -120,9 +123,11 @@ type judged struct {
 // settled is what settleChecks concluded about a head before the gate reads
 // it. A park stops the item; none reports a head no workflow ran on, for a
 // verify refusal that follows to say so; code is the red checks left for the
-// gate, for a refusal that follows to say what failed.
+// gate, for a refusal that follows to say what failed. detail is what a park's
+// ledger row carries, the checks that caused it.
 type settled struct {
 	park, reason string
+	detail       parkDetail
 	stop         error
 	none         string
 	code         []judged
@@ -164,6 +169,12 @@ func (s *session) settleChecks(ctx context.Context, d *DriveItem, sha string, de
 		}
 		out, rerun := s.actOnReds(ctx, d, sha, reds)
 		if len(rerun) == 0 {
+			// Set here rather than by each caller, so no path that parks on
+			// this result records the last session's log in place of the
+			// check that caused the park.
+			if out.park != "" {
+				d.setDetail(out.detail)
+			}
 			return out
 		}
 		for _, id := range rerun {
@@ -201,8 +212,9 @@ func (s *session) actOnReds(ctx context.Context, d *DriveItem, sha string, reds 
 			}
 			s.recordCheck(d.ID, sha, j, false, act)
 		}
-		return settled{park: parkTrunkRed, stop: errTrunkRed, reason: strings.Join(named, "\n") +
-			"\nno branch can fix a check the trunk fails too, so nothing was sent back"}, nil
+		return settled{park: parkTrunkRed, stop: fmt.Errorf("%w: %s", errTrunkRed, strings.Join(named, "; ")), reason: strings.Join(named, "\n") +
+			"\nno branch can fix a check the trunk fails too, so nothing was sent back",
+			detail: parkDetail{Detail: ledger.ClassTrunk, Evidence: strings.Join(named, "\n")}}, nil
 	}
 	// A code failure goes to the gate, which sends it back, so rerunning the
 	// infra failures beside it would spend reruns on a head that is going back.
@@ -238,7 +250,8 @@ func (s *session) actOnReds(ctx context.Context, d *DriveItem, sha string, reds 
 			lines = append(lines, j.run.Name+": "+j.evidence)
 		}
 		return settled{park: parkInfraFailure, reason: "a check failed on the forge's infrastructure, and rerun_infra_failure is " +
-			string(infraPol) + ", so drive did not rerun it:\n" + strings.Join(lines, "\n")}, nil
+			string(infraPol) + ", so drive did not rerun it:\n" + strings.Join(lines, "\n"),
+			detail: parkDetail{Detail: ledger.ClassInfra, Evidence: strings.Join(lines, "\n")}}, nil
 	}
 
 	var ids []int64
@@ -283,8 +296,8 @@ func (s *session) classify(ctx context.Context, r forgeCheck) judged {
 		}
 	}
 	trunk := s.trunk()
-	if u := s.trunkRed(ctx, trunk, r.Name); u != "" {
-		j.class, j.evidence = ledger.ClassTrunk, r.Name+" concluded failure on "+trunk+"'s latest completed run too: "+u
+	if f := s.trunkRed(ctx, trunk, r.Name); f != nil {
+		j.class, j.evidence = ledger.ClassTrunk, f.evidence(trunk)
 		return j
 	}
 	j.class, j.evidence = ledger.ClassCode, "no infrastructure line in its log, and "+trunk+" does not fail it"
@@ -431,74 +444,148 @@ func (s *session) stepsRun(ctx context.Context, job int64) (int, error) {
 // the tip before calling a check not red.
 const trunkWindow = 10
 
-// trunkRed is the URL of the trunk's latest completed run of the check named
-// name when that run failed, or "" when it passed, never ran in the last
-// trunkWindow commits or cannot be read.
+// trunkFailure is the trunk's run of a check that failed, and where it sits.
+type trunkFailure struct {
+	run    forgeCheck
+	sha    string
+	behind int
+}
+
+// evidence names the run and the commit it failed on, so a stale read shows in
+// the park and the stop message rather than in a gh run list the next morning.
+func (f trunkFailure) evidence(trunk string) string {
+	at := trunk + "'s tip"
+	if f.behind > 0 {
+		at = fmt.Sprintf("%d first-parent %s behind %s's tip", f.behind, plural(f.behind, "commit", "commits"), trunk)
+	}
+	sha := f.sha
+	if len(sha) > 7 {
+		sha = sha[:7]
+	}
+	if sha == "" {
+		sha = trunk
+	}
+	return fmt.Sprintf("%s concluded failure on %s's latest completed run too, at %s (%s), completed %s: %s",
+		f.run.Name, trunk, sha, at, f.run.CompletedAt, checkURL(f.run))
+}
+
+// trunkRed is the trunk's latest completed run of the check named name when
+// that run failed, or nil when it passed, the trunk no longer runs it, or it
+// cannot be read.
 //
 // The tip alone is not enough under drive: every merge moves it, so the next
 // item's checks finish while the tip's own run of the same check is still in
-// progress, or never starts on a path-filtered workflow. It walks back along
-// first parents and stops at the first commit holding a completed run, red or
-// green, and at the first one it cannot read, so an older failure never
-// outvotes a newer commit nobody could see.
-func (s *session) trunkRed(ctx context.Context, trunk, name string) string {
-	for _, rev := range append([]string{trunk}, s.trunkCommits(trunk)...) {
-		latest, err := s.completedRun(ctx, rev, name)
+// progress. It walks back along first parents only past a commit whose check
+// runs include one still in progress. A commit whose runs have all completed
+// with none of that name ends the walk not red: a path-filtered workflow, a
+// renamed matrix shard or a dropped job leaves such commits, and the older
+// failure behind them says nothing about the trunk now. The first commit it
+// cannot read ends the walk too, so an older failure never outvotes a newer
+// commit nobody could see.
+//
+// The walk starts from the commit the forge answered for the trunk's name,
+// never from a local ref: a fetch older than the forge's tip would otherwise
+// count its parents from the wrong commit and call one behind it the tip.
+func (s *session) trunkRed(ctx context.Context, trunk, name string) *trunkFailure {
+	rev := trunk
+	for behind := 0; behind <= trunkWindow; behind++ {
+		runs, err := s.commitRuns(ctx, rev)
 		if err != nil {
-			return ""
+			return nil
 		}
+		latest := latestCompleted(runs, name)
 		if latest == nil {
+			if !slices.ContainsFunc(runs, func(r forgeCheck) bool { return r.Status != "completed" }) {
+				return nil
+			}
+			at := rev
+			if behind == 0 {
+				at = runsHead(runs)
+			}
+			if rev = s.firstParent(ctx, at); rev == "" {
+				return nil
+			}
 			continue
 		}
 		if !slices.Contains([]string{"failure", "timed_out", "startup_failure"}, latest.Conclusion) {
-			return ""
+			return nil
 		}
-		if latest.HTMLURL != "" {
-			return latest.HTMLURL
+		f := &trunkFailure{run: *latest, sha: latest.HeadSHA, behind: behind}
+		if behind > 0 && f.sha == "" {
+			f.sha = rev
 		}
-		return latest.DetailsURL
+		return f
+	}
+	return nil
+}
+
+// runsHead is the commit runs were read from, "" when none of them says.
+func runsHead(runs []forgeCheck) string {
+	for _, r := range runs {
+		if r.HeadSHA != "" {
+			return r.HeadSHA
+		}
 	}
 	return ""
 }
 
-// trunkCommits are the trunk's last trunkWindow first-parent commits, newest
-// first, read from origin's trunk the catch-up fetched and from the local one
-// where there is no origin. Reading git costs no forge call. The tip stays in
-// the list although trunkRed asked the forge for it by name: a fetch older than
-// the forge's tip makes the two different commits.
-func (s *session) trunkCommits(trunk string) []string {
-	ref := "origin/" + trunk
-	if gitAt(s.cfg.Root, "rev-parse", "--verify", "--quiet", ref+"^{commit}") != nil {
-		ref = trunk
+// firstParent is sha's first parent, read from git where the commit is local
+// and from the forge where the last fetch predates it. It is "" for a root
+// commit, an empty sha, or a parent neither can name.
+func (s *session) firstParent(ctx context.Context, sha string) string {
+	if sha == "" || strings.HasPrefix(sha, "-") {
+		return ""
 	}
-	out, err := gitcmd.Command(s.cfg.Root, "rev-list", "--first-parent", "-n", strconv.Itoa(trunkWindow), ref).Output()
+	if out, err := gitcmd.Command(s.cfg.Root, "rev-parse", "--verify", "--quiet", sha+"^1^{commit}").Output(); err == nil {
+		return strings.TrimSpace(string(out))
+	}
+	out, err := s.ghAPI(ctx, "repos/"+s.repo()+"/commits/"+url.PathEscape(sha))
 	if err != nil {
-		return nil
+		return ""
 	}
-	return strings.Fields(string(out))
+	var c struct {
+		Parents []struct {
+			SHA string `json:"sha"`
+		} `json:"parents"`
+	}
+	if json.Unmarshal(out, &c) != nil || len(c.Parents) == 0 {
+		return ""
+	}
+	return c.Parents[0].SHA
 }
 
-// completedRun is the latest completed run of the check named name on rev, nil
-// when rev has none.
-func (s *session) completedRun(ctx context.Context, rev, name string) (*forgeCheck, error) {
-	out, err := s.ghAPI(ctx, "repos/"+s.repo()+"/commits/"+url.PathEscape(rev)+
-		"/check-runs?filter=all&per_page=100&check_name="+url.QueryEscape(name))
+// commitRuns are every check run on rev, of every name, across every page:
+// gh --paginate prints one JSON object per page, one after another.
+func (s *session) commitRuns(ctx context.Context, rev string) ([]forgeCheck, error) {
+	out, err := s.ghAPI(ctx, "--paginate", "repos/"+s.repo()+"/commits/"+url.PathEscape(rev)+
+		"/check-runs?filter=all&per_page=100")
 	if err != nil {
 		return nil, err
 	}
-	var doc struct {
-		Runs []forgeCheck `json:"check_runs"`
+	var runs []forgeCheck
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for {
+		var page struct {
+			Runs []forgeCheck `json:"check_runs"`
+		}
+		if err := dec.Decode(&page); err == io.EOF {
+			return runs, nil
+		} else if err != nil {
+			return nil, err
+		}
+		runs = append(runs, page.Runs...)
 	}
-	if err := json.Unmarshal(out, &doc); err != nil {
-		return nil, err
-	}
+}
+
+// latestCompleted is the latest completed run named name, nil when runs hold none.
+func latestCompleted(runs []forgeCheck, name string) *forgeCheck {
 	var latest *forgeCheck
-	for i, r := range doc.Runs {
-		if r.Status == "completed" && (latest == nil || r.CompletedAt > latest.CompletedAt) {
-			latest = &doc.Runs[i]
+	for i, r := range runs {
+		if r.Name == name && r.Status == "completed" && (latest == nil || r.CompletedAt > latest.CompletedAt) {
+			latest = &runs[i]
 		}
 	}
-	return latest, nil
+	return latest
 }
 
 // rerunFailed asks the forge to rerun the failed jobs of one workflow run.
