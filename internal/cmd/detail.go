@@ -51,7 +51,7 @@ const unrecordedLimit = 2000
 func sessionPark(park string) bool {
 	switch park {
 	case "runner_fault", parkImplementDied, parkImplementUnreadable, parkNoCommits, parkUncommitted,
-		passDied, passFaulted, passUnreadable, passSilent, passCapped, passRepeating,
+		passDied, passFaulted, passUnreadable, passSilent, passCapped, passRepeating, passNeedsDecision,
 		passStanding, passChangesUnrecorded, passEdited:
 		return true
 	}
@@ -300,6 +300,21 @@ func (s *session) loopDetail(it backlog.Item, v string, p pass) parkDetail {
 	}
 	pd.Evidence, pd.Log = s.lastRequest(it)
 	return pd
+}
+
+// decisionDetail is the detail of a needs_decision park: the requirements the
+// review handed to the operator, and as evidence the first sentence of its
+// reason for each, read off the body request-changes wrote.
+func decisionDetail(p pass) parkDetail {
+	reqs := p.after.Operator
+	verb := " needs"
+	if len(reqs) > 1 {
+		verb = " need"
+	}
+	return parkDetail{
+		Detail:   requirementList(reqs) + verb + " an operator decision",
+		Evidence: strings.Join(operatorReasons(prompts.Data{Body: p.text}.Changes(), reqs), "\n"),
+	}
 }
 
 // lastRequest is the first paragraph of the item's latest request for changes,

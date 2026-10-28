@@ -600,3 +600,46 @@ func TestRequestChangesDocCommentsOpenWithTheirOwnName(t *testing.T) {
 		}
 	}
 }
+
+// --operator names requirements of the body's list, each carrying its reason
+// under a heading in the evidence. A number past the list, or one no finding
+// names, is refused and writes no row; one that holds records the list.
+func TestRequestChangesOperatorNamesOnlyTheBodysRequirements(t *testing.T) {
+	t.Cleanup(func() { requestChangesFile, requestChangesOperator = "", nil })
+	dir, evidence := capProject(t, 0)
+	write(t, filepath.Join(dir, "work", "01-first.md"),
+		"---\ntitle: First\ndeps:\n---\n\n1. One.\n2. Two.\n3. Three.\n4. Four.\n5. Five.\n6. Six.\n")
+	send := func(text string, args ...string) error {
+		write(t, evidence, text)
+		requestChangesFile, requestChangesOperator = "", nil
+		return execute(t, append([]string{"request-changes", "1", "-f", evidence}, args...)...)
+	}
+
+	err := send("### R9 needs a decision\n\nNobody has made it.\n", "--operator", "9")
+	if Code(err) != ExitRefused || !strings.Contains(fmt.Sprint(err), "has 6 numbered requirement(s)") {
+		t.Errorf("--operator 9 on six requirements = %v (exit %d), want exit 3 naming the count", err, Code(err))
+	}
+	err = send("### R2 answers 200\n\nProbe one.\n", "--operator", "3")
+	if Code(err) != ExitRefused || !strings.Contains(fmt.Sprint(err), "no finding in the evidence names R3") {
+		t.Errorf("--operator 3 with no R3 finding = %v (exit %d), want exit 3", err, Code(err))
+	}
+	if n := requestChangesRows(t, dir); n != 0 {
+		t.Fatalf("%d changes rows after the refusals, want 0", n)
+	}
+	if err := send("### R2 answers 200\n\nProbe one.\n\n### R3 needs a decision\n\nNobody has made it.\n", "--operator", "3,3"); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []ledger.Row
+	for _, r := range l.Rows {
+		if r.ID == "1" && r.Changes != "" {
+			rows = append(rows, r)
+		}
+	}
+	if len(rows) != 1 || !slices.Equal(rows[0].Operator, []int{3}) || !slices.Equal(rows[0].Reqs, []int{2, 3}) {
+		t.Errorf("changes rows = %+v, want one with operator [3] and reqs [2 3]", rows)
+	}
+}

@@ -252,6 +252,17 @@ func TestAFindingReachesTheSurfaceThatMustActOnIt(t *testing.T) {
 		},
 		absent: map[surface][]string{runBrief: {"--still-open"}},
 	}, {
+		channel:  "a requirement no session can meet as written",
+		why:      "sent back as an ordinary round, an unmeetable requirement spent five implement sessions before a repeat check parked it",
+		register: noRegister,
+		setup:    func(*testing.T, string) {},
+		reach: map[surface][]string{
+			reviewBrief: {"drover request-changes B2 -f <file> --operator N[,N...]",
+				"on a decision nobody has made yet, or on evidence that does not",
+				"`needs_decision`"},
+		},
+		absent: map[surface][]string{runBrief: {"--operator"}},
+	}, {
 		channel:  "source files the contract never named",
 		why:      "an item about one storage file whose branch rewrote three backends read exactly like one that stayed put",
 		register: noRegister,

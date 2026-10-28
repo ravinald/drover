@@ -218,6 +218,15 @@ Then do the part no tool can:
    now settled; it refuses to change the numbered requirements, which are the
    contract you are auditing against.
 
+   **A requirement the code cannot meet as written goes to the operator with
+   `drover request-changes <id> -f <file> --operator N[,N...]`**, its reason
+   under a heading naming the requirement: one that depends on a release
+   upstream never made, a decision nobody has made, or evidence no source
+   publishes. Sent back as an ordinary finding, the implementer cannot discharge
+   it and the loop spends rounds until it parks anyway. drive parks the item
+   `needs_decision` and launches no further run for it; the operator amends the
+   contract, or tags it `[operator]` and signs it off.
+
    **A property the code must keep goes in with `drover invariant <id> -f <file>`
    instead**, which appends and is never replaced. A finding names the case that
    broke; an invariant names what may not break again, and every later pass reads
