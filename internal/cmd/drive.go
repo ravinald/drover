@@ -3138,6 +3138,10 @@ func driveFollowUp(d DriveItem, item string, drafted bool, maxReviewRounds int, 
 		if d.Reason != "" {
 			f.Outcome = d.Reason
 		}
+		// The bare pass carries no requirements; the park recorded them.
+		if d.Park == passNeedsDecision && d.decision != "" {
+			f.Next = d.decision
+		}
 		return f
 	case parkImplementDied, parkImplementUnreadable:
 		return followUp{

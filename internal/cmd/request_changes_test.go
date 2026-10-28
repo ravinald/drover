@@ -643,3 +643,31 @@ func TestRequestChangesOperatorNamesOnlyTheBodysRequirements(t *testing.T) {
 		t.Errorf("changes rows = %+v, want one with operator [3] and reqs [2 3]", rows)
 	}
 }
+
+// The reason handed to the operator is the prose of the section a heading
+// naming the requirement opens: subordinate headings and fenced code stay in
+// that section without becoming the reason, a sibling heading ends it, and a
+// section with no prose is its own title.
+func TestOperatorReasonsReadTheWholeSectionOfTheFinding(t *testing.T) {
+	for _, c := range []struct {
+		name, text string
+		nums       []int
+		want       []string
+	}{
+		{"unheaded", "R3 needs a release. More.", []int{3}, []string{"R3: R3 needs a release."}},
+		{"subordinate heading", "### R3 title\n\n#### Reason\n\nNo release exists. Amend it.\n", []int{3},
+			[]string{"R3: No release exists."}},
+		{"fence before prose", "### R3 title\n\n```\n# not a heading. Nor this.\n```\n\nThe prose. Rest.\n", []int{3},
+			[]string{"R3: The prose."}},
+		{"sibling ends the section", "### R3 title\n\n### R4 other\n\nR4's reason. Rest.\n", []int{3, 4},
+			[]string{"R3: R3 title", "R4: R4's reason."}},
+		{"named in a subordinate heading", "## Findings\n\n### R3 title\n\nIts reason. Rest.\n\n## Settled\n\nNot it.\n", []int{3},
+			[]string{"R3: Its reason."}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := operatorReasons(c.text, c.nums); !slices.Equal(got, c.want) {
+				t.Errorf("operatorReasons = %q, want %q", got, c.want)
+			}
+		})
+	}
+}

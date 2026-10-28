@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -7937,15 +7938,22 @@ func TestAReviewHandingARequirementToTheOperatorParksForADecision(t *testing.T) 
 		"1. One.\n2. Two.\n3. Pin the tagged osquery-go release.\n4. Four.\n5. Five.\n6. Six.\n"
 	const r3 = "### R3 needs a release upstream never made\n\nosquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one. " +
 		"Amend R3 to pin the commit, or wait for the release.\n"
+	// A subordinate heading belongs to the finding above it, so the reason is
+	// the prose under it rather than the R3 heading's title.
+	const nestedR3 = "### R3 needs a release upstream never made\n\n#### Reason\n\n" +
+		"osquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one. " +
+		"Amend R3 to pin the commit, or wait for the release.\n"
+	const r2 = "### R2 answers 200 on a refused object\n\n`curl -i /refused` printed 200.\n\n"
 	for _, c := range []struct {
 		name     string
 		evidence string
 		body     []string
 	}{
 		{name: "one operator finding", evidence: r3, body: []string{"no tagged release past v0.3.1"}},
-		{name: "mixed with an ordinary finding",
-			evidence: "### R2 answers 200 on a refused object\n\n`curl -i /refused` printed 200.\n\n" + r3,
-			body:     []string{"printed 200", "no tagged release past v0.3.1"}},
+		{name: "mixed with an ordinary finding", evidence: r2 + r3, body: []string{"printed 200", "no tagged release past v0.3.1"}},
+		{name: "reason under a subordinate heading", evidence: nestedR3, body: []string{"no tagged release past v0.3.1"}},
+		{name: "mixed, reason under a subordinate heading", evidence: r2 + nestedR3,
+			body: []string{"printed 200", "no tagged release past v0.3.1"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			isolate(t)
@@ -7966,6 +7974,10 @@ n=$(cat "$DROVER_TEST_REVIEWS/1" 2>/dev/null || echo 0); n=$((n + 1)); echo $n >
 cd "$DROVER_ROOT" && DROVER_TEST_AS_DROVER=1 "$DROVER_TEST_SELF" request-changes 1 -f "$DROVER_TEST_REVIEWS/ev" --operator 3 >> "$DROVER_TEST_REVIEWS/out" 2>&1
 `)
 
+			var summary bytes.Buffer
+			orig := errOut
+			errOut = &summary
+			t.Cleanup(func() { errOut = orig })
 			got, evs := gateDrive(t)
 			out, _ := os.ReadFile(filepath.Join(reviews, "out"))
 			if n := reviewCount(t, reviews, "1"); n != 1 {
@@ -7982,8 +7994,17 @@ cd "$DROVER_ROOT" && DROVER_TEST_AS_DROVER=1 "$DROVER_TEST_SELF" request-changes
 			if !ok || pk.Park != passNeedsDecision || pk.Detail != "R3 needs an operator decision" {
 				t.Fatalf("park row = %+v, want needs_decision naming R3\nrequest-changes:\n%s", pk, out)
 			}
+			const reason = "osquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one."
+			if !strings.Contains(pk.Evidence, "R3: "+reason) {
+				t.Errorf("park evidence lacks R3's reason: %q", pk.Evidence)
+			}
 			if got.Park != passNeedsDecision {
 				t.Errorf("item 1 parked %q (%s), want %s", got.Park, got.Reason, passNeedsDecision)
+			}
+			for _, want := range []string{"Next steps: decide R3:", `drover signoff 1 3 "<what was checked>"`} {
+				if !strings.Contains(summary.String(), want) {
+					t.Errorf("drive summary lacks %q:\n%s", want, summary.String())
+				}
 			}
 			raw, _ := os.ReadFile(filepath.Join(dir, "work", "01-first.md"))
 			for _, want := range c.body {
@@ -7999,7 +8020,7 @@ cd "$DROVER_ROOT" && DROVER_TEST_AS_DROVER=1 "$DROVER_TEST_SELF" request-changes
 			if e.Action != "decide_requirement" || e.Policy != string(polOperator) {
 				t.Errorf("needs_operator action %q at %q, want decide_requirement at operator", e.Action, e.Policy)
 			}
-			for _, want := range []string{"R3", "osquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one."} {
+			for _, want := range []string{"R3", reason} {
 				if !strings.Contains(e.Reason, want) {
 					t.Errorf("needs_operator reason lacks %q: %s", want, e.Reason)
 				}

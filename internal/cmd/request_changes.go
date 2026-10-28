@@ -292,43 +292,82 @@ func operatorAgainstBody(it backlog.Item, text string, nums []int) ([]int, error
 }
 
 // operatorReasons is the first sentence of the evidence under each requirement
-// in nums, as "R3: <sentence>", in nums' order. The evidence is the finding a
-// heading naming R<n> opens, or the whole text when it has no heading; a
-// heading with nothing under it is its own reason.
+// in nums, as "R3: <sentence>", in nums' order. The evidence is the section of
+// the first heading naming R<n>: every line below it until a heading at the
+// same depth or shallower, so a subordinate "#### Reason" stays inside the
+// finding it explains. With no heading the whole text is the section. The
+// reason is the section's first prose paragraph, skipping subordinate headings
+// and fenced code, and only a section with no prose falls back to its title.
 func operatorReasons(text string, nums []int) []string {
-	type finding struct {
-		heading string
-		body    []string
-	}
-	var fs []finding
-	var f fence
-	for _, l := range strings.Split(text, "\n") {
-		t := strings.TrimSpace(l)
-		if !f.skip(l) && strings.HasPrefix(t, "#") {
-			fs = append(fs, finding{heading: t})
-			continue
-		}
-		if len(fs) == 0 {
-			fs = append(fs, finding{})
-		}
-		fs[len(fs)-1].body = append(fs[len(fs)-1].body, l)
-	}
+	lines := strings.Split(text, "\n")
+	heads := headings(lines)
 	out := make([]string, 0, len(nums))
 	for _, n := range nums {
 		reason := ""
-		for _, x := range fs {
-			if !namesRequirement(x.heading+"\n"+strings.Join(x.body, "\n"), n, x.heading != "") {
+		if len(heads) == 0 {
+			if namesRequirement(text, n, false) {
+				reason = firstSentence(proseParagraph(lines))
+			}
+		}
+		for i, h := range heads {
+			if !namesRequirement(h.text, n, true) {
 				continue
 			}
-			reason = firstSentence(firstParagraph(strings.Join(x.body, "\n")))
+			end := len(lines)
+			for _, next := range heads[i+1:] {
+				if next.depth <= h.depth {
+					end = next.line
+					break
+				}
+			}
+			reason = firstSentence(proseParagraph(lines[h.line+1 : end]))
 			if reason == "" {
-				reason = strings.TrimSpace(strings.TrimLeft(x.heading, "#"))
+				reason = strings.TrimSpace(strings.TrimLeft(h.text, "#"))
 			}
 			break
 		}
 		out = append(out, "R"+strconv.Itoa(n)+": "+reason)
 	}
 	return out
+}
+
+// heading is one Markdown heading outside a code fence: its line index, its
+// depth in leading #s, and its trimmed text.
+type heading struct {
+	line, depth int
+	text        string
+}
+
+// headings is every heading in lines outside a code fence, in order.
+func headings(lines []string) []heading {
+	var hs []heading
+	var f fence
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if f.skip(l) || !strings.HasPrefix(t, "#") {
+			continue
+		}
+		hs = append(hs, heading{line: i, depth: len(t) - len(strings.TrimLeft(t, "#")), text: t})
+	}
+	return hs
+}
+
+// proseParagraph is the first run of non-blank lines in lines that are neither
+// headings nor fenced code, joined by newlines.
+func proseParagraph(lines []string) string {
+	var out []string
+	var f fence
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if f.skip(l) || strings.HasPrefix(t, "#") || t == "" {
+			if len(out) > 0 {
+				break
+			}
+			continue
+		}
+		out = append(out, t)
+	}
+	return strings.Join(out, "\n")
 }
 
 // namesRequirement reports a finding naming R<n>: its heading when it has one,
