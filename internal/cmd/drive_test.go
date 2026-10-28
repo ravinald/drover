@@ -787,6 +787,127 @@ func TestALateEndRowDoesNotReviveAQueueACompletionEnded(t *testing.T) {
 	}
 }
 
+// The forge accepts --auto on PR 7, and while drive waits on the merged-state
+// query an operator either opens replacement PR 8 or records the item merged,
+// both through the real writers. The queue row drive writes after the query must
+// not restore PR 7 as the item's pull request or revive the ended lifecycle,
+// and reconciliation of the landed branch owes no merged event for PR 7.
+func TestAQueueWrittenAfterTheMergedQueryKeepsWhatTheOperatorRecorded(t *testing.T) {
+	for _, replacement := range []bool{true, false} {
+		t.Run(fmt.Sprintf("replacement=%v", replacement), func(t *testing.T) {
+			s := driveProject(t)
+			it, err := s.item("1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			branch, err := s.branchFor(it)
+			if err != nil {
+				t.Fatal(err)
+			}
+			git(t, s.cfg.Root, "switch", "-q", "-c", branch)
+			write(t, filepath.Join(s.cfg.Root, "shipped.txt"), "work\n")
+			git(t, s.cfg.Root, "add", "shipped.txt")
+			git(t, s.cfg.Root, "commit", "-q", "-m", "work")
+			if err := s.recordHead("1", branch); err != nil {
+				t.Fatal(err)
+			}
+			git(t, s.cfg.Root, "switch", "-q", "main")
+			git(t, s.cfg.Root, "merge", "-q", "--no-ff", "-m", "merge", branch)
+			if err := s.record(ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: ledger.Today()}); err != nil {
+				t.Fatal(err)
+			}
+			s.recordPR("1", branch, 7)
+			operator := *s
+			operator.ledger = &ledger.Ledger{}
+
+			state := t.TempDir()
+			signal, done := filepath.Join(state, "signal"), filepath.Join(state, "done")
+			t.Setenv("QUERY_SIGNAL", signal)
+			t.Setenv("QUERY_DONE", done)
+			ghPath, err := exec.LookPath("gh")
+			if err != nil {
+				t.Fatal(err)
+			}
+			stub(t, ghPath, `#!/bin/sh
+case "$*" in *'--state merged'*)
+  touch "$QUERY_SIGNAL"
+  i=0
+  while [ ! -f "$QUERY_DONE" ]; do
+    i=$((i+1)); [ "$i" -lt 500 ] || exit 1
+    sleep 0.01
+  done
+  ;;
+esac
+echo '[]'
+`)
+			finished := make(chan error, 1)
+			go func() {
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					if _, err := os.Stat(signal); err == nil {
+						break
+					}
+					if time.Now().After(deadline) {
+						finished <- errors.New("the merged-state query never ran")
+						return
+					}
+					time.Sleep(time.Millisecond)
+				}
+				var err error
+				if replacement {
+					operator.recordPR("1", branch, 8)
+				} else {
+					yes := true
+					err = operator.record(ledger.Row{ID: "1", Merged: &yes, Date: ledger.Today()})
+				}
+				if err == nil {
+					err = os.WriteFile(done, nil, 0o600)
+				}
+				finished <- err
+			}()
+
+			d := DriveItem{ID: "1", Branch: branch, PR: 7}
+			got := s.afterAutoMerge(context.Background(), it, &d, "main", time.Time{})
+			if err := <-finished; err != nil {
+				t.Fatal(err)
+			}
+			if got.MergeQueued || got.Merged {
+				t.Errorf("drive reports MergeQueued=%v Merged=%v, want neither: the lifecycle ended during the query", got.MergeQueued, got.Merged)
+			}
+			if replacement && (got.PR != 8 || got.Outcome != outcomeReviewed) {
+				t.Errorf("drive reports %s on PR %d, want %s on the replacement PR 8", got.Outcome, got.PR, outcomeReviewed)
+			}
+			if !replacement && (got.Outcome != outcomeSkipped || got.Park != stateDone) {
+				t.Errorf("drive reports %s %s, want %s %s for an item the operator recorded merged", got.Outcome, got.Park, outcomeSkipped, stateDone)
+			}
+
+			if err := s.reload(); err != nil {
+				t.Fatal(err)
+			}
+			if pr, queued := s.ledger.MergeQueued("1"); queued {
+				t.Errorf("the ledger reads queued on PR %d, want the ended lifecycle left ended", pr)
+			}
+			if current, _ := s.ledger.PR("1"); replacement && current != 8 {
+				t.Errorf("the ledger names PR %d, want the replacement PR 8", current)
+			}
+
+			var out bytes.Buffer
+			events = &eventSink{cfg: s.cfg, notifier: newNotifier(s.cfg), w: &out}
+			activeDrive.Store(&runningDrive{id: "D2"})
+			t.Cleanup(func() { events = nil; activeDrive.Store(nil) })
+			if _, _, err := s.reconcile(); err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range strings.Split(out.String(), "\n") {
+				var e DriveEvent
+				if json.Unmarshal([]byte(line), &e) == nil && e.Event == evMerged {
+					t.Errorf("reconciliation announced the ended queue: id=%s PR=%d drive=%s", e.ID, e.PR, e.Drive)
+				}
+			}
+		})
+	}
+}
+
 // A park naming neither the runner nor the log leaves the next operator to
 // diagnose "it died" from nothing: the cause lives in [runners] and the
 // evidence lives in the log, and a launch that never wrote one is its own

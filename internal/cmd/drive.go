@@ -4281,6 +4281,14 @@ func (s *session) nothingWaits(trunk string) string {
 // recordMergeQueued writes the pull request row saying the forge accepted d's
 // --auto merge. Reconciliation owes a merged event on the strength of it, so a
 // row that will not write is reported: the merge still lands, silently.
+//
+// The row is decided under the ledger's lock, against the file as it stands.
+// The forge accepted --auto before the merged-state query, and an operator can
+// finish the item or open a replacement pull request while that query waits.
+// A row written from what this drive read earlier would then restart a queue
+// that already ended, and name the closed pull request as the item's current
+// one. So the row is skipped when the ledger records the item merged or a
+// different pull request, and d is rewritten to the lifecycle the ledger holds.
 func (s *session) recordMergeQueued(d *DriveItem) {
 	pr := d.PR
 	if pr <= 0 {
@@ -4290,9 +4298,35 @@ func (s *session) recordMergeQueued(d *DriveItem) {
 		fmt.Fprintf(errOut, "warn: %s: the merge is queued on a pull request the ledger does not name, so no drive will report it merged\n", d.ID)
 		return
 	}
-	if err := s.record(ledger.Row{ID: d.ID, Branch: d.Branch, PR: pr, MergeQueued: true, Date: ledger.Today()}); err != nil {
+	path := s.cfg.Abs(s.cfg.Paths.Ledger)
+	row := ledger.Stamp(driveStamp(s.verifyStamp(ledger.Row{ID: d.ID, Branch: d.Branch, PR: pr, MergeQueued: true, Date: ledger.Today()})))
+	current, merged := 0, false
+	wrote, err := ledger.AppendUnless(path, row, func(l *ledger.Ledger) bool {
+		current, _ = l.PR(d.ID)
+		merged = l.State(d.ID).Merged
+		return merged || (current > 0 && current != pr)
+	})
+	switch {
+	case err != nil:
 		fmt.Fprintf(errOut, "warn: %s: the merge is queued on #%d, but the ledger row naming it failed, so no drive will report it merged: %v\n", d.ID, pr, err)
+		return
+	case wrote:
+		s.ledger.Rows = append(s.ledger.Rows, row)
+		appended()
+		return
 	}
+	if l, err := ledger.Load(path); err == nil {
+		s.ledger = l
+	}
+	d.MergeQueued = false
+	if merged {
+		d.Outcome, d.Park = outcomeSkipped, stateDone
+		d.Reason = fmt.Sprintf("merge requested on #%d, and the ledger recorded the item merged before the queue was written; nothing is left queued", pr)
+	} else {
+		d.PR = current
+		d.Reason = fmt.Sprintf("merge requested on #%d, and the ledger recorded #%d for the item before the queue was written; #%d is the one to merge", pr, current, current)
+	}
+	fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
 }
 
 // afterAutoMerge reads what an accepted --auto did. gh returns nil both when
