@@ -270,7 +270,7 @@ func init() {
 		h3 h4 h5 h6 head header hgroup hr html i iframe img input ins kbd label
 		legend li link main map mark math menu meta meter nav noscript object ol
 		optgroup option output p picture pre progress q rp rt ruby s samp script
-		search section select slot small source span strong style sub summary sup
+		search section select selectedcontent slot small source span strong style sub summary sup
 		svg table tbody td template textarea tfoot th thead time title tr track u
 		ul var video wbr
 
