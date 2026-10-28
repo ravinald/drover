@@ -254,6 +254,58 @@ func TestRequestChangesRowRecordsTheRequirementsItsFindingsName(t *testing.T) {
 	}
 }
 
+// --still-open carries a finding over from the previous request only, so it
+// refuses a number that request did not name, and a first request outright.
+// Either refusal writes no changes row; one that holds records the list.
+func TestRequestChangesStillOpenNamesOnlyThePreviousRequestsRequirements(t *testing.T) {
+	t.Cleanup(func() { requestChangesFile, requestChangesStillOpen = "", nil })
+	dir, evidence := capProject(t, 0)
+	write(t, filepath.Join(dir, "work", "01-first.md"), sevenRequirements)
+	send := func(text string, args ...string) error {
+		write(t, evidence, text)
+		requestChangesFile, requestChangesStillOpen = "", nil
+		return execute(t, append([]string{"request-changes", "1", "-f", evidence}, args...)...)
+	}
+
+	err := send("### R3 answers 200\n\nProbe one.\n", "--still-open", "3")
+	if Code(err) != ExitRefused || !strings.Contains(fmt.Sprint(err), "has none") {
+		t.Errorf("--still-open on a first request = %v (exit %d), want exit 3 saying there is no previous one", err, Code(err))
+	}
+	if n := requestChangesRows(t, dir); n != 0 {
+		t.Fatalf("%d changes rows after the refusal, want 0", n)
+	}
+	if err := send("### R3 answers 200\n\nProbe one.\n"); err != nil {
+		t.Fatal(err)
+	}
+	err = send("### R5 answers 200\n\nProbe two.\n", "--still-open", "5")
+	if Code(err) != ExitRefused || !strings.Contains(fmt.Sprint(err), "named [3]") {
+		t.Errorf("--still-open 5 against reqs [3] = %v (exit %d), want exit 3 naming [3]", err, Code(err))
+	}
+	if n := requestChangesRows(t, dir); n != 1 {
+		t.Fatalf("%d changes rows after the refusal, want 1", n)
+	}
+	if err := send("### R3 still answers 200\n\nProbe one again.\n", "--still-open", "3,3"); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var open [][]int
+	for _, r := range l.Rows {
+		if r.ID == "1" && r.Changes != "" {
+			open = append(open, r.StillOpen)
+		}
+	}
+	if len(open) != 2 || open[0] != nil || !slices.Equal(open[1], []int{3}) {
+		t.Errorf("still_open per changes row = %v, want [[] [3]]", open)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "ledger.jsonl"))
+	if n := strings.Count(string(raw), `"still_open"`); n != 1 {
+		t.Errorf("%d rows carry a still_open key, want 1: an empty list is omitted", n)
+	}
+}
+
 // Exit 3 promises the tree and the ledger are untouched, and that is asserted
 // rather than assumed.
 func TestRequestChangesRefusesPastTheLimitAndWritesNothing(t *testing.T) {

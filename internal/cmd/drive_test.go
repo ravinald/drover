@@ -98,6 +98,15 @@ func TestPassResult(t *testing.T) {
 				body: launchBody}, passPassed},
 		{"the same evidence twice",
 			pass{before: passCounts(1, 1, false), after: passCounts(2, 2, true), logged: true, res: ok}, passRepeating},
+		{"one requirement, a different defect each round",
+			pass{before: rowCounts(ledger.Row{ID: "1", Changes: "a", Reqs: []int{2}}),
+				after:  rowCounts(ledger.Row{ID: "1", Changes: "a", Reqs: []int{2}}, ledger.Row{ID: "1", Changes: "b", Reqs: []int{2}}),
+				logged: true, res: ok}, passChangesRequested},
+		{"the reviewer marked one finding still open twice",
+			pass{before: rowCounts(ledger.Row{ID: "1", Changes: "a", Reqs: []int{3}, StillOpen: []int{3}}),
+				after: rowCounts(ledger.Row{ID: "1", Changes: "a", Reqs: []int{3}, StillOpen: []int{3}},
+					ledger.Row{ID: "1", Changes: "b", Reqs: []int{3}, StillOpen: []int{3}}),
+				logged: true, res: ok}, passRepeating},
 		// The park for a ledger that has nothing to compare against: rows written
 		// before launch rows carried a digest.
 		{"an audit, and no body digest anywhere in the item's rows",
@@ -7680,49 +7689,236 @@ func TestACatchUpAtDispatchLeavesAMergeInProgress(t *testing.T) {
 	}
 }
 
-// F148's loop: two send-backs worded differently, each a new digest, both
-// naming R4. The second parks the item rather than spending a third round, and
-// the summary sends the operator to both kept rounds.
-func TestADriveParksOnTheSameRequirementSentBackTwiceInOtherWords(t *testing.T) {
-	isolate(t)
-	ghLog := mergeProject(t)
-	dir, _ := forge(t, ghLog)
-	rev, err := exec.LookPath("rev")
-	if err != nil {
-		t.Fatal(err)
+// What a review loop parks on. Each review appends the next row of its case to
+// the ledger, as request-changes would, and keeps the round it sent back; a
+// refused case answers with the row the cap writes and the audit after it. An equal
+// reqs set is two defects under one requirement, which only max_review_rounds
+// bounds; repeating wants identical evidence or the reviewer saying a finding
+// is still open twice in a row. The fixture's ledger already carries one
+// changes row, so the rounds a detail names start at 2.
+func TestADriveReviewLoopParksOnlyOnWhatTheReviewerSaidRepeated(t *testing.T) {
+	refused := func(reqs string) string {
+		return `{"id":"1","refused":"max_review_rounds","reqs":` + reqs + `,"date":"2026-10-28"}` + "\t" +
+			`{"id":"1","level":"reviewed","code_by":"agent","independent":true,"date":"2026-10-28"}`
 	}
-	reviews := t.TempDir()
-	t.Setenv("DROVER_TEST_REVIEWS", reviews)
-	stub(t, rev, `#!/bin/sh
+	changes := func(digest, reqs, open string) string {
+		row := `{"id":"1","changes":"` + digest + `","reqs":` + reqs
+		if open != "" {
+			row += `,"still_open":` + open
+		}
+		return row + `,"date":"2026-10-28"}`
+	}
+	// The digest of the round the stub keeps for review n, so the kept round is
+	// the request its row records.
+	probe := func(n int) string {
+		return digest(fmt.Sprintf("### R3 probe %d fails\n\nThe refused object answers 200 on probe %d.\n\nA second paragraph.", n, n))
+	}
+	for _, c := range []struct {
+		name   string
+		cap    int
+		rows   []string
+		passes []string
+		park   string
+		detail string
+		reason string
+	}{{
+		name:   "equal reqs, new findings",
+		cap:    2,
+		rows:   []string{changes("a1", "[2]", ""), changes("a2", "[2]", ""), refused("[2]")},
+		passes: []string{passChangesRequested, passChangesRequested, passCapped},
+		park:   passCapped,
+		detail: "max_review_rounds 2 reached; the refused request named R2",
+		reason: "max_review_rounds (2)",
+	}, {
+		name:   "the same finding still open twice",
+		rows:   []string{changes(probe(1), "[3]", ""), changes(probe(2), "[3]", "[3]"), changes(probe(3), "[3]", "[3]")},
+		passes: []string{passChangesRequested, passChangesRequested, passRepeating},
+		park:   passRepeating,
+		detail: "R3 still open after rounds 3 and 4",
+		reason: "the review marked the finding under R3 still open after two runs aimed at it",
+	}, {
+		name:   "identical evidence",
+		rows:   []string{changes("c1", "[4]", ""), changes("c1", "[4]", "")},
+		passes: []string{passChangesRequested, passRepeating},
+		park:   passRepeating,
+		detail: "identical evidence in rounds 2 and 3",
+		reason: "the review sent back evidence identical to the previous round's request for changes",
+	}, {
+		name: "bodega F97",
+		cap:  5,
+		rows: []string{changes("f1", "[1,3,5,6]", ""), changes("f2", "[3]", ""), changes("f3", "[3,5]", ""),
+			changes("f4", "[3]", ""), changes("f5", "[3]", ""), refused("[3]")},
+		passes: []string{passChangesRequested, passChangesRequested, passChangesRequested,
+			passChangesRequested, passChangesRequested, passCapped},
+		park:   passCapped,
+		detail: "max_review_rounds 5 reached; the refused request named R3",
+		reason: "max_review_rounds (5)",
+	}} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			ghLog := mergeProject(t)
+			dir, _ := forge(t, ghLog)
+			if c.cap > 0 {
+				appendConfig(t, dir, fmt.Sprintf("\n[review]\nmax_review_rounds = %d\n", c.cap))
+			}
+			rev, err := exec.LookPath("rev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			reviews := t.TempDir()
+			t.Setenv("DROVER_TEST_REVIEWS", reviews)
+			write(t, filepath.Join(reviews, "rows"), strings.Join(c.rows, "\n")+"\n")
+			stub(t, rev, `#!/bin/sh
 echo '{"type":"result","subtype":"success","is_error":false}'
 n=$(cat "$DROVER_TEST_REVIEWS/1" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "$DROVER_TEST_REVIEWS/1"
-mkdir -p "$DROVER_ROOT/reports"
-printf '# 1 changes %s\n\n### R4 is unmet, wording %s\n' $n $n > "$DROVER_ROOT/reports/01-first.changes-$n.md"
-printf '{"id":"1","changes":"wording-%s","reqs":[4],"date":"2026-10-26"}\n' $n >> "$DROVER_ROOT/ledger.jsonl"
+row=$(sed -n "${n}p" "$DROVER_TEST_REVIEWS/rows")
+case "$row" in *'"changes"'*)
+	mkdir -p "$DROVER_ROOT/reports"
+	printf '# 1 changes %s\n\n### R3 probe %s fails\n\nThe refused object answers 200 on probe %s.\n\nA second paragraph.\n' $n $n $n > "$DROVER_ROOT/reports/01-first.changes-$n.md" ;;
+esac
+printf '%s\n' "$row" | tr '\t' '\n' >> "$DROVER_ROOT/ledger.jsonl"
 `)
 
-	var derr error
-	stderr := captureErr(t, func() { derr = execute(t, "drive", "1") })
-	if n := reviewCount(t, reviews, "1"); n != 2 {
-		t.Errorf("%d reviews ran, want 2: the second names R4 again and parks\n%s", n, stderr)
+			var derr error
+			stderr := captureErr(t, func() { derr = execute(t, "drive", "1") })
+			if n := reviewCount(t, reviews, "1"); n != len(c.rows) {
+				t.Errorf("%d reviews ran, want %d (drive: %v)\n%s", n, len(c.rows), derr, stderr)
+			}
+			l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var passes []string
+			for _, r := range l.Rows {
+				if r.ID == "1" && r.Pass != "" {
+					passes = append(passes, r.Pass)
+				}
+			}
+			if !slices.Equal(passes, c.passes) {
+				t.Errorf("passes = %v, want %v\n%s", passes, c.passes, stderr)
+			}
+			pk, ok := l.Parked("1")
+			if !ok || pk.Park != c.park || pk.Detail != c.detail {
+				t.Errorf("park row = %+v, want %s with detail %q", pk, c.park, c.detail)
+			}
+			if !strings.Contains(stderr, c.reason) {
+				t.Errorf("the drive's output lacks %q:\n%s", c.reason, stderr)
+			}
+			if strings.Contains(stderr, "changed nothing it checks") {
+				t.Errorf("the park claims drover checked the run:\n%s", stderr)
+			}
+			if c.park != passRepeating || len(c.rows) != 3 {
+				return
+			}
+			show := capture(t, func() {
+				if err := execute(t, "show", "1", "--no-tracker"); err != nil {
+					t.Errorf("show: %v", err)
+				}
+			})
+			for _, want := range []string{
+				"repeating (R3 still open after rounds 3 and 4)",
+				"### R3 probe 3 fails",
+				"The refused object answers 200 on probe 3.",
+				"park log   reports/01-first.changes-3.md",
+			} {
+				if !strings.Contains(show, want) {
+					t.Errorf("show lacks %q:\n%s", want, show)
+				}
+			}
+			for _, not := range []string{"A second paragraph.", `"type":"result"`} {
+				if strings.Contains(show, not) {
+					t.Errorf("show carries %q on the park line:\n%s", not, show)
+				}
+			}
+		})
 	}
-	if n := len(implementRows(t, dir, "1")); n != 2 {
-		t.Errorf("%d implement sessions launched, want 2 and no third round\n%s", n, stderr)
-	}
-	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+}
+
+// A repeating park's evidence is the latest request for changes, whatever the
+// kept rounds say. request-changes records its row even when keeping the round
+// failed, so the newest file on disk can be an older request, and a park line
+// citing it would send the operator to a finding the branch already closed.
+// Each review here is the real request-changes, run as drover in a process of
+// its own, with a directory standing where keepRound would write a round.
+func TestARepeatingParkShowsTheLatestRequestWhenItsRoundWasNotKept(t *testing.T) {
+	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _, _, _ := l.Pass("1"); got != passRepeating {
-		t.Errorf("the last pass row reads %q, want %q (drive: %v)\n%s", got, passRepeating, derr, stderr)
-	}
-	for _, want := range []string{
-		"the review sent back R4 unmet twice in a row; the contract may need narrowing, splitting or an override",
-		"drover show 1",
-		filepath.Join("reports", "01-first.changes-1.md") + " and " + filepath.Join("reports", "01-first.changes-2.md"),
+	for _, c := range []struct {
+		name    string
+		blocked string
+		log     string
+	}{
+		{name: "the newest kept round is an older request", blocked: "01-first.changes-3.md", log: "changes-2.md"},
+		{name: "no kept round is readable", blocked: "01-first.changes-1.md"},
 	} {
-		if !strings.Contains(stderr, want) {
-			t.Errorf("the drive's output lacks %q:\n%s", want, stderr)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			ghLog := mergeProject(t)
+			dir, _ := forge(t, ghLog)
+			if err := os.MkdirAll(filepath.Join(dir, "reports", c.blocked), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			rev, err := exec.LookPath("rev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			reviews := t.TempDir()
+			t.Setenv("DROVER_TEST_REVIEWS", reviews)
+			t.Setenv("DROVER_TEST_SELF", self)
+			write(t, filepath.Join(reviews, "ev-1"), "### R1 first probe\n\nInitial finding.\n")
+			write(t, filepath.Join(reviews, "ev-2"), "### R1 second probe\n\nFinding persists after first run.\n")
+			write(t, filepath.Join(reviews, "ev-3"), "### R1 third probe\n\nFinding persists after second run: current evidence.\n\nA second paragraph.\n")
+			stub(t, rev, `#!/bin/sh
+echo '{"type":"result","subtype":"success","is_error":false}'
+n=$(cat "$DROVER_TEST_REVIEWS/1" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "$DROVER_TEST_REVIEWS/1"
+open=""; [ $n -gt 1 ] && open="--still-open 1"
+cd "$DROVER_ROOT" && DROVER_TEST_AS_DROVER=1 "$DROVER_TEST_SELF" request-changes 1 -f "$DROVER_TEST_REVIEWS/ev-$n" $open >> "$DROVER_TEST_REVIEWS/out" 2>&1
+`)
+
+			var derr error
+			stderr := captureErr(t, func() { derr = execute(t, "drive", "1") })
+			out, _ := os.ReadFile(filepath.Join(reviews, "out"))
+			if n := reviewCount(t, reviews, "1"); n != 3 {
+				t.Fatalf("%d reviews ran, want 3 (drive: %v)\n%s\nrequest-changes:\n%s", n, derr, stderr, out)
+			}
+			if !strings.Contains(string(out), "warn: round not kept") {
+				t.Fatalf("no request had its round refused, so the case under test never happened:\n%s", out)
+			}
+			l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pk, ok := l.Parked("1")
+			if !ok || pk.Park != passRepeating || pk.Detail != "R1 still open after rounds 3 and 4" {
+				t.Fatalf("park row = %+v, want repeating on R1\n%s\nrequest-changes:\n%s", pk, stderr, out)
+			}
+			if !strings.Contains(pk.Evidence, "Finding persists after second run: current evidence.") ||
+				strings.Contains(pk.Evidence, "first run.") || strings.Contains(pk.Evidence, "A second paragraph.") {
+				t.Errorf("park evidence = %q, want the third request's first paragraph alone", pk.Evidence)
+			}
+			if pk.Log != "" {
+				t.Errorf("park log = %q, want none: no kept round holds the latest request", pk.Log)
+			}
+			show := capture(t, func() {
+				if err := execute(t, "show", "1", "--no-tracker"); err != nil {
+					t.Errorf("show: %v", err)
+				}
+			})
+			if !strings.Contains(show, "Finding persists after second run: current evidence.") {
+				t.Errorf("show lacks the latest request:\n%s", show)
+			}
+			for _, not := range []string{"Finding persists after first run.", "park log"} {
+				if strings.Contains(show, not) {
+					t.Errorf("show carries %q:\n%s", not, show)
+				}
+			}
+			if c.log != "" {
+				if _, err := os.Stat(filepath.Join(dir, "reports", "01-first."+c.log)); err != nil {
+					t.Errorf("the older round this case depends on was never kept: %v", err)
+				}
+			}
+		})
 	}
 }

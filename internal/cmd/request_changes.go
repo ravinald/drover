@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ var (
 	requestChangesFile      string
 	requestChangesOverLimit bool
 	requestChangesYes       bool
+	requestChangesStillOpen []int
 )
 
 var requestChangesCmd = &cobra.Command{
@@ -71,10 +73,19 @@ The replaced text is not lost. Each round is kept beside the saved reports as
 <stem>-<slug>.changes-N.md, and both prompts list the earlier ones as headlines
 with the path. That list is the only thing that says whether five rounds closed
 five defects or circled one guarantee nobody wrote down: on its own, each round
-reads as a clean fix to a real gap, which is how five of them ship.`,
+reads as a clean fix to a real gap, which is how five of them ship.
+
+--still-open names the requirements whose finding from the previous request
+you reproduced as still open, rather than a new defect found under the same
+number. The changes row records the list as still_open, and drive parks the
+item repeating once two rows in a row mark the same requirement. Only the
+reviewer can tell a carried-over finding from a new one, so drover never
+infers it from the numbers alone. It refuses a number the previous request did
+not name, and refuses the flag on a first request.`,
 	Example: `  drover request-changes B1 -f findings.md
   drover review B1 | ...                       # write the evidence, then:
   cat findings.md | drover request-changes B1 -f -      # or from stdin
+  drover request-changes B1 -f findings.md --still-open 3   # R3's earlier finding reproduced
 
   Nothing enforces that a review requests changes. drover cannot tell a pass that found
   nothing from one that found something and did not write it down, so the
@@ -105,6 +116,11 @@ change the numbered requirements, refuses evidence whose only findings are
 			return Refusal{fmt.Errorf("%s is empty: a request for changes with no evidence tells the next run nothing", requestChangesFile)}
 		}
 
+		stillOpen, err := s.stillOpenAgainstLast(it.ID.Bare(), requestChangesStillOpen)
+		if err != nil {
+			return err
+		}
+
 		// Before the cap, because this refusal is the more specific one: a round
 		// past the cap is the operator's call, and a round on an [operator]
 		// requirement is nobody's.
@@ -128,7 +144,7 @@ change the numbered requirements, refuses evidence whose only findings are
 					// worst case is that ambiguity rather than a request that appears
 					// to have been recorded.
 					if err := s.record(ledger.Row{
-						ID: it.ID.Bare(), Refused: "max_review_rounds", Date: ledger.Today(),
+						ID: it.ID.Bare(), Refused: "max_review_rounds", Reqs: findingRequirements(it, text), Date: ledger.Today(),
 					}); err != nil {
 						fmt.Fprintf(errOut, "warn: the cap refusal went unrecorded: %v\n", err)
 					}
@@ -187,7 +203,8 @@ change the numbered requirements, refuses evidence whose only findings are
 		// write failed is the one wrong direction; a body written whose row
 		// failed reports the error and leaves the body correct.
 		if err := s.record(ledger.Row{
-			ID: it.ID.Bare(), Changes: digest(text), Reqs: findingRequirements(it, text), Date: ledger.Today(),
+			ID: it.ID.Bare(), Changes: digest(text), Reqs: findingRequirements(it, text), StillOpen: stillOpen,
+			Date: ledger.Today(),
 		}); err != nil {
 			return err
 		}
@@ -200,6 +217,39 @@ change the numbered requirements, refuses evidence whose only findings are
 		fmt.Printf("The next run reads it: drover run %s --dry-run\n", it.ID.Bare())
 		return nil
 	},
+}
+
+// stillOpenAgainstLast checks --still-open against the previous changes row and
+// returns the list sorted and deduplicated. A number that row did not send back
+// cannot carry a finding over from it, and a first request has nothing to carry.
+func (s *session) stillOpenAgainstLast(id string, nums []int) ([]int, error) {
+	if len(nums) == 0 {
+		return nil, nil
+	}
+	c := s.ledger.Counts(id)
+	if c.ChangesRequested == 0 {
+		return nil, Refusal{fmt.Errorf("--still-open names a finding from the previous request for changes, and %s has none: "+
+			"drop the flag, every finding in a first request is new", id)}
+	}
+	out := slices.Clone(nums)
+	slices.Sort(out)
+	out = slices.Compact(out)
+	for _, n := range out {
+		if !slices.Contains(c.Reqs, n) {
+			return nil, Refusal{fmt.Errorf("--still-open %d: the previous request for changes on %s named %s, so R%d carries no finding over from it; "+
+				"pass only numbers from that list, and none for a new defect under a requirement", n, id, intList(c.Reqs), n)}
+		}
+	}
+	return out, nil
+}
+
+// intList renders nums as [3, 5], and an empty list as [] rather than nothing.
+func intList(nums []int) string {
+	parts := make([]string, len(nums))
+	for i, n := range nums {
+		parts[i] = strconv.Itoa(n)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
 }
 
 // requirementRef is a requirement named in evidence, as R6.
@@ -643,5 +693,7 @@ func init() {
 		"send it back although the item is at [review] max_review_rounds; the operator's call, refused inside a launched session")
 	requestChangesCmd.Flags().BoolVar(&requestChangesYes, "yes", false,
 		"with --over-limit, write evidence drover warned contradicts the item's requirements")
+	requestChangesCmd.Flags().IntSliceVar(&requestChangesStillOpen, "still-open", nil,
+		"requirement numbers whose finding from the previous request for changes is still open, as N[,N...]; never a new defect under the same requirement")
 	root.AddCommand(requestChangesCmd)
 }
