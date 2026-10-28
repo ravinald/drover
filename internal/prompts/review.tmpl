@@ -423,6 +423,21 @@ Then:
   the numbered requirements, which are the contract, and demotes a top-level
   "N." in your evidence to a bullet, because the body reads one as requirement
   eight.
+{{- if and .Changes (not .Cleared) }}
+
+  Compare each finding you send back against the previous round's block in the
+  `{{ .ChangesHeading }}` section above, and name the requirements whose earlier
+  finding you reproduced as still open:
+
+      drover request-changes {{ .ID }} -f <file> --still-open N[,N...]
+
+  Only for the same finding, reproduced again. A new defect under a requirement
+  the last round also named is not still open, and passing it there parks the
+  item `repeating` once a second round says the same: drover cannot tell the two
+  apart, and reads an equal set of requirement numbers alone as progress, which
+  `[review] max_review_rounds` bounds. `--still-open` refuses a number the last
+  request did not name.
+{{- end }}
 {{- end }}
 {{- if and .Path .Changes (not .Cleared) }}
 

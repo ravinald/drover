@@ -187,7 +187,9 @@ func rowResult(p pass) string {
 	// in for.
 	case p.cap > 0 && p.refused:
 		return passCapped
-	case changes >= 1 && (p.after.RepeatedChanges || p.after.RepeatedRequirements):
+	// Never on an equal reqs set alone: one requirement can yield a new defect
+	// every round while the branch improves, and max_review_rounds bounds that.
+	case changes >= 1 && (p.after.RepeatedChanges || p.after.StillOpen):
 		return passRepeating
 	case changes >= 1:
 		return passChangesRequested
@@ -2228,6 +2230,9 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 		case passStanding:
 			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath)+
 				". "+standingNext(d.ID, s.ledger.State(d.ID).Note))
+		case passRepeating, passCapped:
+			d.setDetail(s.loopDetail(it, v, rp))
+			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath))
 		default:
 			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath))
 		}
@@ -2438,11 +2443,11 @@ func passSentence(v, stage string, p pass, subject, runnerName, logPath string) 
 	case passCapped:
 		return fmt.Sprintf("%s wanted to send work back, and the item is at [review] max_review_rounds (%d)", subject, p.cap)
 	case passRepeating:
-		if !p.after.RepeatedChanges && p.after.RepeatedRequirements {
-			return subject + " sent back " + requirementList(p.after.Reqs) +
-				" unmet twice in a row; the contract may need narrowing, splitting or an override"
+		if !p.after.RepeatedChanges && p.after.StillOpen {
+			return subject + " marked the finding under " + requirementList(p.after.StillOpenReqs) +
+				" still open after two runs aimed at it; the contract may need narrowing, splitting or an override"
 		}
-		return subject + " sent back the same evidence as the request for changes before it, so the last run changed nothing it checks"
+		return subject + " sent back evidence identical to the previous round's request for changes"
 	}
 	return subject + " ended as " + v
 }
@@ -5162,7 +5167,7 @@ func (s *session) requestChangesFromVerify(it backlog.Item, header, out string, 
 	if err := f.Close(); err != nil {
 		return err
 	}
-	requestChangesFile = f.Name()
+	requestChangesFile, requestChangesStillOpen = f.Name(), nil
 	defer func() { requestChangesFile = "" }()
 	// request-changes reports on stdout, and stdout under --json carries one object per
 	// line and nothing else.

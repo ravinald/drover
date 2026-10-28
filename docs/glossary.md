@@ -189,7 +189,7 @@ Drive's reading of one review session, stored as `review_result`.
 | `no_digest`         | An audit, no request-changes, and no body digest to compare against.                   |
 | `body_edited`       | The body changed outside drover after the review launched.                             |
 | `no_record`         | The review recorded nothing.                                                           |
-| `repeating`         | The review returned the same evidence twice.                                           |
+| `repeating`         | The review returned the same evidence twice, or marked one finding still open twice.   |
 | `at_limit`          | The review wanted to send work back and `max_review_rounds` refused it.                |
 | `died`              | The session left no terminal event.                                                    |
 | `unreadable`        | The session left a stream drover has no schema for.                                    |

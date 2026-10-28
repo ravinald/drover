@@ -8,6 +8,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/gitcmd"
 	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/runlog"
@@ -274,6 +275,61 @@ func (s *session) recordPark(d *DriveItem, last *runner.Outcome, lastErr error) 
 	if err := s.record(row); err != nil {
 		fmt.Fprintf(errOut, "  · %s: the ledger refused the park row (%v); status will read the item as implemented\n", d.ID, err)
 	}
+}
+
+// loopDetail is the detail of a park the review loop ended on, repeating or
+// at_limit: what repeated or what the cap turned away, and as evidence the
+// first paragraph of the last request for changes drover kept. The session
+// finished cleanly, so its log tail would explain nothing.
+func (s *session) loopDetail(it backlog.Item, v string, p pass) parkDetail {
+	c := p.after
+	n := c.ChangesRequested
+	var pd parkDetail
+	switch {
+	case v == passCapped:
+		named := "no requirement"
+		if len(c.RefusedReqs) > 0 {
+			named = requirementList(c.RefusedReqs)
+		}
+		pd.Detail = fmt.Sprintf("max_review_rounds %d reached; the refused request named %s", p.cap, named)
+	case c.RepeatedChanges:
+		pd.Detail = fmt.Sprintf("identical evidence in rounds %d and %d", n-1, n)
+	default:
+		pd.Detail = fmt.Sprintf("%s still open after rounds %d and %d", requirementList(c.StillOpenReqs), n-1, n)
+	}
+	if rounds, err := s.rounds(it); err == nil && len(rounds) > 0 {
+		last := rounds[len(rounds)-1].Path
+		pd.Evidence, pd.Log = firstParagraph(s.cfg.Abs(last)), last
+	}
+	return pd
+}
+
+// firstParagraph is a kept round's evidence up to its first blank line after
+// prose, so a finding that opens on its heading carries the sentence under it.
+// drover's own header line is skipped.
+func firstParagraph(path string) string {
+	raw, err := os.ReadFile(path) // #nosec G304 — drover's own reports directory
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(raw), "\n")
+	if len(lines) > 0 && strings.HasPrefix(lines[0], "# ") {
+		lines = lines[1:]
+	}
+	var out []string
+	prose := false
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			if prose {
+				break
+			}
+			continue
+		}
+		out = append(out, t)
+		prose = prose || !strings.HasPrefix(t, "#")
+	}
+	return strings.Join(out, "\n")
 }
 
 // announcePark says a park on stderr the moment it happens. driveSummary says
