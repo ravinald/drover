@@ -369,7 +369,23 @@ An object. `items` is one entry per item in backlog order; merged rows are absen
       "implementer": "claude",
       "runs": 1,
       "planned": true,
-      "drive": "D2"
+      "drive": "D2",
+      "origin": {
+        "unrecorded": false,
+        "text": "operator intake #44",
+        "cmd": "intake",
+        "actor": "operator",
+        "issue": 44
+      },
+      "created": { "unrecorded": false, "at": "2026-10-27T09:21:04-07:00", "source": "origin" },
+      "edited": {
+        "unrecorded": false,
+        "at": "2026-10-27T10:02:11-07:00",
+        "source": "body",
+        "cmd": "request-changes",
+        "actor": "operator",
+        "drive": "D2"
+      }
     }
   ],
   "lease": {
@@ -408,6 +424,14 @@ An object. `items` is one entry per item in backlog order; merged rows are absen
   ]
 }
 ```
+
+`origin`, `created` and `edited` are on every item, an unreadable one included, read under the id its filename names from the ledger and the file's mtime; they are the table's second line as data. Each carries `unrecorded`, true for what the ledger never wrote down, so a consumer tells an item made before drover recorded origins from one made by the operator.
+
+- `origin` is the item's [origin row](#writing-to-the-ledger-without-the-binary): `cmd`, `actor`, `agent`, `session`, `found_in`, `issue` and `split_from`, each absent when empty. `drive`, `stage` and `of` are the stage row the origin's session resolves to, absent when it resolves to none. `text` is the phrase the table prints (`operator new`, `claude new`, `operator intake #44`, `operator split of E84`, `D20 review of B104`, `supervisor new`, `agent new`, a trailing `← B104` for a `found_in` that is not the resolved item), and `unrecorded` alone with `text` is all an item with no origin row carries.
+- `created.at` is RFC 3339, or a bare date for a row that carries no `ts`. `source` is `origin`, or `ledger` for an unrecorded item: the earliest ledger row naming it, which bounds the creation from above and prints as `≤` in the table. An unrecorded item no row names has no `at`.
+- `edited.source` is `body` (the latest row carrying the body's digest, which still matches the file, with its `cmd`, `actor`, `agent` and `drive`; `unrecorded` when the row predates attribution), `origin` (no digest row yet, so the creation is the last write drover saw), `hand` (the file no longer matches the latest digest: `by_hand` is true and `at` is the file's mtime) or `mtime` (no row at all: `unrecorded`, `at` the mtime).
+
+`--since` keeps the same items in `items` that it keeps in the table: those whose `created.at` or `edited.at` is at or after it. An unreadable item is held to the same cut rather than kept unconditionally, as `--sev` keeps it.
 
 `lease` is [the checkout lease](#the-checkout-lease), present only while another drover command holds this tree, and `lease_error` only when drover could not name the holder: a degraded read says what it could not ask rather than reporting nobody. That covers a lease drover could not read at all and a holder that has the tree and has not written its account yet, which is why the two never appear together: one of them is always a holder drover cannot describe. `item` is absent on a lease taken over a queue rather than for one id, which is every `drive`. A `drive` names its queue instead: `queue` is the ids it holds waiting, in dispatch order, `running` the ids it has dispatched and not yet heard back from, and `jobs` its `--jobs`. `waiting` is each queued id it holds for a dep that parked for the operator, as `{ "id": "5", "on": "4" }`, and `skipped` each id it took off its queue without attempting, as `{ "id": "6", "reason": "blocked by 4" }`; both are absent while empty. It rewrites all five in the lease file as items are dispatched and finish, so another process reads them without asking the drive. A stopped drive dispatches nothing more and publishes an empty `queue`. `paused` is a drive holding its items for a resume, and `holds` each running item it holds at a stage boundary: the item, the stage it goes on to (`at`) and the verify command the stage before was told to pass. A `running` id with no hold is still inside a session, a verify command or the trunk stage. `reexec` names the binary a resumed drive re-executes onto once every running item holds, `reexec_waiting` is the line naming the running items it has waited on for more than a minute, and `handoff` is what it leaves there for the new process, present only across the `exec`. `control`, `answered` and `refused` carry [`--pause` and `--resume`](#pausing-a-drive) between processes. `config_sha256` is the SHA-256 of the `.drover.toml` the drive runs under, written when it takes the lease and again by each resume that takes, and `config_resumed` says a resume wrote it; when the file on disk no longer matches, the table prints `config changed since this drive started; --pause, then --resume, applies it` (`resumed`, after a resume) under the `▸ also here:` line, and the running drive in `drives` carries `"config_changed": true`. A lease an older binary wrote has no `config_sha256` and reports nothing. `closed` is a drive that takes no more ids: it stopped, or its queue ran out and it is exiting. `drive --enqueue` writes into `queue` while it is absent, and the drive takes what was appended at its next dispatch. `drive` is the running drive's id and `label` its `--label`, both written when the drive takes the lease, before reconciliation, and absent on every other holder. The table prints them after the command on the `▸ also here:` line: `drover drive D2 "night run"`, followed by `paused` while it is (`pausing` while an item is still inside a stage, `pausing to re-exec` with a `waiting:` line carrying `reexec_waiting` once that is set), and a `held:` line under it naming each held item and the stage it holds before.
 
@@ -1541,14 +1565,19 @@ A dep's `state` is what drover found behind the id, and it is the field to read 
 
 `modified` is the body file's mtime as a `YYYY-MM-DD` date. The file system always knows it, so the key is always there; drover keeps no `modified:` frontmatter, which a hand edit would silently leave stale.
 
-`created` is the date of the commit that added the body, and it is absent when there is no commit to read: a project that keeps its bodies outside git, or one declaring `[git] enabled = false`. `created_unknown` then carries the reason, so a consumer reads a missing date as a question nobody could ask rather than as a body with no history. A backlog under a gitignored `.drover/` is that case: `drover show B9 --json` there reports the reason rather than a zero date.
+`origin`, `created` and `edited` are the objects [`status --json`](#status---json) carries, with one difference in `created`: an item with no origin row falls back to the date of the commit that added the body, `source` `git`, rather than to the earliest ledger row. `created` is `{"unrecorded": true}`, with no `at` and no `source`, when there is neither, on a project that keeps its bodies outside git or declares `[git] enabled = false`, and `created_unknown` then carries the reason, so a consumer reads a missing date as a question nobody could ask rather than as a body with no history. A backlog under a gitignored `.drover/` is that case: `drover show B9 --json` there reports the reason rather than a zero date.
 
 ```json
 {
   "modified": "2026-08-27",
-  "created_unknown": ".drover/backlog/B09-login-redirect-loops.md is not tracked in the work tree"
+  "origin": { "unrecorded": true, "text": "unrecorded" },
+  "created": { "unrecorded": true },
+  "created_unknown": ".drover/backlog/B09-login-redirect-loops.md is not tracked in the work tree",
+  "edited": { "unrecorded": true, "at": "2026-08-27T14:02:11-07:00", "source": "mtime" }
 }
 ```
+
+`show` prints the same answers beside its dates: `modified   2026-08-27  edited accept · operator` and `created    2026-08-26  origin operator new`.
 
 ### `unaudited --json`
 

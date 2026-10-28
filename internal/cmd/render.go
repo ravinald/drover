@@ -154,6 +154,7 @@ func median(ds []time.Duration) time.Duration {
 func (s *session) statusReport(scoped, tracker bool, now time.Time) StatusReport {
 	rows := s.rows()
 	s.attachTimes(rows)
+	s.attachProvenance(rows)
 	if scoped && statusBySev {
 		rows = bySeverity(rows)
 	}
@@ -227,6 +228,12 @@ func localize(rows []Row, report *StatusReport, loc *time.Location) {
 		in(&rows[i].Finished)
 		in(&rows[i].StageStarted)
 		in(&rows[i].ETA)
+		if c := rows[i].Created; c != nil {
+			in(&c.At)
+		}
+		if e := rows[i].Edited; e != nil {
+			in(&e.At)
+		}
 	}
 	if report.Lease != nil {
 		in(&report.Lease.Started)
