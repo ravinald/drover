@@ -10,6 +10,7 @@ import (
 
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/ledger"
+	"github.com/ravinald/drover/internal/runner"
 	"github.com/spf13/cobra"
 )
 
@@ -142,7 +143,7 @@ drover launched, supervisor included.`,
 		if err := os.WriteFile(it.Path, written, 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", it.Path, err)
 		}
-		if err := s.wroteBody(it.ID.Bare(), written); err != nil {
+		if err := s.wroteBody(it.ID.Bare(), "amend", written); err != nil {
 			return err
 		}
 		keptRel := rel(s.cfg.Root, keptAt)
@@ -209,7 +210,13 @@ supervisor included.`,
 		if bodyMatches(s.ledger.Counts(it.ID.Bare()).LastBody, sum, digestBytes(b)) {
 			return Refusal{fmt.Errorf("%s's body matches the digest drover last recorded: there is no hand edit to record", it.ID.Bare())}
 		}
-		if err := s.record(ledger.Row{ID: it.ID.Bare(), Body: sum, Note: reason, Date: ledger.Today()}); err != nil {
+		// touch certifies an operator's hand edit, so the row names the
+		// operator whoever typed the command.
+		by := s.author("touch")
+		by.Actor = runner.ActorOperator
+		row := ledger.BodyRow(it.ID.Bare(), sum, by)
+		row.Note = reason
+		if err := s.record(row); err != nil {
 			return err
 		}
 		fmt.Printf("recorded %s's body as it stands (%s): %s\n", it.ID.Bare(), sum, reason)

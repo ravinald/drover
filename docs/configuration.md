@@ -596,12 +596,14 @@ The escape is `drover request-changes --over-limit`, and it refuses inside a ses
 
 It carries three exit codes rather than `merge_check`'s two, because a red check means opposite things depending on what reddened it:
 
-| Exit | Means                                                    | drive does                                                                              |
-| ---- | -------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `0`  | green                                                    | open the pull request, then merge                                                       |
-| `1`  | red, and this diff caused it                             | sends the merge gate's output back to the branch and re-runs                            |
-| `2`  | red, and the code did not cause it                       | stops the whole drive                                                                   |
-| `4`  | the head is behind the trunk, and nothing else was asked | updates the branch and runs the merge gate once more; a second `4` parks `gate_refused` |
+| Exit | Means                                                    | drive does                                                                                                                                 |
+| ---- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `0`  | green                                                    | open the pull request, then merge                                                                                                          |
+| `1`  | red, and this diff caused it                             | checks the head holds the trunk, then sends the merge gate's output back to the branch and re-runs; a head behind the trunk is read as `4` |
+| `2`  | red, and the code did not cause it                       | stops the whole drive                                                                                                                      |
+| `4`  | the head is behind the trunk, and nothing else was asked | updates the branch and runs the merge gate once more; a second `4` parks `gate_refused`, and so does a `1` on a head still behind          |
+
+drive does not take an exit `1` on trust. Before it sends anything back it fetches the trunk and asks git whether `origin/<trunk>` is an ancestor of the head the merge gate read; when it is not, the refusal is read as `4`, and the stderr line and any park reason say the merge gate exited 1 on a head behind the trunk. A fetch that fails, or a head that holds the trunk, leaves the `1` standing as the diff's. drive also fetches just before every merge gate run and updates a branch the trunk moved past while its checks settled, which spends the one retry; a trunk that moves again once the retry is spent parks `gate_refused` without the merge gate being run on a head already known to be behind. At a `retry_moved_trunk` policy other than `auto`, a behind answer after that update still parks with the hand-off. Exit `4` stays the faster answer, since it skips the ancestry read, but it is no longer the only way a merge gate can say the branch is merely behind.
 
 drive also reads the merge gate once after a merge it did not make itself: when the forge merges an `--auto` request on the spot, the merge gate runs on the merged head, and anything but `0` stops the drive with the item merged and not finished. A merged head cannot be updated, and after a squash or a rebase it is never an ancestor of the trunk, so a merge gate that answers `4` from an ancestry test would refuse every one. drive sets `DROVER_GATE_MERGED=1` on that read and leaves it empty on every other, and a merge gate must not exit `4` under it. A `4` there still stops the drive, with a reason naming the variable, because the merge gate never said whether the checks passed. `scripts/merge-gate.sh` skips its behind check under the variable, and also when the head is already reachable from the trunk.
 
@@ -682,14 +684,17 @@ The text goes in as written, with no template processing, so a `{{` renders as `
 
 ## `[intake]`
 
-| Key            | Meaning                                                                                                                           |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `stop_marker`  | Text that holds a scaffolded item inert until a human writes its requirements.                                                    |
-| `hold_markers` | Texts that say a body is not ready to accept. Default `["OPERATOR DECISION PENDING", "BEFORE ACCEPT"]`; `[]` turns the check off. |
+| Key            | Meaning                                                                                                                             |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `stop_marker`  | Text that holds a scaffolded item inert until a human writes its requirements.                                                      |
+| `hold_markers` | Texts that say a body is not ready to accept. Default `["OPERATOR DECISION PENDING", "BEFORE ACCEPT"]`; `[]` turns the check off.   |
+| `closes`       | `"issue"` makes `drover intake` write the issue number into `closes` as well as `issue`. Unset (the default) leaves `closes` empty. |
 
 drover refuses to launch or preview an item whose body carries this text on a line of its own, and `status` shows it as `[?]`: `scaffold · needs requirements` while no numbered requirement is written, `drafted · N reqs · drover accept <id>` once the list is there and waits on accept. The match is a whole line outside any fenced block, never a substring: a body quoting the marker in a config sample is somebody's accepted contract, and matching the quote would make `run` refuse to preview it.
 
 `drover accept <id>` removes the line and `drover unaccept <id>` restores it. Both refuse a project that leaves this key unset, because neither can tell a scaffold from a contract there.
+
+`finish` closes only what an item's `closes` key names and never falls back to `issue`, so an item taken in from an issue closes nothing unless somebody names it there. Set `closes = "issue"` when most items fix the issue they came from: the scaffold then names the number in both keys, and `finish` closes the issue once the item merges. Whoever writes the requirements removes the number from `closes` by hand when the item is one half of a split, or a partial fix that should leave the issue open for the rest. The setting needs `closes` declared under `[frontmatter]`, and load refuses it otherwise, naming the `optional` line to add it to. Any value other than `"issue"` or unset is a load error.
 
 `accept` refuses, unless given `--yes`, a body with a line containing one of `hold_markers` outside a fenced block or a code span holding a space, and names the line. The match is a substring, so `OPERATOR STEP BEFORE ACCEPT: measure X` is a hold under the default. `drover check` reports `HOLD MARKER` for one in an accepted, unmerged item. See [What accept checks](lifecycle.md#what-accept-checks).
 

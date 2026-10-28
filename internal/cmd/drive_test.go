@@ -61,7 +61,7 @@ const (
 )
 
 var (
-	reviewLaunch = ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: launchBody, Date: "2026-10-01"}
+	reviewLaunch = ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: launchBody, Date: "2026-10-01"}
 	reviewAudit  = ledger.Row{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-01"}
 	reviewClear  = ledger.Row{ID: "1", Body: guardBody, Cleared: true, Date: "2026-10-01"}
 )
@@ -98,6 +98,15 @@ func TestPassResult(t *testing.T) {
 				body: launchBody}, passPassed},
 		{"the same evidence twice",
 			pass{before: passCounts(1, 1, false), after: passCounts(2, 2, true), logged: true, res: ok}, passRepeating},
+		{"one requirement, a different defect each round",
+			pass{before: rowCounts(ledger.Row{ID: "1", Changes: "a", Reqs: []int{2}}),
+				after:  rowCounts(ledger.Row{ID: "1", Changes: "a", Reqs: []int{2}}, ledger.Row{ID: "1", Changes: "b", Reqs: []int{2}}),
+				logged: true, res: ok}, passChangesRequested},
+		{"the reviewer marked one finding still open twice",
+			pass{before: rowCounts(ledger.Row{ID: "1", Changes: "a", Reqs: []int{3}, StillOpen: []int{3}}),
+				after: rowCounts(ledger.Row{ID: "1", Changes: "a", Reqs: []int{3}, StillOpen: []int{3}},
+					ledger.Row{ID: "1", Changes: "b", Reqs: []int{3}, StillOpen: []int{3}}),
+				logged: true, res: ok}, passRepeating},
 		// The park for a ledger that has nothing to compare against: rows written
 		// before launch rows carried a digest.
 		{"an audit, and no body digest anywhere in the item's rows",
@@ -1542,7 +1551,7 @@ func TestOpenPRWithoutADriveNamesTheAuthorityThatAnswered(t *testing.T) {
 		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Date: "2026-09-18"},
 		{ID: "1", Changes: "abc123", Date: "2026-09-18"},
 		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-09-19"},
-		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: bodyAtLaunch, Date: "2026-09-20"},
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: bodyAtLaunch, Date: "2026-09-20"},
 		{ID: "1", Level: ledger.LevelReviewed, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-09-20"},
 	} {
 		if err := ledger.Append(path, stamp(t, s, row)); err != nil {
@@ -1602,7 +1611,7 @@ func unrequestedPassRows() []ledger.Row {
 		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Date: "2026-09-22"},
 		{ID: "1", Changes: "second", Date: "2026-09-22"},
 		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-09-22"},
-		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: bodyAtLaunch, Date: "2026-09-22"},
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: bodyAtLaunch, Date: "2026-09-22"},
 		{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-09-22"},
 	}
 }
@@ -1706,7 +1715,7 @@ func TestAStalePassHandsTheFallbackItsOwnRefusals(t *testing.T) {
 		name: "the body changed outside drover",
 		want: "changed outside drover",
 		rows: append(unrequestedPassRows()[:4],
-			ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: "0123456789ab", Date: "2026-09-22"},
+			ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: "0123456789ab", Date: "2026-09-22"},
 			ledger.Row{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-09-22"}),
 	}} {
 		t.Run(c.name, func(t *testing.T) {
@@ -1732,7 +1741,7 @@ func TestAStalePassHandsTheFallbackItsOwnRefusals(t *testing.T) {
 func TestACleanFirstReviewOpensAPullRequestWithoutForce(t *testing.T) {
 	out, err := reviewPassedOver(t, "", []ledger.Row{
 		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-10-01"},
-		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: bodyAtLaunch, Date: "2026-10-01"},
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: bodyAtLaunch, Date: "2026-10-01"},
 		{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-01"},
 	})
 	if err != nil {
@@ -2776,7 +2785,7 @@ func mergedLaunched(t *testing.T, s *session, id, branch string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.launched(it, ledger.StageImplement, "impl"); err != nil {
+	if _, err := s.launched(it, "run", ledger.StageImplement, "impl"); err != nil {
 		t.Fatal(err)
 	}
 	// Recorded before the merge, as a drive records it before the push: after the
@@ -3990,7 +3999,7 @@ func TestReconciliationRefusesAMergedBranchThatNeverHeldACommit(t *testing.T) {
 	}
 	// The branch a killed run leaves: created from the trunk, never committed to.
 	git(t, dir, "branch", branch, "main")
-	if _, err := s.launched(it, ledger.StageImplement, "impl"); err != nil {
+	if _, err := s.launched(it, "run", ledger.StageImplement, "impl"); err != nil {
 		t.Fatal(err)
 	}
 	// The trunk moves on, so the branch is behind it rather than level with it and
@@ -4096,7 +4105,8 @@ func TestRecordHeadWritesOnlyForABranchOffTheTrunk(t *testing.T) {
 // DROVER_TEST_GATE_REFUSE_FROM refuses every gate run from that zero-based
 // count on, which lets the first gate pass and the one at the merge refuse.
 // DROVER_TEST_GATE_BEHIND makes that many first gate runs exit 4, a head
-// behind the trunk. DROVER_TEST_GATE_ANCESTRY makes every gate run exit 4 when
+// behind the trunk, and DROVER_TEST_GATE_STALE makes that many exit 1 saying
+// so, as a gate that never learned exit 4 does. DROVER_TEST_GATE_ANCESTRY makes every gate run exit 4 when
 // origin's main is not an ancestor of the head, the check merge-gate.sh makes,
 // skipped under DROVER_GATE_MERGED=1 unless the value is "ignore". Each run
 // appends the DROVER_GATE_MERGED it saw to merge-gate.merged. DROVER_TEST_OPEN names
@@ -4187,6 +4197,10 @@ case "${DROVER_TEST_GATE_ANCESTRY:-}:${DROVER_GATE_MERGED:-}" in
       exit 4
     fi ;;
 esac
+if [ -n "${DROVER_TEST_GATE_STALE:-}" ] && [ "$n" -lt "$DROVER_TEST_GATE_STALE" ]; then
+  echo "merge-gate: main has moved 9 commit(s) since $1 was checked. Refusing." >&2
+  exit 1
+fi
 if [ -n "${DROVER_TEST_GATE_BEHIND:-}" ] && [ "$n" -lt "$DROVER_TEST_GATE_BEHIND" ]; then
   echo "merge-gate: $1 is behind origin/main" >&2
   exit 4
@@ -5374,6 +5388,71 @@ func TestATrunkConflictParksAndForcesNothing(t *testing.T) {
 	if len(gateLog(t, dir)) != 0 {
 		t.Error("the merge gate ran over a branch that never updated")
 	}
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Counts("1").ByStage[ledger.StageReview] == 0 {
+		t.Fatal("no review session ran before the conflict, so its log could not have been mistaken for the evidence")
+	}
+	conflictParkRow(t, dir, "implemented.txt")
+}
+
+// The trunk can move between a merge that conflicted and the read of its
+// evidence, as a sibling's fetch moves it. The evidence describes the merge that
+// failed, not a merge against wherever origin's trunk points by then.
+func TestATrunkConflictAfterReviewKeepsTheFailedMergeAsEvidence(t *testing.T) {
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, remote := forge(t, ghLog)
+	moveTrunk(t, remote, "implemented.txt", "theirs")
+	trunkResolvesOnAbort(t)
+
+	rows := driveAll(t)
+	if rows[0].Park != parkTrunkConflict {
+		t.Fatalf("item 1 is %q/%q (%s), want parked %q", rows[0].Outcome, rows[0].Park, rows[0].Reason, parkTrunkConflict)
+	}
+	conflictParkRow(t, dir, "implemented.txt")
+}
+
+// trunkResolvesOnAbort makes every merge --abort move origin/main, in the tree
+// it ran in, to a commit resolving the aborted merge: after it, merge-tree
+// against origin/main by name finds no conflict at all.
+func trunkResolvesOnAbort(t *testing.T) {
+	t.Helper()
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DROVER_TEST_REAL_GIT", gitBin)
+	bin := t.TempDir()
+	stub(t, filepath.Join(bin, "git"), `#!/bin/sh
+if [ "$1" = -C ] && [ "$3" = merge ] && [ "$4" = --abort ]; then
+	"$DROVER_TEST_REAL_GIT" "$@" || exit $?
+	dir=$2
+	resolved=$("$DROVER_TEST_REAL_GIT" -C "$dir" commit-tree "HEAD^{tree}" -p refs/remotes/origin/main -p HEAD -m resolved) || exit $?
+	exec "$DROVER_TEST_REAL_GIT" -C "$dir" update-ref refs/remotes/origin/main "$resolved"
+fi
+exec "$DROVER_TEST_REAL_GIT" "$@"
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// conflictParkRow asserts item 1's ledger park row names the conflicted file as its
+// detail, carries merge-tree's account of it, and points at no session log.
+func conflictParkRow(t *testing.T, dir, path string) {
+	t.Helper()
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pk, ok := l.Parked("1")
+	if !ok || pk.Park != parkTrunkConflict || pk.Detail != path || pk.Log != "" {
+		t.Fatalf("ledger park row = %+v (found %v), want %s (%s) and no log", pk, ok, parkTrunkConflict, path)
+	}
+	if !strings.Contains(pk.Evidence, "CONFLICT") || !strings.Contains(pk.Evidence, path) {
+		t.Errorf("evidence %q is not merge-tree's account of %s", pk.Evidence, path)
+	}
 }
 
 // --follow appends what a finish unblocked. Item 3 depends on item 1, so it is
@@ -5653,7 +5732,7 @@ func TestAnExactBytesDigestStillMatches(t *testing.T) {
 	}
 	exact := digestBytes(raw)
 
-	launch := ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: exact, Date: "2026-10-01"}
+	launch := ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: exact, Date: "2026-10-01"}
 	audit := ledger.Row{ID: "1", Level: ledger.LevelReviewed, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-01"}
 	p := pass{before: rowCounts(), after: rowCounts(launch, audit), logged: true, res: ok}
 	p.readBody(it.Path)
@@ -6375,6 +6454,231 @@ func TestAGateSayingBehindIsRetriedOnceAfterACatchUp(t *testing.T) {
 				t.Errorf("%d pull requests opened over a merge gate that never passed", n)
 			}
 		})
+	}
+}
+
+// gateDrive runs drive over item 1 and splits what it printed into its events
+// and the item's account.
+func gateDrive(t *testing.T) (got DriveItem, evs []DriveEvent) {
+	t.Helper()
+	out := capture(t, func() {
+		if err := execute(t, "drive", "--json", "--events", "1"); err != nil {
+			t.Fatalf("drive: %v", err)
+		}
+	})
+	for _, line := range strings.Split(out, "\n") {
+		var e DriveEvent
+		if json.Unmarshal([]byte(line), &e) == nil && e.Event != "" {
+			evs = append(evs, e)
+			continue
+		}
+		_ = json.Unmarshal([]byte(line), &got)
+	}
+	return got, evs
+}
+
+// changesRows counts the changes rows drive wrote for id, past the one
+// mergeProject seeds.
+func changesRows(t *testing.T, dir, id string) int {
+	t.Helper()
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, r := range l.Rows {
+		if r.ID == id && r.Changes != "" && r.Changes != "earlier" {
+			n++
+		}
+	}
+	return n
+}
+
+// A gate that refuses a moved trunk with exit 1 rather than 4 is reporting the
+// trunk, not the diff, and drive asks git before believing it: a head the trunk
+// moved past is caught up and gated again, a caught-up head is still sent back,
+// and a policy short of auto parks the reread refusal as it would an exit 4.
+func TestAGateExitingOneOnAHeadBehindTheTrunkIsReadAsBehind(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		moved    bool
+		policy   string
+		park     string
+		rounds   int
+		changes  int
+		gateRuns int
+	}{
+		{"behind is caught up and gated again", true, "", "", 0, 0, 2},
+		{"caught up is still sent back", false, "", parkGateRefused, 1, 1, 1},
+		{"operator parks with the hand-off", true, "operator", parkGateRefused, 0, 0, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			ghLog := mergeProject(t)
+			dir, remote := forge(t, ghLog)
+			if c.policy != "" {
+				appendConfig(t, dir, "\n[supervise]\nretry_moved_trunk = \""+c.policy+"\"\n")
+			}
+			t.Setenv("DROVER_TEST_GATE_STALE", "1")
+			if c.moved {
+				moveTrunkAfter(t, remote, "merge-gate", "*", "elsewhere.txt", "theirs")
+			}
+
+			got, evs := gateDrive(t)
+			if n := len(gateLog(t, dir)); n != c.gateRuns {
+				t.Errorf("[drive] merge_gate ran %d times, want %d", n, c.gateRuns)
+			}
+			if got.Park != c.park || got.Rounds != c.rounds {
+				t.Fatalf("item 1 parked %q with rounds=%d (%s), want %q and %d", got.Park, got.Rounds, got.Reason, c.park, c.rounds)
+			}
+			if n := changesRows(t, dir, "1"); n != c.changes {
+				t.Errorf("%d changes rows for item 1, want %d", n, c.changes)
+			}
+			const read = "exit 1 on a head behind main, which drover read as behind"
+			switch {
+			case c.park == "":
+				git(t, dir, "fetch", "-q", "origin")
+				moved := git(t, dir, "rev-parse", "origin/main")
+				if !got.Merged || got.CatchUp == nil || got.CatchUp.To != moved {
+					t.Errorf("item 1 is %q with update_branch %+v (%s), want the retry's merge of %s merged",
+						got.Outcome, got.CatchUp, got.Reason, moved)
+				}
+			case c.policy != "":
+				if !strings.Contains(got.Reason, read) {
+					t.Errorf("reason %q does not say drover read the exit 1 as behind", got.Reason)
+				}
+				i := slices.IndexFunc(evs, func(e DriveEvent) bool { return e.Event == evNeedsOperator && e.ID == "1" })
+				if i < 0 || evs[i].Action != "retry_moved_trunk" || !strings.Contains(evs[i].Reason, read) {
+					t.Errorf("no needs_operator for retry_moved_trunk naming the reread exit 1 in %+v", evs)
+				}
+			default:
+				if strings.Contains(got.Reason, read) {
+					t.Errorf("reason %q reads a caught-up head as behind", got.Reason)
+				}
+			}
+		})
+	}
+}
+
+// The head's checks can take most of an hour after the catch-up, so the trunk
+// is fetched again just before the gate reads the head. A trunk that moved in
+// that wait is caught up first, and a gate that checks ancestry is asked once.
+func TestTheTrunkIsCaughtUpAgainWhenItMovesBeforeTheGate(t *testing.T) {
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, remote := forge(t, ghLog)
+	t.Setenv("DROVER_TEST_GATE_ANCESTRY", "on")
+	moveTrunkAfter(t, remote, "gh", "api*check-runs*", "elsewhere.txt", "theirs")
+
+	got, evs := gateDrive(t)
+	var steps []string
+	for _, e := range evs {
+		if e.Event == evStage && e.ID == "1" && e.Result == "" && (e.Stage == stageGate || e.Stage == stageCatchUp) {
+			steps = append(steps, e.Stage)
+		}
+	}
+	if want := []string{stageCatchUp, stageCatchUp, stageGate}; !slices.Equal(steps[:min(3, len(steps))], want) {
+		t.Errorf("the trunk steps ran %q, want %q first", steps, want)
+	}
+	if n := len(gateLog(t, dir)); n != 1 {
+		t.Errorf("[drive] merge_gate ran %d times, want once, on the head caught up again", n)
+	}
+	git(t, dir, "fetch", "-q", "origin")
+	moved := git(t, dir, "rev-parse", "origin/main")
+	if !got.Merged || got.CatchUp == nil || got.CatchUp.To != moved {
+		t.Errorf("item 1 is %q with update_branch %+v (%s), want %s merged in before the gate", got.Outcome, got.CatchUp, got.Reason, moved)
+	}
+}
+
+// A catch-up before the gate spends the one retry, and the policy still owns
+// what follows: at operator, a gate that then refuses a trunk moved under it,
+// by exit 1 on a head behind it or by exit 4, hands off rather than parking as
+// an exhausted retry, and nothing is sent back.
+func TestAPolicyShortOfAutoHandsOffAfterACatchUpBeforeTheGate(t *testing.T) {
+	for _, exit := range []string{"1", "4"} {
+		t.Run("exit "+exit, func(t *testing.T) {
+			isolate(t)
+			ghLog := mergeProject(t)
+			dir, remote := forge(t, ghLog)
+			appendConfig(t, dir, "\n[supervise]\nretry_moved_trunk = \"operator\"\n")
+			moveTrunkAfter(t, remote, "gh", "api*check-runs*", "first.txt", "first")
+			gate, err := exec.LookPath("merge-gate")
+			if err != nil {
+				t.Fatal(err)
+			}
+			stub(t, gate, `#!/bin/sh
+echo "$1" >> "$DROVER_ROOT/merge-gate.log"
+tmp=$(mktemp -d)
+git clone -q "$DROVER_TEST_REMOTE" "$tmp/c"
+echo second > "$tmp/c/second.txt"
+git -C "$tmp/c" add -A
+git -C "$tmp/c" -c user.name=o -c user.email=o@example.invalid -c commit.gpgsign=false commit -q -m second
+git -C "$tmp/c" push -q origin HEAD:main
+rm -rf "$tmp"
+echo 'merge-gate: main moved; refusing' >&2
+exit `+exit+`
+`)
+
+			got, evs := gateDrive(t)
+			i := slices.IndexFunc(evs, func(e DriveEvent) bool { return e.Event == evNeedsOperator && e.ID == "1" })
+			if i < 0 || evs[i].Action != "retry_moved_trunk" {
+				t.Fatalf("no needs_operator for retry_moved_trunk: park=%s rounds=%d reason=%s", got.Park, got.Rounds, got.Reason)
+			}
+			if got.Park != parkGateRefused || got.Rounds != 0 {
+				t.Errorf("item 1 parked %q with rounds=%d (%s), want %q and 0", got.Park, got.Rounds, got.Reason, parkGateRefused)
+			}
+			if n := changesRows(t, dir, "1"); n != 0 {
+				t.Errorf("%d changes rows for item 1, want none", n)
+			}
+			if n := len(gateLog(t, dir)); n != 1 {
+				t.Errorf("[drive] merge_gate ran %d times, want once", n)
+			}
+		})
+	}
+}
+
+// The retry's catch-up waits on the new head's checks too, and the trunk can
+// move in that wait. With the one catch-up spent, drive parks on the fetch it
+// makes before the gate rather than hand the gate a head it already knows is
+// behind.
+func TestATrunkMovingDuringTheRetrysChecksParksBeforeTheGate(t *testing.T) {
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, remote := forge(t, ghLog)
+	t.Setenv("DROVER_TEST_GATE_BEHIND", "1")
+	t.Setenv("DROVER_TEST_GATE_ANCESTRY", "on")
+	moveTrunkAfter(t, remote, "gh", "api*check-runs*", "second.txt", "second")
+	gh, err := exec.LookPath("gh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := os.ReadFile(gh) // #nosec G304 -- the wrapper moveTrunkAfter just stubbed
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first check read is the head the gate reads first; the second is the
+	// head the retry's catch-up left.
+	moved := strings.Replace(string(script), `if [ ! -e "$DROVER_TEST_MOVE_MARKER" ]; then`,
+		`if [ "$(cat "$DROVER_TEST_READS")" = 2 ] && [ ! -e "$DROVER_TEST_MOVE_MARKER" ]; then`, 1)
+	if moved == string(script) {
+		t.Fatal("the trunk-moving wrapper no longer carries the line this test rewrites")
+	}
+	// stub, never a write through the link: the wrapper's file is shared with
+	// every other test that moves the trunk.
+	stub(t, gh, moved)
+
+	got, _ := gateDrive(t)
+	if n := len(gateLog(t, dir)); n != 1 {
+		t.Errorf("[drive] merge_gate ran %d times, want once: the retry's head was already behind", n)
+	}
+	if got.Park != parkGateRefused || got.Rounds != 0 {
+		t.Fatalf("item 1 parked %q with rounds=%d (%s), want %q and 0", got.Park, got.Rounds, got.Reason, parkGateRefused)
+	}
+	if want := behindAgain(got.Branch, "main", "exit 4", ""); !strings.HasPrefix(got.Reason, strings.TrimSpace(want)) {
+		t.Errorf("reason %q, want behindAgain's", got.Reason)
+	}
+	if n := changesRows(t, dir, "1"); n != 0 {
+		t.Errorf("%d changes rows for item 1, want none", n)
 	}
 }
 
@@ -7102,6 +7406,23 @@ func TestAConflictAtDispatchParksAtSupervisor(t *testing.T) {
 	if st := git(t, h.Tree, "status", "--porcelain"); st != "" {
 		t.Errorf("the worktree was left mid-merge:\n%s", st)
 	}
+	conflictParkRow(t, dir, "shared.txt")
+}
+
+// The dispatch hold merges the trunk commit it resolved under the trunk lock,
+// and a sibling's fetch can move origin/main once that lock is released.
+func TestAConflictAtDispatchKeepsTheFailedMergeAsEvidence(t *testing.T) {
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, _ := forge(t, ghLog)
+	staleBranch(t, dir, "shared.txt", "ours")
+	mergedSibling(t, dir)
+	trunkResolvesOnAbort(t)
+
+	if _, stderr, err := driveEventsOf(t, "1"); err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	conflictParkRow(t, dir, "shared.txt")
 }
 
 // A conflict round counts against max_review_rounds, so an item already at the cap
@@ -7368,49 +7689,236 @@ func TestACatchUpAtDispatchLeavesAMergeInProgress(t *testing.T) {
 	}
 }
 
-// F148's loop: two send-backs worded differently, each a new digest, both
-// naming R4. The second parks the item rather than spending a third round, and
-// the summary sends the operator to both kept rounds.
-func TestADriveParksOnTheSameRequirementSentBackTwiceInOtherWords(t *testing.T) {
-	isolate(t)
-	ghLog := mergeProject(t)
-	dir, _ := forge(t, ghLog)
-	rev, err := exec.LookPath("rev")
-	if err != nil {
-		t.Fatal(err)
+// What a review loop parks on. Each review appends the next row of its case to
+// the ledger, as request-changes would, and keeps the round it sent back; a
+// refused case answers with the row the cap writes and the audit after it. An equal
+// reqs set is two defects under one requirement, which only max_review_rounds
+// bounds; repeating wants identical evidence or the reviewer saying a finding
+// is still open twice in a row. The fixture's ledger already carries one
+// changes row, so the rounds a detail names start at 2.
+func TestADriveReviewLoopParksOnlyOnWhatTheReviewerSaidRepeated(t *testing.T) {
+	refused := func(reqs string) string {
+		return `{"id":"1","refused":"max_review_rounds","reqs":` + reqs + `,"date":"2026-10-28"}` + "\t" +
+			`{"id":"1","level":"reviewed","code_by":"agent","independent":true,"date":"2026-10-28"}`
 	}
-	reviews := t.TempDir()
-	t.Setenv("DROVER_TEST_REVIEWS", reviews)
-	stub(t, rev, `#!/bin/sh
+	changes := func(digest, reqs, open string) string {
+		row := `{"id":"1","changes":"` + digest + `","reqs":` + reqs
+		if open != "" {
+			row += `,"still_open":` + open
+		}
+		return row + `,"date":"2026-10-28"}`
+	}
+	// The digest of the round the stub keeps for review n, so the kept round is
+	// the request its row records.
+	probe := func(n int) string {
+		return digest(fmt.Sprintf("### R3 probe %d fails\n\nThe refused object answers 200 on probe %d.\n\nA second paragraph.", n, n))
+	}
+	for _, c := range []struct {
+		name   string
+		cap    int
+		rows   []string
+		passes []string
+		park   string
+		detail string
+		reason string
+	}{{
+		name:   "equal reqs, new findings",
+		cap:    2,
+		rows:   []string{changes("a1", "[2]", ""), changes("a2", "[2]", ""), refused("[2]")},
+		passes: []string{passChangesRequested, passChangesRequested, passCapped},
+		park:   passCapped,
+		detail: "max_review_rounds 2 reached; the refused request named R2",
+		reason: "max_review_rounds (2)",
+	}, {
+		name:   "the same finding still open twice",
+		rows:   []string{changes(probe(1), "[3]", ""), changes(probe(2), "[3]", "[3]"), changes(probe(3), "[3]", "[3]")},
+		passes: []string{passChangesRequested, passChangesRequested, passRepeating},
+		park:   passRepeating,
+		detail: "R3 still open after rounds 3 and 4",
+		reason: "the review marked the finding under R3 still open after two runs aimed at it",
+	}, {
+		name:   "identical evidence",
+		rows:   []string{changes("c1", "[4]", ""), changes("c1", "[4]", "")},
+		passes: []string{passChangesRequested, passRepeating},
+		park:   passRepeating,
+		detail: "identical evidence in rounds 2 and 3",
+		reason: "the review sent back evidence identical to the previous round's request for changes",
+	}, {
+		name: "bodega F97",
+		cap:  5,
+		rows: []string{changes("f1", "[1,3,5,6]", ""), changes("f2", "[3]", ""), changes("f3", "[3,5]", ""),
+			changes("f4", "[3]", ""), changes("f5", "[3]", ""), refused("[3]")},
+		passes: []string{passChangesRequested, passChangesRequested, passChangesRequested,
+			passChangesRequested, passChangesRequested, passCapped},
+		park:   passCapped,
+		detail: "max_review_rounds 5 reached; the refused request named R3",
+		reason: "max_review_rounds (5)",
+	}} {
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			ghLog := mergeProject(t)
+			dir, _ := forge(t, ghLog)
+			if c.cap > 0 {
+				appendConfig(t, dir, fmt.Sprintf("\n[review]\nmax_review_rounds = %d\n", c.cap))
+			}
+			rev, err := exec.LookPath("rev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			reviews := t.TempDir()
+			t.Setenv("DROVER_TEST_REVIEWS", reviews)
+			write(t, filepath.Join(reviews, "rows"), strings.Join(c.rows, "\n")+"\n")
+			stub(t, rev, `#!/bin/sh
 echo '{"type":"result","subtype":"success","is_error":false}'
 n=$(cat "$DROVER_TEST_REVIEWS/1" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "$DROVER_TEST_REVIEWS/1"
-mkdir -p "$DROVER_ROOT/reports"
-printf '# 1 changes %s\n\n### R4 is unmet, wording %s\n' $n $n > "$DROVER_ROOT/reports/01-first.changes-$n.md"
-printf '{"id":"1","changes":"wording-%s","reqs":[4],"date":"2026-10-26"}\n' $n >> "$DROVER_ROOT/ledger.jsonl"
+row=$(sed -n "${n}p" "$DROVER_TEST_REVIEWS/rows")
+case "$row" in *'"changes"'*)
+	mkdir -p "$DROVER_ROOT/reports"
+	printf '# 1 changes %s\n\n### R3 probe %s fails\n\nThe refused object answers 200 on probe %s.\n\nA second paragraph.\n' $n $n $n > "$DROVER_ROOT/reports/01-first.changes-$n.md" ;;
+esac
+printf '%s\n' "$row" | tr '\t' '\n' >> "$DROVER_ROOT/ledger.jsonl"
 `)
 
-	var derr error
-	stderr := captureErr(t, func() { derr = execute(t, "drive", "1") })
-	if n := reviewCount(t, reviews, "1"); n != 2 {
-		t.Errorf("%d reviews ran, want 2: the second names R4 again and parks\n%s", n, stderr)
+			var derr error
+			stderr := captureErr(t, func() { derr = execute(t, "drive", "1") })
+			if n := reviewCount(t, reviews, "1"); n != len(c.rows) {
+				t.Errorf("%d reviews ran, want %d (drive: %v)\n%s", n, len(c.rows), derr, stderr)
+			}
+			l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var passes []string
+			for _, r := range l.Rows {
+				if r.ID == "1" && r.Pass != "" {
+					passes = append(passes, r.Pass)
+				}
+			}
+			if !slices.Equal(passes, c.passes) {
+				t.Errorf("passes = %v, want %v\n%s", passes, c.passes, stderr)
+			}
+			pk, ok := l.Parked("1")
+			if !ok || pk.Park != c.park || pk.Detail != c.detail {
+				t.Errorf("park row = %+v, want %s with detail %q", pk, c.park, c.detail)
+			}
+			if !strings.Contains(stderr, c.reason) {
+				t.Errorf("the drive's output lacks %q:\n%s", c.reason, stderr)
+			}
+			if strings.Contains(stderr, "changed nothing it checks") {
+				t.Errorf("the park claims drover checked the run:\n%s", stderr)
+			}
+			if c.park != passRepeating || len(c.rows) != 3 {
+				return
+			}
+			show := capture(t, func() {
+				if err := execute(t, "show", "1", "--no-tracker"); err != nil {
+					t.Errorf("show: %v", err)
+				}
+			})
+			for _, want := range []string{
+				"repeating (R3 still open after rounds 3 and 4)",
+				"### R3 probe 3 fails",
+				"The refused object answers 200 on probe 3.",
+				"park log   reports/01-first.changes-3.md",
+			} {
+				if !strings.Contains(show, want) {
+					t.Errorf("show lacks %q:\n%s", want, show)
+				}
+			}
+			for _, not := range []string{"A second paragraph.", `"type":"result"`} {
+				if strings.Contains(show, not) {
+					t.Errorf("show carries %q on the park line:\n%s", not, show)
+				}
+			}
+		})
 	}
-	if n := len(implementRows(t, dir, "1")); n != 2 {
-		t.Errorf("%d implement sessions launched, want 2 and no third round\n%s", n, stderr)
-	}
-	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+}
+
+// A repeating park's evidence is the latest request for changes, whatever the
+// kept rounds say. request-changes records its row even when keeping the round
+// failed, so the newest file on disk can be an older request, and a park line
+// citing it would send the operator to a finding the branch already closed.
+// Each review here is the real request-changes, run as drover in a process of
+// its own, with a directory standing where keepRound would write a round.
+func TestARepeatingParkShowsTheLatestRequestWhenItsRoundWasNotKept(t *testing.T) {
+	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _, _, _ := l.Pass("1"); got != passRepeating {
-		t.Errorf("the last pass row reads %q, want %q (drive: %v)\n%s", got, passRepeating, derr, stderr)
-	}
-	for _, want := range []string{
-		"the review sent back R4 unmet twice in a row; the contract may need narrowing, splitting or an override",
-		"drover show 1",
-		filepath.Join("reports", "01-first.changes-1.md") + " and " + filepath.Join("reports", "01-first.changes-2.md"),
+	for _, c := range []struct {
+		name    string
+		blocked string
+		log     string
+	}{
+		{name: "the newest kept round is an older request", blocked: "01-first.changes-3.md", log: "changes-2.md"},
+		{name: "no kept round is readable", blocked: "01-first.changes-1.md"},
 	} {
-		if !strings.Contains(stderr, want) {
-			t.Errorf("the drive's output lacks %q:\n%s", want, stderr)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			isolate(t)
+			ghLog := mergeProject(t)
+			dir, _ := forge(t, ghLog)
+			if err := os.MkdirAll(filepath.Join(dir, "reports", c.blocked), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			rev, err := exec.LookPath("rev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			reviews := t.TempDir()
+			t.Setenv("DROVER_TEST_REVIEWS", reviews)
+			t.Setenv("DROVER_TEST_SELF", self)
+			write(t, filepath.Join(reviews, "ev-1"), "### R1 first probe\n\nInitial finding.\n")
+			write(t, filepath.Join(reviews, "ev-2"), "### R1 second probe\n\nFinding persists after first run.\n")
+			write(t, filepath.Join(reviews, "ev-3"), "### R1 third probe\n\nFinding persists after second run: current evidence.\n\nA second paragraph.\n")
+			stub(t, rev, `#!/bin/sh
+echo '{"type":"result","subtype":"success","is_error":false}'
+n=$(cat "$DROVER_TEST_REVIEWS/1" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "$DROVER_TEST_REVIEWS/1"
+open=""; [ $n -gt 1 ] && open="--still-open 1"
+cd "$DROVER_ROOT" && DROVER_TEST_AS_DROVER=1 "$DROVER_TEST_SELF" request-changes 1 -f "$DROVER_TEST_REVIEWS/ev-$n" $open >> "$DROVER_TEST_REVIEWS/out" 2>&1
+`)
+
+			var derr error
+			stderr := captureErr(t, func() { derr = execute(t, "drive", "1") })
+			out, _ := os.ReadFile(filepath.Join(reviews, "out"))
+			if n := reviewCount(t, reviews, "1"); n != 3 {
+				t.Fatalf("%d reviews ran, want 3 (drive: %v)\n%s\nrequest-changes:\n%s", n, derr, stderr, out)
+			}
+			if !strings.Contains(string(out), "warn: round not kept") {
+				t.Fatalf("no request had its round refused, so the case under test never happened:\n%s", out)
+			}
+			l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pk, ok := l.Parked("1")
+			if !ok || pk.Park != passRepeating || pk.Detail != "R1 still open after rounds 3 and 4" {
+				t.Fatalf("park row = %+v, want repeating on R1\n%s\nrequest-changes:\n%s", pk, stderr, out)
+			}
+			if !strings.Contains(pk.Evidence, "Finding persists after second run: current evidence.") ||
+				strings.Contains(pk.Evidence, "first run.") || strings.Contains(pk.Evidence, "A second paragraph.") {
+				t.Errorf("park evidence = %q, want the third request's first paragraph alone", pk.Evidence)
+			}
+			if pk.Log != "" {
+				t.Errorf("park log = %q, want none: no kept round holds the latest request", pk.Log)
+			}
+			show := capture(t, func() {
+				if err := execute(t, "show", "1", "--no-tracker"); err != nil {
+					t.Errorf("show: %v", err)
+				}
+			})
+			if !strings.Contains(show, "Finding persists after second run: current evidence.") {
+				t.Errorf("show lacks the latest request:\n%s", show)
+			}
+			for _, not := range []string{"Finding persists after first run.", "park log"} {
+				if strings.Contains(show, not) {
+					t.Errorf("show carries %q:\n%s", not, show)
+				}
+			}
+			if c.log != "" {
+				if _, err := os.Stat(filepath.Join(dir, "reports", "01-first."+c.log)); err != nil {
+					t.Errorf("the older round this case depends on was never kept: %v", err)
+				}
+			}
+		})
 	}
 }

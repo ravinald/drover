@@ -94,10 +94,17 @@ type Row struct {
 	// somebody has to resolve.
 	Changes string `json:"changes,omitempty"`
 	// Reqs is the requirement numbers the evidence's findings name, sorted, on a
-	// changes row. The digest compares wording, so a reviewer rewording one
+	// changes row, and on a refused row the ones the request the cap turned away
+	// named. The digest compares wording, so a reviewer rewording one
 	// unmet requirement round after round writes a new digest every time; the
 	// numbers are the substance it misses. Absent where no finding names one.
 	Reqs []int `json:"reqs,omitempty"`
+	// StillOpen is the requirement numbers, a subset of the previous changes
+	// row's Reqs, whose finding from that request the reviewer reproduced as
+	// still open, as opposed to a new defect found under the same requirement.
+	// Only the reviewer can tell the two apart, so it says so; drover never
+	// infers it from Reqs. Absent where every finding is new.
+	StillOpen []int `json:"still_open,omitempty"`
 	// Pass is the sixth shape: one row per review pass drive read a result
 	// from, carrying the token it computed. Every token is recorded and not
 	// only the one that merges, because a file holding passes alone cannot tell
@@ -163,7 +170,7 @@ type Row struct {
 	// Body is a 12-hex digest of the item file's exact bytes, frontmatter
 	// included. It is evidence of what the body held when drover last had a hand
 	// in it: the review stage row carries the body as the session launched, and
-	// the ninth shape, a row of {"id","body","date"} alone, carries it after each
+	// the ninth shape, a row of {"id","body","date"} and its author, carries it after each
 	// command that writes an item (request-changes, close-changes, invariant,
 	// link, split, accept, unaccept, amend, and touch, which adds its reason as
 	// Note). A body that no longer matches the latest digest was changed by
@@ -175,6 +182,22 @@ type Row struct {
 	// anywhere else. A separate row rather than a field on each command's own
 	// row, because link and invariant write no row of their own to carry it.
 	Body string `json:"body,omitempty"`
+	// Cmd, Actor and Agent name who wrote the body a row's digest records:
+	// the drover command, the actor it ran as and the interactive agent driving
+	// it, the Author BodyRow stamps. Every row carrying Body carries them, and a
+	// row written before they existed carries none, which a reader reports as
+	// unrecorded rather than as the operator. Append refuses a digest without
+	// Cmd and Actor, and MarshalJSON keeps an empty Agent on such a row, so "no
+	// agent" reads as recorded rather than as a key nobody wrote.
+	Cmd   string `json:"cmd,omitempty"`
+	Actor string `json:"actor,omitempty"`
+	Agent string `json:"agent,omitempty"`
+	// Origin is the eighteenth shape: one row per item, written by the command
+	// that created its body, saying how it came to exist. A set origin is what
+	// makes it this shape. An item created before drover recorded it has none,
+	// and none is ever backfilled: a row drover did not witness would be a
+	// record nobody made.
+	Origin *Origin `json:"origin,omitempty"`
 	// Cleared marks the ninth-shape row `drover close-changes` writes. The digest alone
 	// cannot say which command wrote the body, and open-pr needs exactly that:
 	// a clear after a standing pass is a reviewer saying the block that parked
@@ -277,6 +300,121 @@ type Row struct {
 	TS     string `json:"ts,omitempty"`
 	Report string `json:"report,omitempty"`
 	Note   string `json:"note,omitempty"`
+}
+
+// Origin is how one item came to exist, as the command that created its body
+// saw it. Every field is written, empty where it does not apply, so a reader
+// tells "intake made it from no issue" from a row that predates the field.
+type Origin struct {
+	// Cmd is new, intake or split.
+	Cmd string `json:"cmd"`
+	// Actor is operator, agent or supervisor, and Session the launch id of the
+	// session drover started, empty for the operator.
+	Actor   string `json:"actor"`
+	Agent   string `json:"agent"`
+	Session string `json:"session"`
+	// FoundIn is new's --found-in, Issue the tracker issue intake read and
+	// SplitFrom the item split took the work from.
+	FoundIn   string `json:"found_in"`
+	Issue     int    `json:"issue"`
+	SplitFrom string `json:"split_from"`
+}
+
+// Author is who wrote a body: the drover command, the actor it ran as, and
+// the interactive agent driving that actor's terminal, empty when none is
+// known.
+type Author struct {
+	Cmd   string
+	Actor string
+	Agent string
+}
+
+// BodyRow is the row recording that by wrote the body whose digest is
+// digest. It is the one constructor for a row carrying Body, so a writer
+// cannot record a digest without saying who wrote it, and it stamps ts and
+// date here rather than leaving them to the append.
+func BodyRow(id, digest string, by Author) Row {
+	return Stamp(Row{ID: id, Body: digest, Cmd: by.Cmd, Actor: by.Actor, Agent: by.Agent})
+}
+
+// MarshalJSON writes an attributed body row's agent key even when it is
+// empty, the one departure from each field's omitempty. A row without Actor
+// is a body row written before attribution existed, or no body row at all,
+// and encodes as it always has.
+func (r Row) MarshalJSON() ([]byte, error) {
+	type plain Row
+	if r.Body == "" || r.Actor == "" {
+		return json.Marshal(plain(r))
+	}
+	return json.Marshal(struct {
+		plain
+		Agent string `json:"agent"`
+	}{plain(r), r.Agent})
+}
+
+// StageOf is the stage row drover wrote for the launch session names, false
+// when no stage row carries it. A launch id is minted once per launch, so the
+// first match is the only one.
+func (l *Ledger) StageOf(session string) (Row, bool) {
+	if session == "" {
+		return Row{}, false
+	}
+	for _, r := range l.Rows {
+		if r.Stage != "" && r.Session == session {
+			return r, true
+		}
+	}
+	return Row{}, false
+}
+
+// Provenance is what the ledger knows about where one item came from and who
+// last wrote its body.
+type Provenance struct {
+	// Origin is the item's origin row, nil for an item minted before drover
+	// recorded one. That reads as unrecorded, never as an error.
+	Origin *Row
+	// LastBody is the latest row carrying a body digest, a review stage row
+	// or a body row, nil when no drover that records digests wrote one.
+	LastBody *Row
+	// Matches is whether the file's digest as it stands equals LastBody's.
+	// False with LastBody set is a hand edit nobody recorded.
+	Matches bool
+	// Launch is the stage row whose session created the item, nil when the
+	// origin names no session or no stage row carries it. Its Drive, Stage
+	// and ID say which drive, which stage and which item's session it was.
+	Launch *Row
+}
+
+// Recorded reports whether the item's origin was written down when it
+// happened.
+func (p Provenance) Recorded() bool { return p.Origin != nil }
+
+// Provenance reads one item's origin and latest body row. current is the
+// file's digests as it stands now, every form a row may hold it in: a match
+// against any of them is a match.
+func (l *Ledger) Provenance(id string, current ...string) Provenance {
+	var p Provenance
+	for i := range l.Rows {
+		r := &l.Rows[i]
+		if r.ID != id {
+			continue
+		}
+		if r.Origin != nil && p.Origin == nil {
+			p.Origin = r
+		}
+		if r.Body != "" {
+			p.LastBody = r
+		}
+	}
+	if p.LastBody != nil {
+		p.Matches = slices.Contains(current, p.LastBody.Body)
+	}
+	if p.Origin != nil {
+		if st, ok := l.StageOf(p.Origin.Origin.Session); ok {
+			p.Launch = &st
+		}
+	}
+	return p
 }
 
 // Amendment is what one `drover amend` changed: the requirement count before
@@ -816,19 +954,26 @@ type Counts struct {
 	// the same evidence digest, which is a review that has stopped finding
 	// anything new.
 	//
-	// RepeatedRequirements marks the last two naming the same requirements,
-	// however the evidence is worded, and Reqs is the last one's list. An equal
-	// set and not an overlap: a second round finding a different gap in one
-	// shared requirement is progress. A row without reqs, which an older binary
-	// writes, matches nothing on either side.
-	ChangesRequested     int
-	LastChanges          string
-	RepeatedChanges      bool
-	RepeatedRequirements bool
-	Reqs                 []int
+	// StillOpen marks the last two each carrying a still_open list and the two
+	// sharing a requirement: two consecutive runs were sent the same finding and
+	// neither closed it. Reqs is the last one's list, and StillOpenReqs the
+	// requirements the two lists share.
+	//
+	// An equal Reqs pair alone is not a repeat. A requirement such as "every
+	// refused object answers 403" admits any number of distinct defects, and a
+	// reviewer writing new probes each round sends the same number back while
+	// the branch improves; [review] max_review_rounds is the bound on that.
+	ChangesRequested int
+	LastChanges      string
+	RepeatedChanges  bool
+	StillOpen        bool
+	StillOpenReqs    []int
+	Reqs             []int
 	// Refusals is how many requests for changes the cap turned away over the item's history.
-	// A reader deciding about one pass wants RefusedSince instead.
-	Refusals int
+	// A reader deciding about one pass wants RefusedSince instead. RefusedReqs
+	// is the requirements the last refused request named.
+	Refusals    int
+	RefusedReqs []int
 	// LastBody is the body digest from the most recent row carrying one, review
 	// stage row or body row, in file order. Empty for an item no drover that
 	// records digests has touched.
@@ -863,6 +1008,7 @@ func (c Counts) Launches() int {
 func (l *Ledger) Counts(id string) Counts {
 	c := Counts{ByStage: map[string]int{}}
 	var last string
+	var prevStillOpen []int
 	for _, r := range l.Rows {
 		if r.ID != id {
 			continue
@@ -876,18 +1022,31 @@ func (l *Ledger) Counts(id string) Counts {
 		if r.Changes != "" {
 			c.ChangesRequested++
 			c.RepeatedChanges = last != "" && r.Changes == last
-			c.RepeatedRequirements = len(c.Reqs) > 0 && slices.Equal(r.Reqs, c.Reqs)
-			c.Reqs = r.Reqs
+			c.StillOpenReqs = shared(prevStillOpen, r.StillOpen)
+			c.StillOpen = len(c.StillOpenReqs) > 0
+			c.Reqs, prevStillOpen = r.Reqs, r.StillOpen
 			c.LastChanges, last = r.Date, r.Changes
 		}
 		if r.Refused != "" {
 			c.Refusals++
+			c.RefusedReqs = r.Reqs
 		}
 		if r.Body != "" {
 			c.LastBody = r.Body
 		}
 	}
 	return c
+}
+
+// shared is the numbers in both a and b, in a's order.
+func shared(a, b []int) []int {
+	var out []int
+	for _, n := range a {
+		if slices.Contains(b, n) {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // RefusedSince reports whether the cap turned a request for changes away after the row count
@@ -1150,6 +1309,9 @@ func Append(path string, r Row) error {
 func AppendUnless(path string, r Row, skip func(*Ledger) bool) (bool, error) {
 	if r.ID == "" && r.Usage == nil {
 		return false, fmt.Errorf("row has no id")
+	}
+	if r.Body != "" && (r.Cmd == "" || r.Actor == "") {
+		return false, fmt.Errorf("internal: the body row for %s names no command or no actor (cmd %q, actor %q); build it with ledger.BodyRow and an Author naming both", r.ID, r.Cmd, r.Actor)
 	}
 	return appendLocked(path, r, skip)
 }

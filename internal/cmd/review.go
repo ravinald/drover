@@ -139,7 +139,7 @@ authority that a branch may merge.`,
 		}.from(name, spec, mode).write(errOut)
 
 		before := s.ledger.Counts(it.ID.Bare())
-		at, err := s.launched(it, ledger.StageReview, name)
+		at, err := s.launched(it, "review", ledger.StageReview, name)
 		if err != nil {
 			return err
 		}

@@ -268,7 +268,7 @@ func (s *session) recordIssue(it backlog.Item, number int) error {
 	if err != nil {
 		return err
 	}
-	return s.writeBody(it, written)
+	return s.writeBody(it, "accept", written)
 }
 
 // mirrorState rewrites the item's state label after drover changed the state.

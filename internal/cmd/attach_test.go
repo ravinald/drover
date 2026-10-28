@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/lease"
 	"github.com/ravinald/drover/internal/ledger"
 )
@@ -412,6 +413,57 @@ func TestWatchAfterReturnsEventsOfOneSecondEachOnce(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("walking --after returned seqs %v, want each of %v once", got, want)
+	}
+}
+
+// watch --until and a [notify] events table both claim every event a drive
+// emits, so an event added to one list and not the other fails here.
+func TestDriveEventNamesMatchNotifyEvents(t *testing.T) {
+	notify := slices.DeleteFunc(config.NotifyEvents(), func(n string) bool { return n == config.EventExitUndone })
+	var onlyWatch, onlyNotify []string
+	for _, n := range driveEventNames {
+		if !slices.Contains(notify, n) {
+			onlyWatch = append(onlyWatch, n)
+		}
+	}
+	for _, n := range notify {
+		if !slices.Contains(driveEventNames, n) {
+			onlyNotify = append(onlyNotify, n)
+		}
+	}
+	if len(onlyWatch) > 0 || len(onlyNotify) > 0 {
+		t.Errorf("driveEventNames and config.NotifyEvents() disagree: in driveEventNames only %v, in NotifyEvents only %v", onlyWatch, onlyNotify)
+	}
+}
+
+// A supervising loop waits on needs_supervisor, so --until accepts it and
+// returns on the line.
+func TestWatchUntilNeedsSupervisorReturnsTheLine(t *testing.T) {
+	enqueueFixture(t)
+	ownState(t)
+	if _, stderr, err := driveEventsOf(t, "1"); err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	path := fixtureEvents(t, "D1")
+	raw, err := os.ReadFile(path) // #nosec G304 -- the test's own state directory
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	if len(lines) < 2 || !strings.Contains(lines[len(lines)-1], `"exit"`) {
+		t.Fatalf("this needs a drive whose event file ends on its exit:\n%s", raw)
+	}
+	sup := `{"event":"needs_supervisor","ts":"2026-10-18T09:40:51Z","drive":"D1","id":"1","action":"resolve_conflict"}`
+	lines = slices.Insert(lines, len(lines)-1, sup)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var werr error
+	out := capture(t, func() { werr = execute(t, "watch", "D1", "--until", "needs_supervisor", "--after", "0") })
+	var e DriveEvent
+	if werr != nil || json.Unmarshal([]byte(strings.TrimSpace(out)), &e) != nil || e.Event != evNeedsSupervisor || e.Seq != len(lines)-1 {
+		t.Errorf("watch --until needs_supervisor: %v, printed %q; want exit 0 and the needs_supervisor line at seq %d", werr, out, len(lines)-1)
 	}
 }
 

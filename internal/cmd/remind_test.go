@@ -218,14 +218,14 @@ func TestTheLedgerProbeReadsTheOperatorsAnswer(t *testing.T) {
 	if !m.scaffold {
 		t.Fatal("the scaffold was not marked as one")
 	}
-	if err := s.record(ledger.Row{ID: "1", Body: "aaaaaaaaaaaa", Date: today}); err != nil {
+	if err := s.record(ledger.BodyRow("1", "aaaaaaaaaaaa", ledger.Author{Cmd: "accept", Actor: "operator"})); err != nil {
 		t.Fatal(err)
 	}
 	if got := p.answered(s.cfg, ev, m); got != "" {
 		t.Errorf("a body row on a body still a scaffold answered %q, want nothing", got)
 	}
 	write(t, body, "---\ntitle: First\ndeps:\n---\n\n1. Do it.\n")
-	if err := s.record(ledger.Row{ID: "1", Body: "bbbbbbbbbbbb", Date: today}); err != nil {
+	if err := s.record(ledger.BodyRow("1", "bbbbbbbbbbbb", ledger.Author{Cmd: "accept", Actor: "operator"})); err != nil {
 		t.Fatal(err)
 	}
 	if got := p.answered(s.cfg, ev, m); got != answeredAccepted {

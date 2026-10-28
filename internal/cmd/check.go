@@ -145,8 +145,10 @@ wording, so never match on it.
   NO REQUIREMENTS     an accepted, unmerged item whose body has no top-level "N. "
                       lines
   PLACEHOLDER         an accepted, unmerged item whose body carries an angle-bracket
-                      placeholder such as <provider> outside a fenced block or a
-                      code span holding a space
+                      placeholder such as <provider> outside a fenced block, a
+                      code span holding a space, or a span holding one element
+                      or component tag (<h1>, <Dialog>); a variable written in
+                      braces, {provider-dir}, is never one
   HOLD MARKER         an accepted, unmerged item whose body carries a line matching
                       [intake] hold_markers outside a fenced block
   BROAD CITATION      a scaffold whose body cites a directory at the top of the
@@ -765,7 +767,7 @@ func (s *session) checkReport() CheckReport {
 		for _, h := range bodyHolds(lines, s.cfg.Intake.Holds()) {
 			f := Finding{
 				Kind:   "PLACEHOLDER",
-				Detail: "fill it in or remove it; a run handed this body invents the value",
+				Detail: "fill it in or remove it; a run handed this body invents the value. A variable part is written in braces, {name}, which is never read as a placeholder",
 			}
 			if h.marker {
 				f = Finding{

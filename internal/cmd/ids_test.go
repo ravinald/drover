@@ -13,6 +13,7 @@ import (
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/idalloc"
+	"github.com/ravinald/drover/internal/ledger"
 )
 
 // nextID is the id mint would issue under prefix with the local allocator.
@@ -141,7 +142,7 @@ func TestGitAllocatorInterleavedHostsGetDistinctIDs(t *testing.T) {
 		}
 		fired = true
 		var err error
-		if idB, _, err = b.mint("B", "from-b", "body\n", nil); err != nil {
+		if idB, _, err = b.mint("B", "from-b", "body\n", ledger.Origin{Cmd: "new"}, nil); err != nil {
 			t.Errorf("host b: %v", err)
 		}
 	}
@@ -150,7 +151,7 @@ func TestGitAllocatorInterleavedHostsGetDistinctIDs(t *testing.T) {
 	var idA backlog.ID
 	stderr := captureErr(t, func() {
 		var err error
-		if idA, _, err = a.mint("B", "from-a", "body\n", nil); err != nil {
+		if idA, _, err = a.mint("B", "from-a", "body\n", ledger.Origin{Cmd: "new"}, nil); err != nil {
 			t.Errorf("host a: %v", err)
 		}
 	})
@@ -176,7 +177,7 @@ func TestGitAllocatorSeedsFromDisk(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	id, _, err := sessionAt(t, first).mint("B", "new", "body\n", nil)
+	id, _, err := sessionAt(t, first).mint("B", "new", "body\n", ledger.Origin{Cmd: "new"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +188,7 @@ func TestGitAllocatorSeedsFromDisk(t *testing.T) {
 		t.Errorf("seeded F = %s, want 4", got)
 	}
 
-	id, _, err = sessionAt(t, idHost(t, remote)).mint("F", "elsewhere", "body\n", nil)
+	id, _, err = sessionAt(t, idHost(t, remote)).mint("F", "elsewhere", "body\n", ledger.Origin{Cmd: "new"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,14 +209,14 @@ func TestGitAllocatorRefusesAfterFiveLostLeases(t *testing.T) {
 		}
 		inside = true
 		defer func() { inside = false }()
-		if _, _, err := b.mint("B", fmt.Sprintf("b-%d", len(stems(t, b.cfg.Abs("work")))), "body\n", nil); err != nil {
+		if _, _, err := b.mint("B", fmt.Sprintf("b-%d", len(stems(t, b.cfg.Abs("work")))), "body\n", ledger.Origin{Cmd: "new"}, nil); err != nil {
 			t.Errorf("host b: %v", err)
 		}
 	}
 	t.Cleanup(func() { idPushHook = nil })
 
 	var err error
-	captureErr(t, func() { _, _, err = a.mint("B", "starved", "body\n", nil) })
+	captureErr(t, func() { _, _, err = a.mint("B", "starved", "body\n", ledger.Origin{Cmd: "new"}, nil) })
 	if Code(err) != ExitRefused || !strings.Contains(err.Error(), remote) {
 		t.Fatalf("err = %v (exit %d), want a refusal naming %s", err, Code(err), remote)
 	}
@@ -284,7 +285,7 @@ func TestGitAllocatorPushesRacingInsideTheRemoteRetry(t *testing.T) {
 			a, b := sessionAt(t, idHost(t, remote)), sessionAt(t, idHost(t, remote))
 			want := map[string]bool{"B1": true, "B2": true}
 			if seeded {
-				if _, _, err := a.mint("B", "seed", "body\n", nil); err != nil {
+				if _, _, err := a.mint("B", "seed", "body\n", ledger.Origin{Cmd: "new"}, nil); err != nil {
 					t.Fatal(err)
 				}
 				want = map[string]bool{"B2": true, "B3": true}
@@ -299,7 +300,7 @@ func TestGitAllocatorPushesRacingInsideTheRemoteRetry(t *testing.T) {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
-						ids[i], _, errs[i] = s.mint("B", fmt.Sprintf("racing-%d", i), "body\n", nil)
+						ids[i], _, errs[i] = s.mint("B", fmt.Sprintf("racing-%d", i), "body\n", ledger.Origin{Cmd: "new"}, nil)
 					}()
 				}
 				wg.Wait()
@@ -354,7 +355,7 @@ func TestGitAllocatorHungRemoteRefusesAtTheDeadline(t *testing.T) {
 
 	mint := func(slug string) error {
 		done := make(chan error, 1)
-		go func() { _, _, err := s.mint("B", slug, "body\n", nil); done <- err }()
+		go func() { _, _, err := s.mint("B", slug, "body\n", ledger.Origin{Cmd: "new"}, nil); done <- err }()
 		select {
 		case err := <-done:
 			return err
@@ -410,7 +411,7 @@ exec %q "$@"
 `, realGit))
 			s := sessionAt(t, dir)
 			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-			if _, _, err := s.mint("B", "quiet", "body\n", nil); err != nil {
+			if _, _, err := s.mint("B", "quiet", "body\n", ledger.Origin{Cmd: "new"}, nil); err != nil {
 				t.Fatal(err)
 			}
 			raw, err := os.ReadFile(log) // #nosec G304 -- the shim's own log
@@ -442,7 +443,7 @@ func TestGitAllocatorSkipsPrePushHooks(t *testing.T) {
 	remote := bareRemote(t)
 	dir := idHost(t, remote)
 	script(t, filepath.Join(dir, ".git", "hooks"), "pre-push", "exit 1\n")
-	id, _, err := sessionAt(t, dir).mint("B", "hooked", "body\n", nil)
+	id, _, err := sessionAt(t, dir).mint("B", "hooked", "body\n", ledger.Origin{Cmd: "new"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -458,7 +459,7 @@ func TestGitAllocatorRejectedPushIsNotUnreachable(t *testing.T) {
 	remote := bareRemote(t)
 	dir := idHost(t, remote)
 	script(t, filepath.Join(remote, "hooks"), "pre-receive", "cat >/dev/null\necho 'refs/drover/* is protected' >&2\nexit 1\n")
-	_, _, err := sessionAt(t, dir).mint("B", "refused", "body\n", nil)
+	_, _, err := sessionAt(t, dir).mint("B", "refused", "body\n", ledger.Origin{Cmd: "new"}, nil)
 	if Code(err) != ExitRefused {
 		t.Fatalf("exit = %d (%v), want %d", Code(err), err, ExitRefused)
 	}

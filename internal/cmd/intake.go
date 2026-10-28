@@ -16,6 +16,7 @@ import (
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/gh"
 	"github.com/ravinald/drover/internal/idalloc"
+	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/sev"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +33,9 @@ var intakeCmd = &cobra.Command{
 	Long: `Reads the issue, allocates the next free id in the matching namespace, writes a
 body with the frontmatter filled and the issue quoted as raw material. The
 body's issue key is the link back: the issue becomes the item's own, and no
-label is written to say so.
+label is written to say so. finish reads closes, not issue, so the closes key
+stays empty unless [intake] closes = "issue", which writes the number there
+too; remove it by hand when the item is a split or only partly fixes the issue.
 
 It does NOT write the requirements. The scaffold carries a stop marker and
 drover refuses to launch, or even preview, while it is present. Those numbered
@@ -144,7 +147,8 @@ business and appears neither there nor in ` + "`drover follow-ups`" + `.`,
 		if slug == "" {
 			slug = fmt.Sprintf("issue-%d", number)
 		}
-		id, path, err := s.mint(prefix, slug, s.scaffold(kind, number, issue, slug), nil)
+		id, path, err := s.mint(prefix, slug, s.scaffold(kind, number, issue, slug),
+			ledger.Origin{Cmd: "intake", Issue: number}, nil)
 		if err != nil {
 			return err
 		}
@@ -371,7 +375,13 @@ var idDeadline = 30 * time.Second
 // overwrites.
 //
 // vet sees the id before anything is written, and may refuse it.
-func (s *session) mint(prefix, slug, body string, vet func(backlog.ID) error) (backlog.ID, string, error) {
+//
+// origin is how the caller came to create it; mint fills in who did, and
+// records it once the body exists. A ledger that refuses that row fails the
+// command and leaves the body where it is, as a body row that will not write
+// does: deleting a body the operator may already have opened would lose more
+// than the row.
+func (s *session) mint(prefix, slug, body string, origin ledger.Origin, vet func(backlog.ID) error) (backlog.ID, string, error) {
 	dir := s.cfg.Abs(s.cfg.Paths.Backlog)
 	unlock, err := idalloc.Lock(dir)
 	if err != nil {
@@ -410,6 +420,10 @@ func (s *session) mint(prefix, slug, body string, vet func(backlog.ID) error) (b
 	}
 	if err := f.Close(); err != nil {
 		return backlog.ID{}, "", fmt.Errorf("write scaffold: %w", err)
+	}
+	if err := s.recordOrigin(id.Bare(), origin); err != nil {
+		return backlog.ID{}, "", fmt.Errorf("%s is written at %s, but the ledger would not record where it came from: %w",
+			id.Bare(), rel(s.cfg.Root, path), err)
 	}
 	return id, path, nil
 }
@@ -495,10 +509,14 @@ func (s *session) scaffold(kind string, number int, issue gh.Issue, _ string) st
 	var b strings.Builder
 	// The issue key is intake's alone: it is what makes a re-run idempotent, and
 	// a hand-written item has no issue to name.
-	b.WriteString(s.scaffoldBody(kind, issue.Title, map[string]string{
+	seed := map[string]string{
 		"issue":            fmt.Sprintf("%d", number),
 		s.cfg.Severity.Key: seedSeverity(kind, issue.Severity),
-	}))
+	}
+	if s.cfg.Intake.Closes == config.IntakeClosesIssue {
+		seed[backlog.KeyCloses] = seed["issue"]
+	}
+	b.WriteString(s.scaffoldBody(kind, issue.Title, seed))
 	fmt.Fprintf(&b, "--- raw material: issue #%d — evidence, NOT requirements ---\n\n", number)
 	fmt.Fprintf(&b, "> %s\n>\n", issue.Title)
 	for _, line := range strings.Split(strings.ReplaceAll(issue.Body, "\r\n", "\n"), "\n") {

@@ -275,7 +275,7 @@ func TestDriveColorGoldens(t *testing.T) {
 		name string
 		args []string
 	}{
-		{"status", []string{"status", "--no-tracker"}},
+		{"status", []string{"status", "--no-tracker", "--short"}},
 		{"show", []string{"show", "2", "--no-tracker"}},
 		{"drives", []string{"drives"}},
 		{"check", []string{"check"}},

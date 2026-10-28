@@ -6,8 +6,8 @@
   body       work/02-second.md  (1 numbered requirement)
   branch     second
   pr         unknown  (--no-tracker: the forge was not asked)
-  modified   <date>
-  created    unknown (work/02-second.md is not tracked in the work tree)
+  modified   <date>  edited drive · D2
+  created    unknown (work/02-second.md is not tracked in the work tree)  origin unrecorded
 
   audit history
     implemented by  impl  (2 runs)

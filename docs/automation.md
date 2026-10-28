@@ -369,7 +369,23 @@ An object. `items` is one entry per item in backlog order; merged rows are absen
       "implementer": "claude",
       "runs": 1,
       "planned": true,
-      "drive": "D2"
+      "drive": "D2",
+      "origin": {
+        "unrecorded": false,
+        "text": "operator intake #44",
+        "cmd": "intake",
+        "actor": "operator",
+        "issue": 44
+      },
+      "created": { "unrecorded": false, "at": "2026-10-27T09:21:04-07:00", "source": "origin" },
+      "edited": {
+        "unrecorded": false,
+        "at": "2026-10-27T10:02:11-07:00",
+        "source": "body",
+        "cmd": "request-changes",
+        "actor": "operator",
+        "drive": "D2"
+      }
     }
   ],
   "lease": {
@@ -408,6 +424,14 @@ An object. `items` is one entry per item in backlog order; merged rows are absen
   ]
 }
 ```
+
+`origin`, `created` and `edited` are on every item, an unreadable one included, read under the id its filename names from the ledger and the file's mtime; they are the table's second line as data. Each carries `unrecorded`, true for what the ledger never wrote down, so a consumer tells an item made before drover recorded origins from one made by the operator.
+
+- `origin` is the item's [origin row](#writing-to-the-ledger-without-the-binary): `cmd`, `actor`, `agent`, `session`, `found_in`, `issue` and `split_from`, each absent when empty. `drive`, `stage` and `of` are the stage row the origin's session resolves to, absent when it resolves to none. `text` is the phrase the table prints (`operator new`, `claude new`, `operator intake #44`, `operator split of E84`, `D20 review of B104`, `supervisor new`, `agent new`, a trailing `← B104` for a `found_in` that is not the resolved item), and `unrecorded` alone with `text` is all an item with no origin row carries.
+- `created.at` is RFC 3339, or a bare date for a row that carries no `ts`. `source` is `origin`, or `ledger` for an unrecorded item: the earliest ledger row naming it, which bounds the creation from above and prints as `≤` in the table. An unrecorded item no row names has no `at`.
+- `edited.source` is `body` (the latest row carrying the body's digest, which still matches the file, with its `cmd`, `actor`, `agent` and `drive`; `unrecorded` when the row predates attribution), `origin` (no digest row yet, so the creation is the last write drover saw), `hand` (the file no longer matches the latest digest: `by_hand` is true and `at` is the file's mtime) or `mtime` (no row at all: `unrecorded`, `at` the mtime).
+
+`--since` keeps the same items in `items` that it keeps in the table: those whose `created.at` or `edited.at` is at or after it. An unreadable item is held to the same cut rather than kept unconditionally, as `--sev` keeps it.
 
 `lease` is [the checkout lease](#the-checkout-lease), present only while another drover command holds this tree, and `lease_error` only when drover could not name the holder: a degraded read says what it could not ask rather than reporting nobody. That covers a lease drover could not read at all and a holder that has the tree and has not written its account yet, which is why the two never appear together: one of them is always a holder drover cannot describe. `item` is absent on a lease taken over a queue rather than for one id, which is every `drive`. A `drive` names its queue instead: `queue` is the ids it holds waiting, in dispatch order, `running` the ids it has dispatched and not yet heard back from, and `jobs` its `--jobs`. `waiting` is each queued id it holds for a dep that parked for the operator, as `{ "id": "5", "on": "4" }`, and `skipped` each id it took off its queue without attempting, as `{ "id": "6", "reason": "blocked by 4" }`; both are absent while empty. It rewrites all five in the lease file as items are dispatched and finish, so another process reads them without asking the drive. A stopped drive dispatches nothing more and publishes an empty `queue`. `paused` is a drive holding its items for a resume, and `holds` each running item it holds at a stage boundary: the item, the stage it goes on to (`at`) and the verify command the stage before was told to pass. A `running` id with no hold is still inside a session, a verify command or the trunk stage. `reexec` names the binary a resumed drive re-executes onto once every running item holds, `reexec_waiting` is the line naming the running items it has waited on for more than a minute, and `handoff` is what it leaves there for the new process, present only across the `exec`. `control`, `answered` and `refused` carry [`--pause` and `--resume`](#pausing-a-drive) between processes. `config_sha256` is the SHA-256 of the `.drover.toml` the drive runs under, written when it takes the lease and again by each resume that takes, and `config_resumed` says a resume wrote it; when the file on disk no longer matches, the table prints `config changed since this drive started; --pause, then --resume, applies it` (`resumed`, after a resume) under the `▸ also here:` line, and the running drive in `drives` carries `"config_changed": true`. A lease an older binary wrote has no `config_sha256` and reports nothing. `closed` is a drive that takes no more ids: it stopped, or its queue ran out and it is exiting. `drive --enqueue` writes into `queue` while it is absent, and the drive takes what was appended at its next dispatch. `drive` is the running drive's id and `label` its `--label`, both written when the drive takes the lease, before reconciliation, and absent on every other holder. The table prints them after the command on the `▸ also here:` line: `drover drive D2 "night run"`, followed by `paused` while it is (`pausing` while an item is still inside a stage, `pausing to re-exec` with a `waiting:` line carrying `reexec_waiting` once that is set), and a `held:` line under it naming each held item and the stage it holds before.
 
@@ -1046,8 +1070,13 @@ The `findings_open` park reason names the follow-up for that item, chosen from t
 | `push_network`            | A `git push` whose output names the transport failing (`closed by remote host`, `Could not resolve host`, `Connection refused`) | That line                                                                       |
 | `code`                    | A `gate_refused` park whose merge gate refused over a red check drive read as `code`, rather than any session log               | Up to 5 lines the check's job log says failed                                   |
 | `unknown`                 | None of the above                                                                                                               | The log's last 5 lines, or the push's                                           |
+| `unrecorded`              | A park no session caused, whose cause named no detail of its own                                                                | `<park>: <reason>`, never a session log                                         |
 
-The order of the rows is the order they are read in. A park that comes after a clean session (`gate_refused` with no `code` check under it, `at_limit`, `protected_paths`) reads `unknown` with the last lines of the last log the item wrote, since nothing under it failed; the `reason` carries the cause. A park before any launch says no session ran.
+The order of the rows is the order they are read in. Only a park a session caused reads the session's log: `runner_fault`, `implement_died`, `implement_unreadable`, `no_commits`, `uncommitted_work` and the review pass causes (`died`, `unreadable`, `no_record`, `at_limit`, `repeating`, `findings_open`, `no_digest`, `body_edited`). One of those that matches no other row reads `unknown` with the last lines of the last log the item wrote, and one before any launch says no session ran. Every other park (`gate_refused` with no `code` check under it, `protected_paths`, `trunk_red` and the rest) reads `unrecorded`, with the cause and the reason as its evidence and no `log`, because the last session before it finished cleanly and its log says nothing about why drive stopped.
+
+A `repeating` or `at_limit` park's `detail` says what repeated instead of a token: `R3 still open after rounds 4 and 5` for a finding the reviewer marked still open twice, `identical evidence in rounds 4 and 5` for an equal digest, and `max_review_rounds 11 reached; the refused request named R3` at the cap. Its `evidence` is the first paragraph of the last request for changes drover kept, and its `log` that kept round's path, since the session finished cleanly and its log explains nothing.
+
+A `trunk_conflict` park's `detail` is the conflicted files instead of a token, comma-separated and relative to the repository root, so `drover status` prints `parked: trunk_conflict (docs/usage.md)`. Its `evidence` is the last 5 lines of `git merge-tree --write-tree --name-only --messages <branch> origin/<trunk>`, which name each file and the kind of conflict, and it carries no `log`.
 
 A session that leaves a process it started running is not counted as clean, whatever its terminal event says: the implement run parks `implement_died` and a review reads `died`. The prompt tells every session to run its verify command in the foreground.
 
@@ -1538,14 +1567,19 @@ A dep's `state` is what drover found behind the id, and it is the field to read 
 
 `modified` is the body file's mtime as a `YYYY-MM-DD` date. The file system always knows it, so the key is always there; drover keeps no `modified:` frontmatter, which a hand edit would silently leave stale.
 
-`created` is the date of the commit that added the body, and it is absent when there is no commit to read: a project that keeps its bodies outside git, or one declaring `[git] enabled = false`. `created_unknown` then carries the reason, so a consumer reads a missing date as a question nobody could ask rather than as a body with no history. A backlog under a gitignored `.drover/` is that case: `drover show B9 --json` there reports the reason rather than a zero date.
+`origin`, `created` and `edited` are the objects [`status --json`](#status---json) carries, with one difference in `created`: an item with no origin row falls back to the date of the commit that added the body, `source` `git`, rather than to the earliest ledger row. `created` is `{"unrecorded": true}`, with no `at` and no `source`, when there is neither, on a project that keeps its bodies outside git or declares `[git] enabled = false`, and `created_unknown` then carries the reason, so a consumer reads a missing date as a question nobody could ask rather than as a body with no history. A backlog under a gitignored `.drover/` is that case: `drover show B9 --json` there reports the reason rather than a zero date.
 
 ```json
 {
   "modified": "2026-08-27",
-  "created_unknown": ".drover/backlog/B09-login-redirect-loops.md is not tracked in the work tree"
+  "origin": { "unrecorded": true, "text": "unrecorded" },
+  "created": { "unrecorded": true },
+  "created_unknown": ".drover/backlog/B09-login-redirect-loops.md is not tracked in the work tree",
+  "edited": { "unrecorded": true, "at": "2026-08-27T14:02:11-07:00", "source": "mtime" }
 }
 ```
+
+`show` prints the same answers beside its dates: `modified   2026-08-27  edited accept · operator` and `created    2026-08-26  origin operator new`.
 
 ### `unaudited --json`
 
@@ -1848,10 +1882,24 @@ Every row drover writes carries `ts` beside `date`: the instant it was written, 
 
 `reviewer` on an audit row is who looked, as the operator attributes it, and it is how a human reviewer is recorded at all. Omit it and the row says nobody was named; drover never fills it in, because a reviewer the tool invented is one nobody can go and ask. `agent` on a completion row means who the record credits with the work, which `mark-merged` and `finish` do default. `level` is the only key drover reads as an audit level; a row carrying an `audit` key instead is not read as an audit row. `independent` is an assertion when written by hand, as `--code-by` is when typed.
 
-A `changes` row is one `drover request-changes`: `changes` is a digest of the evidence, and `reqs` the requirement numbers its findings name, sorted, absent when none does. A finding is a heading outside a code fence, or the whole evidence when it has none, and a number counts only when the body's list holds it. `drive` reads two consecutive rows with the same `changes`, or with equal `reqs`, as a review repeating itself and parks the item `repeating`.
+A `changes` row is one `drover request-changes`: `changes` is a digest of the evidence, and `reqs` the requirement numbers its findings name, sorted, absent when none does. A finding is a heading outside a code fence, or the whole evidence when it has none, and a number counts only when the body's list holds it. `still_open` is the requirement numbers the reviewer passed to `--still-open`: those whose finding from the previous request it reproduced as still open, a subset of that row's `reqs`, absent when empty. A `refused` row carries `reqs` too, naming what the request the cap turned away named.
+
+`drive` parks the item `repeating` on two consecutive rows with the same `changes`, or on two consecutive rows each carrying `still_open` where the two lists share a number: two runs were sent the same finding and neither closed it. Equal `reqs` alone is not a repeat, because one requirement can yield a different defect every round while the branch improves, and `[review] max_review_rounds` is the bound on that.
 
 ```json
-{"id":"16","changes":"9c41e07b2d3a","reqs":[4,7],"date":"2026-10-26","ts":"2026-10-26T10:02:11-07:00"}
+{"id":"16","changes":"9c41e07b2d3a","reqs":[4,7],"still_open":[4],"date":"2026-10-26","ts":"2026-10-26T10:02:11-07:00"}
+```
+
+A body row records that drover wrote an item's body: `body` is a 12-hex digest of the file, and `cmd`, `actor` and `agent` say who wrote it. `cmd` is the drover command (`accept`, `unaccept`, `amend`, `invariant`, `link`, `split`, `request-changes`, `close-changes`, `touch`); `request-changes` keeps that name when `drive` sends work back through it. `actor` is `operator`, `agent` for a session drover launched, or `supervisor` for the one `drover supervise` started. `agent` names the interactive agent driving the command: in a session drover launched it is the runner that session's stage row recorded, and in a terminal drover did not start it is `claude` when `CLAUDECODE=1` is set, `codex` when `CODEX_THREAD_ID` is, and `""` otherwise. The `agent` key is always present on a body row, so an empty value means drover saw no agent rather than that nobody recorded one. drover refuses to append a row carrying `body` without `cmd` and `actor`. `touch` always records `operator`, since a person's hand edit is what it certifies. A review stage row carries the same four keys beside its `body`, with `cmd` the command that launched the session, `review` or `drive`. A file whose digest no longer matches the latest body row was edited by something drover did not run. A body row written before these keys existed carries none of them, and a reader reports its author as unrecorded rather than as the operator.
+
+```json
+{"id":"16","body":"a1b2c3d4e5f6","cmd":"accept","actor":"operator","agent":"claude","date":"2026-10-27","ts":"2026-10-27T09:12:03-07:00"}
+```
+
+An origin row records how an item came to exist, and a set `origin` object is what makes a row one. `new`, `intake` and `split` each write one when they create a body, and nothing else does. `origin` holds every key whether or not it applies: `cmd` (`new`, `intake` or `split`), `actor` and `agent` as on a body row, `session` (the launch id of the session drover started, empty for the operator), `found_in` (`new --found-in`), `issue` (the tracker issue `intake` read, 0 otherwise) and `split_from` (the item `split` took the work from). Where `session` matches a stage row's, that row's `drive`, `stage` and `id` say which drive's session filed it and while working which item. An item created before origin rows existed has none, and drover never writes one after the fact: a row it did not witness would be a record nobody made, so a reader reports the origin as unrecorded. The `Found while working <id>, <title>.` line `new --found-in` writes into the body stays, because `draft` reads it back.
+
+```json
+{"id":"B105","origin":{"cmd":"new","actor":"agent","agent":"codex","session":"5e55a0c1d2e3","found_in":"B104","issue":0,"split_from":""},"date":"2026-10-27","ts":"2026-10-27T09:14:40-07:00"}
 ```
 
 The stage row is what `run` and `review` write themselves, and writing it is what lets `mark-merged` and `finish` attribute the work without being told. An agent recording a run by hand should write one too; omitting it costs the attribution, not the completion.

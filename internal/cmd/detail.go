@@ -8,8 +8,10 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/gitcmd"
 	"github.com/ravinald/drover/internal/ledger"
+	"github.com/ravinald/drover/internal/prompts"
 	"github.com/ravinald/drover/internal/runlog"
 	"github.com/ravinald/drover/internal/runner"
 )
@@ -21,9 +23,11 @@ import (
 // OAuth token that expired, a pre-push hook or ssh refusing the push.
 //
 // A token rather than prose for the reason park is one: a wrapper keys on it.
-// unknown is a park whose cause none of the others names, and it carries the
-// last lines of the log so the operator reads them in the park rather than
-// opening the file.
+// unknown is a session-caused park whose cause none of the others names, and it
+// carries the last lines of the log so the operator reads them in the park
+// rather than opening the file. unrecorded is a park no session caused whose
+// code path named no detail of its own: it carries the cause and drive's
+// reason, because a session log there would describe work that went fine.
 const (
 	detailRunnerExit  = "runner_exit"
 	detailToolDenied  = "tool_denied"
@@ -34,7 +38,25 @@ const (
 	detailPushHook    = "push_hook"
 	detailPushNetwork = "push_network"
 	detailUnknown     = "unknown"
+	detailUnrecorded  = "unrecorded"
 )
+
+// unrecordedLimit is the most of a reason an unrecorded detail carries: enough
+// for the sentence and the verify output tail some reasons end on.
+const unrecordedLimit = 2000
+
+// sessionPark reports a park cause a session's own ending produces: the
+// implement run's, a review pass's, and a runner fault. sessionDetail reads
+// these; every other cause is drive's, after its sessions were done.
+func sessionPark(park string) bool {
+	switch park {
+	case "runner_fault", parkImplementDied, parkImplementUnreadable, parkNoCommits, parkUncommitted,
+		passDied, passFaulted, passUnreadable, passSilent, passCapped, passRepeating,
+		passStanding, passChangesUnrecorded, passEdited:
+		return true
+	}
+	return false
+}
 
 // tailLines is how many of a log's last lines an unknown detail carries.
 const tailLines = 5
@@ -234,21 +256,122 @@ func prePushHook(root string) string {
 	return ""
 }
 
-// recordPark fills the detail of a park nothing named one for, from the last
-// launch the item made, and appends the twelfth-shape row status and show read
-// it back from. A park before any launch has no session to read, and says so.
+// recordPark fills the detail of a park nothing named one for, and appends the
+// twelfth-shape row status and show read it back from. Only a park a session
+// caused reads the last launch the item made; one before any launch says no
+// session ran. Any other park names its cause and reason instead, since the
+// last session there finished cleanly and its log explains nothing.
 func (s *session) recordPark(d *DriveItem, last *runner.Outcome, lastErr error) {
 	if d.Detail == "" {
-		pd := parkDetail{Detail: detailUnknown, Evidence: "no session ran for this item in this drive"}
-		if last != nil {
-			pd = sessionDetail(*last, lastErr)
+		switch {
+		case !sessionPark(d.Park):
+			d.setDetail(parkDetail{Detail: detailUnrecorded, Evidence: trim(d.Park+": "+d.Reason, unrecordedLimit)})
+		case last != nil:
+			d.setDetail(sessionDetail(*last, lastErr))
+		default:
+			d.setDetail(parkDetail{Detail: detailUnknown, Evidence: "no session ran for this item in this drive"})
 		}
-		d.setDetail(pd)
 	}
 	row := ledger.Row{ID: d.ID, Park: d.Park, Detail: d.Detail, Evidence: d.Evidence, Log: d.Log, Date: ledger.Today()}
 	if err := s.record(row); err != nil {
 		fmt.Fprintf(errOut, "  · %s: the ledger refused the park row (%v); status will read the item as implemented\n", d.ID, err)
 	}
+}
+
+// loopDetail is the detail of a park the review loop ended on, repeating or
+// at_limit: what repeated or what the cap turned away, and as evidence the
+// first paragraph of the last request for changes. The session finished
+// cleanly, so its log tail would explain nothing.
+func (s *session) loopDetail(it backlog.Item, v string, p pass) parkDetail {
+	c := p.after
+	n := c.ChangesRequested
+	var pd parkDetail
+	switch {
+	case v == passCapped:
+		named := "no requirement"
+		if len(c.RefusedReqs) > 0 {
+			named = requirementList(c.RefusedReqs)
+		}
+		pd.Detail = fmt.Sprintf("max_review_rounds %d reached; the refused request named %s", p.cap, named)
+	case c.RepeatedChanges:
+		pd.Detail = fmt.Sprintf("identical evidence in rounds %d and %d", n-1, n)
+	default:
+		pd.Detail = fmt.Sprintf("%s still open after rounds %d and %d", requirementList(c.StillOpenReqs), n-1, n)
+	}
+	pd.Evidence, pd.Log = s.lastRequest(it)
+	return pd
+}
+
+// lastRequest is the first paragraph of the item's latest request for changes,
+// with the kept round it came from when there is one. A kept round counts only
+// when its evidence digests to the latest changes row's: request-changes records
+// that row even when keeping the round failed, and the newest file on disk is
+// then an older request, which a park line would present as the current one.
+// Otherwise the body's own section is read off the file, since request-changes
+// writes it before the row and the loaded item predates the review that wrote
+// it; that carries no log, because no kept round holds it.
+func (s *session) lastRequest(it backlog.Item) (evidence, log string) {
+	want := ""
+	for _, r := range s.ledger.Rows {
+		if r.ID == it.ID.Bare() && r.Changes != "" {
+			want = r.Changes
+		}
+	}
+	if want == "" {
+		return "", ""
+	}
+	if rounds, err := s.rounds(it); err == nil && len(rounds) > 0 {
+		last := rounds[len(rounds)-1].Path
+		if raw, err := os.ReadFile(s.cfg.Abs(last)); err == nil { // #nosec G304 — drover's own reports directory
+			if text := dropRoundHeader(string(raw)); digest(text) == want {
+				return firstParagraph(text), last
+			}
+		}
+	}
+	raw, err := os.ReadFile(it.Path)
+	if err != nil {
+		return "", ""
+	}
+	_, body, err := splitFrontmatter(string(raw))
+	if err != nil {
+		return "", ""
+	}
+	if d := (prompts.Data{Body: body}); !d.Cleared() {
+		return firstParagraph(d.Changes()), ""
+	}
+	return "", ""
+}
+
+// dropRoundHeader is a kept round's evidence without the header line keepRound
+// writes above it.
+func dropRoundHeader(raw string) string {
+	if strings.HasPrefix(raw, "# ") {
+		if _, rest, ok := strings.Cut(raw, "\n"); ok {
+			return rest
+		}
+		return ""
+	}
+	return raw
+}
+
+// firstParagraph is evidence up to its first blank line after prose, so a
+// finding that opens on its heading carries the sentence under it.
+func firstParagraph(text string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+	prose := false
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			if prose {
+				break
+			}
+			continue
+		}
+		out = append(out, t)
+		prose = prose || !strings.HasPrefix(t, "#")
+	}
+	return strings.Join(out, "\n")
 }
 
 // announcePark says a park on stderr the moment it happens. driveSummary says

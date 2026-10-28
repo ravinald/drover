@@ -398,10 +398,20 @@ func TestAgentsExplainsClosesAndIssueWhereDeclared(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{closes, "drover resolve", "--link", "`fixed`", "NO DISPOSITION", issue, "names it in both"} {
+	for _, want := range []string{closes, "drover resolve", "--link", "`fixed`", "NO DISPOSITION", issue, "names it in both",
+		"`[intake] closes = \"issue\"` makes intake write it into both"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("block declaring closes and issue lacks %q", want)
 		}
+	}
+
+	s.cfg.Intake.Closes = config.IntakeClosesIssue
+	seeded, err := s.renderAgents()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "This project sets `[intake] closes = \"issue\"`"; !strings.Contains(seeded, want) {
+		t.Errorf("block under [intake] closes = \"issue\" lacks %q", want)
 	}
 
 	plain, err := fixture(t, "").renderAgents()
