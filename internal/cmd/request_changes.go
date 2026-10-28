@@ -373,7 +373,7 @@ func proseParagraph(lines []string) string {
 	var f fence
 	for _, l := range lines {
 		t := strings.TrimSpace(l)
-		if f.skip(l) || strings.HasPrefix(t, "#") || t == "" {
+		if f.skip(l) || headingDepth(l) > 0 || t == "" {
 			if len(out) > 0 {
 				break
 			}
@@ -477,7 +477,7 @@ func operatorOnlyFindings(it backlog.Item, text string) (ops []backlog.Requireme
 func findingTexts(text string) (findings []string, headed bool) {
 	var f fence
 	for _, l := range strings.Split(text, "\n") {
-		if t := strings.TrimSpace(l); !f.skip(l) && strings.HasPrefix(t, "#") {
+		if t := strings.TrimSpace(l); !f.skip(l) && headingDepth(l) > 0 {
 			findings = append(findings, t)
 		}
 	}

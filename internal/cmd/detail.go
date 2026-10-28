@@ -384,7 +384,7 @@ func firstParagraph(text string) string {
 			continue
 		}
 		out = append(out, t)
-		prose = prose || !strings.HasPrefix(t, "#")
+		prose = prose || headingDepth(t) == 0
 	}
 	return strings.Join(out, "\n")
 }

@@ -7936,33 +7936,46 @@ func TestAReviewHandingARequirementToTheOperatorParksForADecision(t *testing.T) 
 	}
 	const sixRequirements = "---\ntitle: First\ndeps:\n---\n\n" +
 		"1. One.\n2. Two.\n3. Pin the tagged osquery-go release.\n4. Four.\n5. Five.\n6. Six.\n"
-	const r3 = "### R3 needs a release upstream never made\n\nosquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one. " +
-		"Amend R3 to pin the commit, or wait for the release.\n"
+	const pinReason = "osquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one."
+	// A line opening on an issue reference is prose, not a heading, so it is
+	// the reason at every stage that tells the two apart.
+	const issueReason = "#62 tracks the missing upstream release, so nothing in this repository can supply it."
+	const title = "R3 needs a release upstream never made"
+	const rest = " Amend R3 to pin the commit, or wait for the release.\n"
+	flat := func(reason string) string { return "### " + title + "\n\n" + reason + rest }
 	// A subordinate heading belongs to the finding above it, so the reason is
 	// the prose under it rather than the R3 heading's title.
-	const nestedR3 = "### R3 needs a release upstream never made\n\n#### Reason\n\n" +
-		"osquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one. " +
-		"Amend R3 to pin the commit, or wait for the release.\n"
+	nested := func(reason string) string { return "### " + title + "\n\n#### Reason\n\n" + reason + rest }
 	// The same finding written one level shallower, which request-changes has to
 	// demote: the reason stays under R3 only when both headings move together.
-	const shallowR3 = "## R3 needs a release upstream never made\n\n### Reason\n\n" +
-		"osquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one. " +
-		"Amend R3 to pin the commit, or wait for the release.\n"
+	shallow := func(reason string) string { return "## " + title + "\n\n### Reason\n\n" + reason + rest }
 	const r2 = "### R2 answers 200 on a refused object\n\n`curl -i /refused` printed 200.\n\n"
-	for _, c := range []struct {
+	type decisionCase struct {
 		name     string
 		evidence string
+		reason   string
 		body     []string
-	}{
-		{name: "one operator finding", evidence: r3, body: []string{"no tagged release past v0.3.1"}},
-		{name: "mixed with an ordinary finding", evidence: r2 + r3, body: []string{"printed 200", "no tagged release past v0.3.1"}},
-		{name: "reason under a subordinate heading", evidence: nestedR3, body: []string{"no tagged release past v0.3.1"}},
-		{name: "mixed, reason under a subordinate heading", evidence: r2 + nestedR3,
-			body: []string{"printed 200", "no tagged release past v0.3.1"}},
-		{name: "reason under a heading request-changes demotes", evidence: shallowR3, body: []string{"no tagged release past v0.3.1"}},
-		{name: "mixed, reason under a heading request-changes demotes", evidence: r2 + shallowR3,
-			body: []string{"printed 200", "no tagged release past v0.3.1"}},
+	}
+	var cases []decisionCase
+	for _, r := range []struct{ label, reason, inBody string }{
+		{"", pinReason, "no tagged release past v0.3.1"},
+		{", reason opening on an issue reference", issueReason, "tracks the missing upstream release"},
 	} {
+		for _, f := range []struct {
+			label string
+			form  func(string) string
+		}{
+			{"one operator finding", flat},
+			{"reason under a subordinate heading", nested},
+			{"reason under a heading request-changes demotes", shallow},
+		} {
+			cases = append(cases,
+				decisionCase{name: f.label + r.label, evidence: f.form(r.reason), reason: r.reason, body: []string{r.inBody}},
+				decisionCase{name: "mixed, " + f.label + r.label, evidence: r2 + f.form(r.reason), reason: r.reason,
+					body: []string{"printed 200", r.inBody}})
+		}
+	}
+	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			isolate(t)
 			ghLog := mergeProject(t)
@@ -8002,7 +8015,7 @@ cd "$DROVER_ROOT" && DROVER_TEST_AS_DROVER=1 "$DROVER_TEST_SELF" request-changes
 			if !ok || pk.Park != passNeedsDecision || pk.Detail != "R3 needs an operator decision" {
 				t.Fatalf("park row = %+v, want needs_decision naming R3\nrequest-changes:\n%s", pk, out)
 			}
-			const reason = "osquery-go has no tagged release past v0.3.1, so nothing in this repository can pin one."
+			reason := c.reason
 			if !strings.Contains(pk.Evidence, "R3: "+reason) {
 				t.Errorf("park evidence lacks R3's reason: %q", pk.Evidence)
 			}
