@@ -62,7 +62,7 @@ const (
 )
 
 var (
-	reviewLaunch = ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: launchBody, Date: "2026-10-01"}
+	reviewLaunch = ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: launchBody, Date: "2026-10-01"}
 	reviewAudit  = ledger.Row{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-01"}
 	reviewClear  = ledger.Row{ID: "1", Body: guardBody, Cleared: true, Date: "2026-10-01"}
 )
@@ -1636,7 +1636,7 @@ func TestOpenPRWithoutADriveNamesTheAuthorityThatAnswered(t *testing.T) {
 		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Date: "2026-09-18"},
 		{ID: "1", Changes: "abc123", Date: "2026-09-18"},
 		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-09-19"},
-		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: bodyAtLaunch, Date: "2026-09-20"},
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: bodyAtLaunch, Date: "2026-09-20"},
 		{ID: "1", Level: ledger.LevelReviewed, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-09-20"},
 	} {
 		if err := ledger.Append(path, stamp(t, s, row)); err != nil {
@@ -1696,7 +1696,7 @@ func unrequestedPassRows() []ledger.Row {
 		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Date: "2026-09-22"},
 		{ID: "1", Changes: "second", Date: "2026-09-22"},
 		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-09-22"},
-		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: bodyAtLaunch, Date: "2026-09-22"},
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: bodyAtLaunch, Date: "2026-09-22"},
 		{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-09-22"},
 	}
 }
@@ -1800,7 +1800,7 @@ func TestAStalePassHandsTheFallbackItsOwnRefusals(t *testing.T) {
 		name: "the body changed outside drover",
 		want: "changed outside drover",
 		rows: append(unrequestedPassRows()[:4],
-			ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: "0123456789ab", Date: "2026-09-22"},
+			ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: "0123456789ab", Date: "2026-09-22"},
 			ledger.Row{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-09-22"}),
 	}} {
 		t.Run(c.name, func(t *testing.T) {
@@ -1826,7 +1826,7 @@ func TestAStalePassHandsTheFallbackItsOwnRefusals(t *testing.T) {
 func TestACleanFirstReviewOpensAPullRequestWithoutForce(t *testing.T) {
 	out, err := reviewPassedOver(t, "", []ledger.Row{
 		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-10-01"},
-		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: bodyAtLaunch, Date: "2026-10-01"},
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: bodyAtLaunch, Date: "2026-10-01"},
 		{ID: "1", Level: ledger.LevelVerified, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-01"},
 	})
 	if err != nil {
@@ -2870,7 +2870,7 @@ func mergedLaunched(t *testing.T, s *session, id, branch string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.launched(it, ledger.StageImplement, "impl"); err != nil {
+	if _, err := s.launched(it, "run", ledger.StageImplement, "impl"); err != nil {
 		t.Fatal(err)
 	}
 	// Recorded before the merge, as a drive records it before the push: after the
@@ -4084,7 +4084,7 @@ func TestReconciliationRefusesAMergedBranchThatNeverHeldACommit(t *testing.T) {
 	}
 	// The branch a killed run leaves: created from the trunk, never committed to.
 	git(t, dir, "branch", branch, "main")
-	if _, err := s.launched(it, ledger.StageImplement, "impl"); err != nil {
+	if _, err := s.launched(it, "run", ledger.StageImplement, "impl"); err != nil {
 		t.Fatal(err)
 	}
 	// The trunk moves on, so the branch is behind it rather than level with it and
@@ -5512,6 +5512,71 @@ func TestATrunkConflictParksAndForcesNothing(t *testing.T) {
 	if len(gateLog(t, dir)) != 0 {
 		t.Error("the merge gate ran over a branch that never updated")
 	}
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if l.Counts("1").ByStage[ledger.StageReview] == 0 {
+		t.Fatal("no review session ran before the conflict, so its log could not have been mistaken for the evidence")
+	}
+	conflictParkRow(t, dir, "implemented.txt")
+}
+
+// The trunk can move between a merge that conflicted and the read of its
+// evidence, as a sibling's fetch moves it. The evidence describes the merge that
+// failed, not a merge against wherever origin's trunk points by then.
+func TestATrunkConflictAfterReviewKeepsTheFailedMergeAsEvidence(t *testing.T) {
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, remote := forge(t, ghLog)
+	moveTrunk(t, remote, "implemented.txt", "theirs")
+	trunkResolvesOnAbort(t)
+
+	rows := driveAll(t)
+	if rows[0].Park != parkTrunkConflict {
+		t.Fatalf("item 1 is %q/%q (%s), want parked %q", rows[0].Outcome, rows[0].Park, rows[0].Reason, parkTrunkConflict)
+	}
+	conflictParkRow(t, dir, "implemented.txt")
+}
+
+// trunkResolvesOnAbort makes every merge --abort move origin/main, in the tree
+// it ran in, to a commit resolving the aborted merge: after it, merge-tree
+// against origin/main by name finds no conflict at all.
+func trunkResolvesOnAbort(t *testing.T) {
+	t.Helper()
+	gitBin, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DROVER_TEST_REAL_GIT", gitBin)
+	bin := t.TempDir()
+	stub(t, filepath.Join(bin, "git"), `#!/bin/sh
+if [ "$1" = -C ] && [ "$3" = merge ] && [ "$4" = --abort ]; then
+	"$DROVER_TEST_REAL_GIT" "$@" || exit $?
+	dir=$2
+	resolved=$("$DROVER_TEST_REAL_GIT" -C "$dir" commit-tree "HEAD^{tree}" -p refs/remotes/origin/main -p HEAD -m resolved) || exit $?
+	exec "$DROVER_TEST_REAL_GIT" -C "$dir" update-ref refs/remotes/origin/main "$resolved"
+fi
+exec "$DROVER_TEST_REAL_GIT" "$@"
+`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// conflictParkRow asserts item 1's ledger park row names the conflicted file as its
+// detail, carries merge-tree's account of it, and points at no session log.
+func conflictParkRow(t *testing.T, dir, path string) {
+	t.Helper()
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pk, ok := l.Parked("1")
+	if !ok || pk.Park != parkTrunkConflict || pk.Detail != path || pk.Log != "" {
+		t.Fatalf("ledger park row = %+v (found %v), want %s (%s) and no log", pk, ok, parkTrunkConflict, path)
+	}
+	if !strings.Contains(pk.Evidence, "CONFLICT") || !strings.Contains(pk.Evidence, path) {
+		t.Errorf("evidence %q is not merge-tree's account of %s", pk.Evidence, path)
+	}
 }
 
 // --follow appends what a finish unblocked. Item 3 depends on item 1, so it is
@@ -5791,7 +5856,7 @@ func TestAnExactBytesDigestStillMatches(t *testing.T) {
 	}
 	exact := digestBytes(raw)
 
-	launch := ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Body: exact, Date: "2026-10-01"}
+	launch := ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: exact, Date: "2026-10-01"}
 	audit := ledger.Row{ID: "1", Level: ledger.LevelReviewed, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-01"}
 	p := pass{before: rowCounts(), after: rowCounts(launch, audit), logged: true, res: ok}
 	p.readBody(it.Path)
@@ -7465,6 +7530,23 @@ func TestAConflictAtDispatchParksAtSupervisor(t *testing.T) {
 	if st := git(t, h.Tree, "status", "--porcelain"); st != "" {
 		t.Errorf("the worktree was left mid-merge:\n%s", st)
 	}
+	conflictParkRow(t, dir, "shared.txt")
+}
+
+// The dispatch hold merges the trunk commit it resolved under the trunk lock,
+// and a sibling's fetch can move origin/main once that lock is released.
+func TestAConflictAtDispatchKeepsTheFailedMergeAsEvidence(t *testing.T) {
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, _ := forge(t, ghLog)
+	staleBranch(t, dir, "shared.txt", "ours")
+	mergedSibling(t, dir)
+	trunkResolvesOnAbort(t)
+
+	if _, stderr, err := driveEventsOf(t, "1"); err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	conflictParkRow(t, dir, "shared.txt")
 }
 
 // A conflict round counts against max_review_rounds, so an item already at the cap

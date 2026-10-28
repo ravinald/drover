@@ -122,7 +122,9 @@ ledger, keeps no round, and reaches no tracker.`,
 		if err := os.WriteFile(it.Path, written, 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", it.Path, err)
 		}
-		if err := s.record(ledger.Row{ID: it.ID.Bare(), Body: bodySum(written), Cleared: true, Date: ledger.Today()}); err != nil {
+		row := ledger.BodyRow(it.ID.Bare(), bodySum(written), s.author("close-changes"))
+		row.Cleared = true
+		if err := s.record(row); err != nil {
 			return err
 		}
 		fmt.Printf("cleared the block on %s -> %s (%d requirement(s) unchanged)\n",

@@ -118,7 +118,7 @@ func (s *session) link(it backlog.Item, numbers []int) error {
 	if err != nil {
 		return err
 	}
-	if err := s.writeBody(it, written); err != nil {
+	if err := s.writeBody(it, "link", written); err != nil {
 		return err
 	}
 

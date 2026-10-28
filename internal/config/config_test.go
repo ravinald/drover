@@ -694,6 +694,53 @@ func TestMergeMethod(t *testing.T) {
 	}
 }
 
+// [intake] closes = "issue" seeds closes with the intake issue. Any other value
+// is refused at load, and so is the setting where closes is undeclared: intake
+// would seed a key the next read of the scaffold rejects.
+func TestIntakeCloses(t *testing.T) {
+	declared := "\n[frontmatter]\nrequired = [\"title\", \"deps\"]\noptional = [\"issue\", \"closes\"]\n"
+	undeclared := "\n[frontmatter]\nrequired = [\"title\", \"deps\"]\noptional = [\"issue\"]\n"
+	for _, c := range []struct {
+		name, frontmatter, line, want string
+		refused                       []string
+	}{
+		{name: "default", frontmatter: declared, want: ""},
+		{name: "empty", frontmatter: declared, line: `closes = ""`, want: ""},
+		{name: "issue", frontmatter: declared, line: `closes = "issue"`, want: "issue"},
+		{name: "invalid", frontmatter: declared, line: `closes = "always"`,
+			refused: []string{`intake.closes is "always"`, `"issue"`}},
+		{name: "undeclared", frontmatter: undeclared, line: `closes = "issue"`,
+			refused: []string{"intake.closes", "[frontmatter] optional"}},
+		{name: "undeclared and unset", frontmatter: undeclared, want: ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			body := minimal + c.frontmatter
+			if c.line != "" {
+				body += "\n[intake]\n" + c.line + "\n"
+			}
+			root := write(t, map[string]string{FileName: body, "go.mod": "module x\n"})
+			cfg, err := Load(root)
+			if len(c.refused) > 0 {
+				if err == nil {
+					t.Fatalf("load succeeded, want a refusal naming %q", c.refused)
+				}
+				for _, want := range c.refused {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("load = %v, want it to name %q", err, want)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Intake.Closes != c.want {
+				t.Errorf("intake.closes = %q, want %q", cfg.Intake.Closes, c.want)
+			}
+		})
+	}
+}
+
 // How a repository merges is a fact about that repository, so a per-user value
 // would apply one project's history policy to every project on the machine.
 // The refusal names the file the value belongs in.

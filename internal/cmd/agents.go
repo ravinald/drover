@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"github.com/ravinald/drover/internal/backlog"
+	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/gitcmd"
 	"github.com/ravinald/drover/internal/prompts"
 	"github.com/ravinald/drover/internal/runner"
@@ -70,9 +71,11 @@ type agentsData struct {
 	Optional   []string
 	// Closes and Issue say the project declares that key. Each carries
 	// behavior a bare name in the schema list does not show: finish reads one
-	// and ignores the other.
+	// and ignores the other. SeedCloses says intake writes the issue number
+	// into closes as well.
 	Closes         bool
 	Issue          bool
+	SeedCloses     bool
 	StopMarker     string
 	FollowUpLabel  string
 	SeverityPrefix string
@@ -294,6 +297,7 @@ func (s *session) generatedAgents() (string, error) {
 		Optional:       cfg.Frontmatter.Optional,
 		Closes:         cfg.Known(backlog.KeyCloses),
 		Issue:          cfg.Known(backlog.KeyIssue),
+		SeedCloses:     cfg.Intake.Closes == config.IntakeClosesIssue,
 		StopMarker:     cfg.Intake.StopMarker,
 		FollowUpLabel:  cfg.GitHub.FollowUpLabel,
 		SeverityPrefix: cfg.GitHub.SeverityPrefix,

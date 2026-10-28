@@ -77,7 +77,7 @@ func TestStatusMarksWhatADriveHasQueued(t *testing.T) {
 	rows := s.rows()
 	s.attachDrive(rows, l, time.Now())
 	var buf bytes.Buffer
-	s.printTable(&buf, rows, nil)
+	s.printTable(&buf, rows, nil, time.Now())
 	got := buf.String()
 	if !strings.Contains(got, "queued 2") || !strings.Contains(got, "queued:  B1 B2") {
 		t.Errorf("the table names no queue:\n%s", got)

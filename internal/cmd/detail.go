@@ -21,9 +21,11 @@ import (
 // OAuth token that expired, a pre-push hook or ssh refusing the push.
 //
 // A token rather than prose for the reason park is one: a wrapper keys on it.
-// unknown is a park whose cause none of the others names, and it carries the
-// last lines of the log so the operator reads them in the park rather than
-// opening the file.
+// unknown is a session-caused park whose cause none of the others names, and it
+// carries the last lines of the log so the operator reads them in the park
+// rather than opening the file. unrecorded is a park no session caused whose
+// code path named no detail of its own: it carries the cause and drive's
+// reason, because a session log there would describe work that went fine.
 const (
 	detailRunnerExit  = "runner_exit"
 	detailToolDenied  = "tool_denied"
@@ -34,7 +36,25 @@ const (
 	detailPushHook    = "push_hook"
 	detailPushNetwork = "push_network"
 	detailUnknown     = "unknown"
+	detailUnrecorded  = "unrecorded"
 )
+
+// unrecordedLimit is the most of a reason an unrecorded detail carries: enough
+// for the sentence and the verify output tail some reasons end on.
+const unrecordedLimit = 2000
+
+// sessionPark reports a park cause a session's own ending produces: the
+// implement run's, a review pass's, and a runner fault. sessionDetail reads
+// these; every other cause is drive's, after its sessions were done.
+func sessionPark(park string) bool {
+	switch park {
+	case "runner_fault", parkImplementDied, parkImplementUnreadable, parkNoCommits, parkUncommitted,
+		passDied, passFaulted, passUnreadable, passSilent, passCapped, passRepeating,
+		passStanding, passChangesUnrecorded, passEdited:
+		return true
+	}
+	return false
+}
 
 // tailLines is how many of a log's last lines an unknown detail carries.
 const tailLines = 5
@@ -234,16 +254,21 @@ func prePushHook(root string) string {
 	return ""
 }
 
-// recordPark fills the detail of a park nothing named one for, from the last
-// launch the item made, and appends the twelfth-shape row status and show read
-// it back from. A park before any launch has no session to read, and says so.
+// recordPark fills the detail of a park nothing named one for, and appends the
+// twelfth-shape row status and show read it back from. Only a park a session
+// caused reads the last launch the item made; one before any launch says no
+// session ran. Any other park names its cause and reason instead, since the
+// last session there finished cleanly and its log explains nothing.
 func (s *session) recordPark(d *DriveItem, last *runner.Outcome, lastErr error) {
 	if d.Detail == "" {
-		pd := parkDetail{Detail: detailUnknown, Evidence: "no session ran for this item in this drive"}
-		if last != nil {
-			pd = sessionDetail(*last, lastErr)
+		switch {
+		case !sessionPark(d.Park):
+			d.setDetail(parkDetail{Detail: detailUnrecorded, Evidence: trim(d.Park+": "+d.Reason, unrecordedLimit)})
+		case last != nil:
+			d.setDetail(sessionDetail(*last, lastErr))
+		default:
+			d.setDetail(parkDetail{Detail: detailUnknown, Evidence: "no session ran for this item in this drive"})
 		}
-		d.setDetail(pd)
 	}
 	row := ledger.Row{ID: d.ID, Park: d.Park, Detail: d.Detail, Evidence: d.Evidence, Log: d.Log, Date: ledger.Today()}
 	if err := s.record(row); err != nil {

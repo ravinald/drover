@@ -122,6 +122,15 @@ type Row struct {
 	// Usage is every usage row naming the item, all time, and absent when none
 	// does: an item nobody measured has no usage, not a usage of zero.
 	Usage *UsageTotals `json:"usage,omitempty"`
+	// Origin, Created and Edited are where the item came from, when it was
+	// created, and the latest write to its body, each saying whether the ledger
+	// recorded it. An unreadable row carries them too.
+	Origin  *ItemOrigin `json:"origin,omitempty"`
+	Created *ItemTime   `json:"created,omitempty"`
+	Edited  *ItemEdit   `json:"edited,omitempty"`
+	// path is an unreadable row's file, which provenance reads in place of
+	// the item nothing could parse.
+	path string
 }
 
 // StatusReport is what --json emits: the rows, and who else is in this
@@ -205,6 +214,8 @@ var (
 	statusPrintCSS      string
 	statusWindow        int
 	statusAllProjects   bool
+	statusShort         bool
+	statusSince         string
 )
 
 var statusCmd = &cobra.Command{
@@ -230,6 +241,20 @@ The item whose branch is checked out is marked with ▸ and named in the
 footer, and a drover command holding this checkout is named under it. status
 reports that and never refuses it: the question it answers is where you are,
 which now includes who else is here.
+
+Under each row a second line, dim and indented to the id, says where the item
+came from and who last wrote it, in fixed-width fields so a column scans:
+ORIGIN (28), CREATED (12), EDITED (12), then EDITOR.
+      operator intake #44           Oct 27 09:21  Oct 27 10:02 accept · operator
+ORIGIN is the origin row drover writes when new, intake or split makes the
+item, or unrecorded for one made before it did. CREATED for an unrecorded item
+is the earliest ledger row naming it, marked ≤. EDITOR is the command and actor
+of the latest row carrying the body's digest, or "by hand" at the file's mtime,
+marked ~, when the body no longer matches it. The times are local, month and
+day this year and the date alone for another. --short prints one line per item
+and nothing else. --since 3d, 12h or a date keeps only the items created or
+edited since then, beside every other filter, and the footer says how many it
+hid.
 
 The PR column is each item's pull request and its state: open, draft, merged
 or closed. One gh pr list call reads them all, matched on the branch each item
@@ -284,6 +309,8 @@ B1 --json prints.`,
   drover status --sev C,H           # critical and high only
   drover status --sev none          # items declaring nothing drover recognises
   drover status --no-tracker        # ask the forge nothing; the PR column says so
+  drover status --short             # one line per item, no origin line under it
+  drover status --since 3d          # only items created or edited in the last three days
   drover status B1                  # the same as drover show B1, flags included
   drover status --template docs/status.tmpl -o ~/notes/drover.md --force
                                     # the project's own view, written to a file
@@ -306,6 +333,9 @@ B1 --json prints.`,
       "independent":true,"reviewer":"sam","implementer":"claude","review_runner":"codex","runs":3,
       "audits":2,"rounds":2,"planned":false,
       "pr":{"number":236,"state":"merged"},
+      "origin":{"unrecorded":false,"text":"operator intake #44","cmd":"intake","actor":"operator","issue":44},
+      "created":{"unrecorded":false,"at":"2026-10-27T09:21:04-07:00","source":"origin"},
+      "edited":{"unrecorded":false,"at":"2026-10-27T10:02:11-07:00","source":"body","cmd":"accept","actor":"operator"},
       "usage":{"runs":5,"tokens":{"input":2100,"output":310000,"cache_create":2400000,"cache_read":98000000},
        "weighted":12512100,"cost_usd":61.4}},
      {"id":"B2","title":"drive parks twice","state":"implemented","planned":false,"drive":"D2",
@@ -342,6 +372,11 @@ B1 --json prints.`,
   existed. queued is the
   item's pid and position in a running drive's queue, and eta, an estimate, is
   when its review stage should end, absent below 5 timed runs of a stage.
+  origin, created and edited say where the item came from, when, and the
+  latest write to its body, each with unrecorded for what the ledger never
+  wrote down. created.source is origin, or ledger for the earliest row naming
+  an unrecorded item; edited.source is body, origin when no digest row exists
+  yet, hand (by_hand, at the file's mtime) or mtime when no row exists at all.
   drive is the drive that wrote the item's latest drive row, and drives is
   every drive the ledger records, newest first, as drover drives --json prints
   them; the one the lease names carries "running": true, and "config_changed":
@@ -421,6 +456,12 @@ B1 --json prints.`,
 			return err
 		}
 		now := time.Now()
+		sinceCut = time.Time{}
+		if statusSince != "" {
+			if sinceCut, err = parseSinceFlag(statusSince, now); err != nil {
+				return err
+			}
+		}
 		if statusRender {
 			if len(s.cfg.Status.Render) == 0 {
 				return fmt.Errorf("--render renders each [status] render pair, and .drover.toml declares none")
@@ -438,8 +479,8 @@ B1 --json prints.`,
 			tmpl = dashboard.Prefix + "html"
 		}
 		_, builtin := dashboard.Builtin(tmpl)
-		if builtin && (len(statusSev) > 0 || statusBySev) {
-			return fmt.Errorf("%s renders every item, as a [status] render does: drop --sev and --by-sev, or copy it with --print-template and filter in the copy", tmpl)
+		if builtin && (len(statusSev) > 0 || statusBySev || statusSince != "") {
+			return fmt.Errorf("%s renders every item, as a [status] render does: drop --sev, --by-sev and --since, or copy it with --print-template and filter in the copy", tmpl)
 		}
 		if statusJSON || tmpl != "" {
 			report := s.statusReport(!builtin, !statusNoTracker, now)
@@ -461,14 +502,15 @@ B1 --json prints.`,
 		}
 		rows := s.rows()
 		s.attachTimes(rows)
+		s.attachProvenance(rows)
 		if l, busy, err := s.leaseHolder(); err == nil && busy {
 			s.attachDrive(rows, l, now)
 		}
 		if statusBySev {
 			rows = bySeverity(rows)
 		}
-		prErr := s.attachPRs(rows, func(r Row) bool { return (statusAll || r.State != stateDone) && keep(r) }, !statusNoTracker)
-		s.printTable(os.Stdout, rows, prErr)
+		prErr := s.attachPRs(rows, func(r Row) bool { return (statusAll || r.State != stateDone) && keep(r) && recent(r) }, !statusNoTracker)
+		s.printTable(os.Stdout, rows, prErr, now)
 		return nil
 	},
 }
@@ -492,6 +534,7 @@ func statusAsShow(cmd *cobra.Command) error {
 		"all": statusAll, "open": cmd.Flags().Changed("open"), "sev": len(statusSev) > 0, "by-sev": statusBySev,
 		"template": statusTemplate != "", "o": statusOut != "", "render": statusRender, "tz": statusTZ != "",
 		"html": statusHTML, "window": cmd.Flags().Changed("window"), "all-projects": statusAllProjects,
+		"short": statusShort, "since": statusSince != "",
 	} {
 		if set {
 			return fmt.Errorf("--%s shapes the table, and status <id> is show <id>, which prints one item: drop --%s or the id", name, name)
@@ -514,6 +557,12 @@ func statusScope(cmd *cobra.Command) error {
 		if !statusJSON && statusTemplate == "" && !statusHTML && !statusRender && !statusAllProjects {
 			return Refusal{fmt.Errorf("--window sizes the trends --json, a template and --all-projects report, and the table shows none: add one of them")}
 		}
+	}
+	if statusShort && (statusJSON || statusTemplate != "" || statusHTML || statusRender || statusAllProjects) {
+		return Refusal{fmt.Errorf("--short is the one-line table, and --json, a template, --render and --all-projects print no table: drop --short")}
+	}
+	if statusSince != "" && (statusRender || statusAllProjects) {
+		return Refusal{fmt.Errorf("--since filters this project's items, and --render and --all-projects carry every item: drop --since")}
 	}
 	if cmd.Flags().Changed("open") {
 		return Refusal{fmt.Errorf(
@@ -601,15 +650,29 @@ func keep(r Row) bool {
 	return sevWanted[sev.Of(r.Severity)]
 }
 
-// sevRows applies --sev to a slice. Only --json uses it; the table filters
+// sinceCut is the parsed --since, zero when the flag is absent. Package state
+// for the reason sevWanted is.
+var sinceCut time.Time
+
+// recent reports whether a row survives --since: created or edited at or after
+// it. A broken row is held to the same cut, through its ledger rows and mtime,
+// since --since asks what changed and an old unreadable file did not.
+func recent(r Row) bool {
+	if sinceCut.IsZero() {
+		return true
+	}
+	return !r.since().Before(sinceCut)
+}
+
+// sevRows applies --sev and --since to a slice. Only --json uses it; the table filters
 // inline so its footer can still count the whole backlog.
 func sevRows(rows []Row) []Row {
-	if sevWanted == nil {
+	if sevWanted == nil && sinceCut.IsZero() {
 		return rows
 	}
 	out := make([]Row, 0, len(rows))
 	for _, r := range rows {
-		if keep(r) {
+		if keep(r) && recent(r) {
 			out = append(out, r)
 		}
 	}
@@ -642,7 +705,7 @@ func (s *session) rows() []Row {
 	for _, b := range s.backlog.Broken {
 		rows = append(rows, Row{
 			ID: strings.SplitN(trimDir(b.Path), "-", 2)[0], Title: "(unreadable)",
-			State: stateBroken, Error: b.Err.Error(), Planned: true,
+			State: stateBroken, Error: b.Err.Error(), Planned: true, path: b.Path,
 		})
 	}
 
@@ -874,7 +937,7 @@ func tally(rows []Row) counts {
 	return c
 }
 
-func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
+func (s *session) printTable(w io.Writer, rows []Row, prErr error, now time.Time) {
 	fmt.Fprintf(w, "%s status  (ledger: %s)\n\n", s.cfg.Project, s.cfg.Paths.Ledger)
 
 	// The column holds whatever the project put there, so it is sized to the
@@ -894,7 +957,7 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
 	// capped · validate + PR" overruns.
 	noteWidth := 0
 	for _, r := range rows {
-		if (!statusAll && r.State == stateDone) || !keep(r) {
+		if (!statusAll && r.State == stateDone) || !keep(r) || !recent(r) {
 			continue
 		}
 		if n := utf8.RuneCountInString(r.note()); n > noteWidth {
@@ -908,7 +971,7 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
 	// name or a read to report, so a project with no forge keeps its table.
 	prWidth := 0
 	for _, r := range rows {
-		if (!statusAll && r.State == stateDone) || !keep(r) {
+		if (!statusAll && r.State == stateDone) || !keep(r) || !recent(r) {
 			continue
 		}
 		prWidth = max(prWidth, r.PR.visible())
@@ -923,7 +986,7 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
 	}
 	c := tally(rows)
 	intakeSeen := false
-	shown, hidden, offRank := 0, 0, 0
+	shown, hidden, offRank, old := 0, 0, 0, 0
 	var here Row
 	tint := colorTo(w)
 	// The cell only carries severity when the project pointed it there. Tinting
@@ -940,6 +1003,10 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
 		}
 		if !keep(r) {
 			offRank++
+			continue
+		}
+		if !recent(r) {
+			old++
 			continue
 		}
 		// Deferred to the first visible intake row: on a project whose intake is
@@ -978,6 +1045,9 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
 		line := fmt.Sprintf("%s %s %s %s %-*s %s",
 			glyph(r.State), mark, id, cell, width, trunc(r.Title, width), note)
 		fmt.Fprintln(w, paint(line, tint && r.Current))
+		if !statusShort && r.Origin != nil {
+			fmt.Fprintln(w, sgr(r.secondLine(now), pal.Muted, tint))
+		}
 	}
 	// An empty table is an answer, and two blank lines is not a way to give it.
 	// Three different things produce one, and they need different fixes: a
@@ -986,6 +1056,8 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
 	case shown > 0:
 	case offRank > 0:
 		fmt.Fprintf(w, "no items at that severity (%d filtered out).\n", offRank)
+	case old > 0:
+		fmt.Fprintf(w, "nothing created or edited since %s (%d filtered out).\n", statusSince, old)
 	case hidden > 0:
 		fmt.Fprintln(w, "nothing open.")
 	case s.backlog.Missing:
@@ -1005,6 +1077,9 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error) {
 	}
 	if offRank > 0 {
 		progress = append(progress, fmt.Sprintf("%d %s hidden by --sev", offRank, plural(offRank, "row", "rows")))
+	}
+	if old > 0 {
+		progress = append(progress, fmt.Sprintf("%d %s hidden by --since", old, plural(old, "row", "rows")))
 	}
 	if len(progress)+len(waiting) > 0 {
 		fmt.Fprintln(w)
@@ -1324,6 +1399,10 @@ func init() {
 		"the days the trends cover, ending today")
 	statusCmd.Flags().BoolVar(&statusAllProjects, "all-projects", false,
 		"one row per project in the per-user registry instead of this project's items")
+	statusCmd.Flags().BoolVar(&statusShort, "short", false,
+		"one line per item: drop the second line naming origin, created and edited")
+	statusCmd.Flags().StringVar(&statusSince, "since", "",
+		"keep only items created or edited at or after this: a span back from now (3d, 12h) or a date")
 	statusCmd.MarkFlagsMutuallyExclusive("all-projects", "render")
 	statusCmd.MarkFlagsMutuallyExclusive("json", "template")
 	statusCmd.MarkFlagsMutuallyExclusive("html", "template")

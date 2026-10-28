@@ -12,6 +12,7 @@ import (
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/gitcmd"
 	"github.com/ravinald/drover/internal/graph"
+	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/prompts"
 	"github.com/spf13/cobra"
 )
@@ -86,9 +87,9 @@ requirements, the commits and files to move, which way the dependency points
   drover status          # B58 reads blocked until B59 merges
   drover show B58 --json # its deps carry the new id
 
-Safety: local writes. Scaffolds one item under the backlog and, under --after,
-rewrites the deps line of another and appends a body digest row for it to the
-ledger. Reaches no tracker. Under [ids] allocator = "git" it first pushes refs/drover/ids to
+Safety: local writes. Scaffolds one item under the backlog, appends an origin
+row for it to the ledger and, under --after, rewrites the deps line of another
+and appends a body digest row for it to the ledger. Reaches no tracker. Under [ids] allocator = "git" it first pushes refs/drover/ids to
 [ids] remote.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(_ *cobra.Command, args []string) error {
@@ -160,7 +161,7 @@ ledger. Reaches no tracker. Under [ids] allocator = "git" it first pushes refs/d
 		// already names it. Checked anyway: the id comes from the tree, the shelf
 		// and possibly a remote counter, and an id reused after a hand edit would
 		// otherwise write a dependency on itself.
-		id, path, err := s.mint(prefix, slug, body, func(id backlog.ID) error {
+		id, path, err := s.mint(prefix, slug, body, ledger.Origin{Cmd: "split", SplitFrom: it.ID.Bare()}, func(id backlog.ID) error {
 			if splitBefore {
 				return s.acyclicIDs(id.Bare(), deps)
 			}
@@ -422,7 +423,7 @@ func (s *session) blockOn(it backlog.Item, dep string) error {
 	if err != nil {
 		return err
 	}
-	return s.writeBody(it, written)
+	return s.writeBody(it, "split", written)
 }
 
 // acyclic refuses a dependency the backlog could not satisfy in any order.

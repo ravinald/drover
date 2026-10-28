@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/sev"
 	"github.com/spf13/cobra"
 )
@@ -99,17 +100,19 @@ deleting the first.`,
 			return err
 		}
 		body := s.scaffoldBody(kind, title, map[string]string{s.cfg.Severity.Key: rank})
+		origin := ledger.Origin{Cmd: "new"}
 		if newFoundIn != "" {
 			found, err := s.item(newFoundIn)
 			if err != nil {
 				return err
 			}
 			body = withProvenance(body, found.ID.Bare(), found.Title())
+			origin.FoundIn = found.ID.Bare()
 		}
 		if description != "" {
 			body = aboveRole(body, description+"\n\n")
 		}
-		id, path, err := s.mint(prefix, slug, body, nil)
+		id, path, err := s.mint(prefix, slug, body, origin, nil)
 		if err != nil {
 			return err
 		}

@@ -684,14 +684,17 @@ The text goes in as written, with no template processing, so a `{{` renders as `
 
 ## `[intake]`
 
-| Key            | Meaning                                                                                                                           |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `stop_marker`  | Text that holds a scaffolded item inert until a human writes its requirements.                                                    |
-| `hold_markers` | Texts that say a body is not ready to accept. Default `["OPERATOR DECISION PENDING", "BEFORE ACCEPT"]`; `[]` turns the check off. |
+| Key            | Meaning                                                                                                                             |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `stop_marker`  | Text that holds a scaffolded item inert until a human writes its requirements.                                                      |
+| `hold_markers` | Texts that say a body is not ready to accept. Default `["OPERATOR DECISION PENDING", "BEFORE ACCEPT"]`; `[]` turns the check off.   |
+| `closes`       | `"issue"` makes `drover intake` write the issue number into `closes` as well as `issue`. Unset (the default) leaves `closes` empty. |
 
 drover refuses to launch or preview an item whose body carries this text on a line of its own, and `status` shows it as `[?]`: `scaffold · needs requirements` while no numbered requirement is written, `drafted · N reqs · drover accept <id>` once the list is there and waits on accept. The match is a whole line outside any fenced block, never a substring: a body quoting the marker in a config sample is somebody's accepted contract, and matching the quote would make `run` refuse to preview it.
 
 `drover accept <id>` removes the line and `drover unaccept <id>` restores it. Both refuse a project that leaves this key unset, because neither can tell a scaffold from a contract there.
+
+`finish` closes only what an item's `closes` key names and never falls back to `issue`, so an item taken in from an issue closes nothing unless somebody names it there. Set `closes = "issue"` when most items fix the issue they came from: the scaffold then names the number in both keys, and `finish` closes the issue once the item merges. Whoever writes the requirements removes the number from `closes` by hand when the item is one half of a split, or a partial fix that should leave the issue open for the rest. The setting needs `closes` declared under `[frontmatter]`, and load refuses it otherwise, naming the `optional` line to add it to. Any value other than `"issue"` or unset is a load error.
 
 `accept` refuses, unless given `--yes`, a body with a line containing one of `hold_markers` outside a fenced block or a code span holding a space, and names the line. The match is a substring, so `OPERATOR STEP BEFORE ACCEPT: measure X` is a hold under the default. `drover check` reports `HOLD MARKER` for one in an accepted, unmerged item. See [What accept checks](lifecycle.md#what-accept-checks).
 

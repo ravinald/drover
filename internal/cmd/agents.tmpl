@@ -37,6 +37,13 @@ typo'd `deps` would read as no dependencies and render a blocked item READY.
 - `issue` is the tracker issue `drover intake` created this item from. `finish`
   reads `closes`, not `issue`, so an item meant to close its own intake issue
   names it in both.
+{{- if .SeedCloses }}
+  This project sets `[intake] closes = "issue"`, so intake writes the number
+  into both; remove it from `closes` when the item is a split or only partly
+  fixes the issue.
+{{- else if .Closes }}
+  `[intake] closes = "issue"` makes intake write it into both.
+{{- end }}
 {{- end }}
 
 ### Command safety

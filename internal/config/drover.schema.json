@@ -310,6 +310,12 @@
           "items": { "type": "string" },
           "default": ["OPERATOR DECISION PENDING", "BEFORE ACCEPT"],
           "description": "Texts that say a body is not ready to accept. accept refuses a body with one on a line unless given --yes, and check reports one in an accepted, unmerged item. An empty list turns the check off."
+        },
+        "closes": {
+          "type": "string",
+          "enum": ["", "issue"],
+          "default": "",
+          "description": "What intake seeds the closes key with. \"issue\" writes the issue number into closes as well as issue, so finish closes the issue the item came from; unset leaves closes empty. Needs closes declared under [frontmatter]. Remove the number by hand from an item that is a split or only partly fixes the issue."
         }
       }
     },
