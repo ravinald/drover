@@ -162,7 +162,7 @@ func (s *session) acceptOne(bare string) error {
 		return Refusal{fmt.Errorf("%s\nNothing was accepted. The body is not finished: fill in or remove each line above,\n"+
 			"or accept anyway: drover accept %s --yes", strings.Join(msgs, "\n"), it.ID.Bare())}
 	}
-	if err := s.writeBody(it, kept); err != nil {
+	if err := s.writeBody(it, "accept", kept); err != nil {
 		return err
 	}
 	fmt.Printf("accepted: %s (stop marker deleted from %s)\n",
@@ -381,7 +381,7 @@ is not a scaffold, and unrunning a completion is unmark-merged's job.`,
 		}
 		at := bodyStart(lines)
 		restored := append(lines[:at:at], append(stopBlock(marker), lines[at:]...)...)
-		if err := s.writeBody(it, restored); err != nil {
+		if err := s.writeBody(it, "unaccept", restored); err != nil {
 			return err
 		}
 		fmt.Printf("unaccepted: %s (stop marker restored in %s)\n", id, rel(s.cfg.Root, it.Path))
@@ -433,12 +433,12 @@ func bodyLines(path string) ([]string, error) {
 // writeBody rewrites a body in place and records the digest of what it wrote.
 // The mode is only applied on creation, so a file already on disk keeps
 // whatever permissions it had.
-func (s *session) writeBody(it backlog.Item, lines []string) error {
+func (s *session) writeBody(it backlog.Item, cmd string, lines []string) error {
 	written := []byte(strings.Join(lines, "\n"))
 	if err := os.WriteFile(it.Path, written, 0o600); err != nil {
 		return err
 	}
-	return s.wroteBody(it.ID.Bare(), written)
+	return s.wroteBody(it.ID.Bare(), cmd, written)
 }
 
 // bodyStart is the index of the first body line: past the closing frontmatter

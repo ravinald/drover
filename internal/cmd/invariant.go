@@ -94,7 +94,7 @@ no tracker.`,
 		if err := os.WriteFile(it.Path, written, 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", it.Path, err)
 		}
-		if err := s.wroteBody(it.ID.Bare(), written); err != nil {
+		if err := s.wroteBody(it.ID.Bare(), "invariant", written); err != nil {
 			return err
 		}
 		fmt.Printf("recorded against %s -> %s (%d requirement(s) unchanged)\n",

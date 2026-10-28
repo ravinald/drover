@@ -292,7 +292,7 @@ func TestASecondCutParksWithItsDetail(t *testing.T) {
 	}
 
 	// Launching the item again is acting on the park, and status stops naming it.
-	if _, err := s.launched(mustItem(t, s, "1"), ledger.StageImplement, "impl"); err != nil {
+	if _, err := s.launched(mustItem(t, s, "1"), "run", ledger.StageImplement, "impl"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := s.ledger.Parked("1"); ok {

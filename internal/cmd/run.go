@@ -167,7 +167,7 @@ preview, and exits 3.`,
 		// `mark-merged` can attribute the work without parsing a log — which an
 		// interactive run never writes, and a second run with another runner
 		// would make ambiguous anyway.
-		at, err := s.launched(it, ledger.StageImplement, name)
+		at, err := s.launched(it, "run", ledger.StageImplement, name)
 		if err != nil {
 			return err
 		}
