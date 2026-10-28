@@ -37,7 +37,9 @@ placeholder such as <provider>, in prose or in a code span with no space in it
 (a path like internal/<provider>/client.go), or a line carrying one of [intake]
 hold_markers, by default "OPERATOR DECISION PENDING" and "BEFORE ACCEPT". A
 fenced block, and a code span holding a space (drover show <id>), is a syntax
-example and is not read.
+example and is not read. Neither is a code span holding one HTML or SVG element
+or a capitalized component and nothing else (<h1>, <Dialog>). Write a variable
+part in braces, internal/{provider-dir}/client.go, which is never a placeholder.
 
 A body that cites a directory in the project tree, as a path dispatch reads,
 gets one note per directory: under drive --jobs the item waits for any item
@@ -160,7 +162,8 @@ func (s *session) acceptOne(bare string) error {
 			msgs[i] = fmt.Sprintf("%s:%d carries %s", where, line, h.what)
 		}
 		return Refusal{fmt.Errorf("%s\nNothing was accepted. The body is not finished: fill in or remove each line above,\n"+
-			"or accept anyway: drover accept %s --yes", strings.Join(msgs, "\n"), it.ID.Bare())}
+			"or accept anyway: drover accept %s --yes\n"+
+			"A variable part is written in braces, {name}, which is never read as a placeholder", strings.Join(msgs, "\n"), it.ID.Bare())}
 	}
 	if err := s.writeBody(it, "accept", kept); err != nil {
 		return err
@@ -249,6 +252,52 @@ func dirNote(id, dir string) string {
 // not one.
 var placeholderSlot = regexp.MustCompile(`<[A-Za-z0-9-]+>`)
 
+// loneTag is a code span holding nothing but one tag, the form a body for a web
+// project writes when it cites what renders: `<h1>`, `<Dialog>`.
+var loneTag = regexp.MustCompile(`^<([A-Za-z0-9-]+)>$`)
+
+// markupElements is every element name in the WHATWG HTML Living Standard's
+// element index (html.spec.whatwg.org/multipage/indices.html#elements-3) and the
+// SVG 2 element index (www.w3.org/TR/SVG2/eltindex.html), lowercased, since a
+// span naming one is citing markup rather than leaving a slot to fill.
+var markupElements = map[string]bool{}
+
+func init() {
+	for _, name := range strings.Fields(`
+		a abbr address area article aside audio b base bdi bdo blockquote body br
+		button canvas caption cite code col colgroup data datalist dd del details
+		dfn dialog div dl dt em embed fieldset figcaption figure footer form h1 h2
+		h3 h4 h5 h6 head header hgroup hr html i iframe img input ins kbd label
+		legend li link main map mark math menu meta meter nav noscript object ol
+		optgroup option output p picture pre progress q rp rt ruby s samp script
+		search section select slot small source span strong style sub summary sup
+		svg table tbody td template textarea tfoot th thead time title tr track u
+		ul var video wbr
+
+		animate animatemotion animatetransform circle clippath defs desc discard
+		ellipse feblend fecolormatrix fecomponenttransfer fecomposite
+		feconvolvematrix fediffuselighting fedisplacementmap fedistantlight
+		fedropshadow feflood fefunca fefuncb fefuncg fefuncr fegaussianblur
+		feimage femerge femergenode femorphology feoffset fepointlight
+		fespecularlighting fespotlight fetile feturbulence filter foreignobject g
+		image line lineargradient marker mask metadata mpath path pattern polygon
+		polyline radialgradient rect set stop switch symbol text textpath tspan
+		use view`) {
+		markupElements[name] = true
+	}
+}
+
+// citesMarkup reports whether a code span's content is one tag naming an HTML
+// or SVG element, or a JSX component, which by convention starts uppercase.
+func citesMarkup(content string) bool {
+	m := loneTag.FindStringSubmatch(content)
+	if m == nil {
+		return false
+	}
+	name := m[1]
+	return markupElements[strings.ToLower(name)] || (name[0] >= 'A' && name[0] <= 'Z')
+}
+
 // bodyHold is one line that says a body is not finished.
 type bodyHold struct {
 	// line is 1-based within the lines handed to bodyHolds.
@@ -261,7 +310,8 @@ type bodyHold struct {
 // bodyHolds is every line from the body start on that carries a placeholder
 // or a hold marker. A fenced block is a syntax example and is skipped whole.
 // So is an inline code span holding a space, which is a command example
-// (`drover show <id>`); a span without one is a path the run will be told to
+// (`drover show <id>`), and one holding nothing but an element or component
+// tag (`<h1>`, `<Dialog>`). Any other span is a path the run will be told to
 // edit (`internal/<provider>/client.go`), and is read like prose.
 func bodyHolds(lines []string, markers []string) []bodyHold {
 	var out []bodyHold
@@ -270,7 +320,7 @@ func bodyHolds(lines []string, markers []string) []bodyHold {
 		if f.skip(lines[i]) {
 			continue
 		}
-		text := withoutCommandSpans(lines[i])
+		text := withoutExampleSpans(lines[i])
 		for _, m := range markers {
 			if m != "" && strings.Contains(text, m) {
 				out = append(out, bodyHold{i + 1, fmt.Sprintf("the hold marker %q", m), true})
@@ -283,11 +333,11 @@ func bodyHolds(lines []string, markers []string) []bodyHold {
 	return out
 }
 
-// withoutCommandSpans blanks every inline code span on line whose content
-// holds a space, leaving the rest as written. A span opens on a run of
+// withoutExampleSpans blanks every inline code span on line whose content
+// holds a space or cites markup, leaving the rest as written. A span opens on a run of
 // backticks and closes on the next run of the same length; an unclosed run is
 // literal text.
-func withoutCommandSpans(line string) string {
+func withoutExampleSpans(line string) string {
 	var b strings.Builder
 	for i := 0; i < len(line); {
 		if line[i] != '`' {
@@ -306,7 +356,7 @@ func withoutCommandSpans(line string) string {
 			i = j
 			continue
 		}
-		if content := line[j:end]; !strings.Contains(content, " ") {
+		if content := line[j:end]; !strings.Contains(content, " ") && !citesMarkup(content) {
 			b.WriteString(tick + content + tick)
 		}
 		i = end + len(tick)
