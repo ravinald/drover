@@ -592,8 +592,8 @@ func TestReconcileEmitsMergedAfterAnInterveningDriveHeldTheItem(t *testing.T) {
 }
 
 // A retry of the same item inside D1 that a usage hold kept from starting
-// replaces the attempt that queued PR 7, and the end row is the only place
-// the next drive's reconciliation can learn the merge is owed.
+// replaces the attempt that queued PR 7, and the merge it queued is still owed
+// to the next drive's reconciliation.
 func TestReconcileEmitsMergedAfterTheSameDriveHeldARetry(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -662,10 +662,22 @@ func TestARetryEndsTheQueueOnlyByMergingOrANewPR(t *testing.T) {
 // queued on PR 7.
 var queuedOnPR7 = []ledger.Outcome{{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7}}
 
-// reconcileQueuedMerge merges item 1's branch, records D1 ending with d1 after
-// opening PR 7 for it, followed by between, and returns the merged events
-// reconcile emits under drive.
+// reconcileQueuedMerge merges item 1's branch, records D1 opening PR 7 for it
+// and the forge accepting its --auto merge, then between, then D1's end row
+// carrying d1, and returns the merged events reconcile emits under drive.
+// between lands before the end row because D1 keeps running after the queue
+// is accepted, and anything an operator records meanwhile is older than the
+// end row and newer than the queue.
 func reconcileQueuedMerge(t *testing.T, drive string, d1 []ledger.Outcome, between ...ledger.Row) []DriveEvent {
+	t.Helper()
+	merged, _ := reconcileQueued(t, drive, d1, true, 1, between...)
+	return merged
+}
+
+// reconcileQueued is reconcileQueuedMerge, returning the ledger reconcile read,
+// asserting the queue reads back outstanding only when want is and that
+// reconcile finishes landed items.
+func reconcileQueued(t *testing.T, drive string, d1 []ledger.Outcome, want bool, landed int, between ...ledger.Row) ([]DriveEvent, *ledger.Ledger) {
 	t.Helper()
 	s := driveProject(t)
 	dir := s.cfg.Root
@@ -688,13 +700,15 @@ func reconcileQueuedMerge(t *testing.T, drive string, d1 []ledger.Outcome, betwe
 	git(t, dir, "merge", "-q", "--no-ff", "-m", "merge", branch)
 
 	exit := 0
-	rows := []ledger.Row{
-		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Drive: "D1", Date: ledger.Today()},
-		{ID: "1", PR: 7, Branch: branch, Drive: "D1", Date: ledger.Today()},
-		{ID: ledger.DriveRowID, Drive: "D1", Exit: &exit, Date: ledger.Today(),
-			Outcomes: d1},
+	activeDrive.Store(&runningDrive{id: "D1"})
+	if err := s.record(ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: ledger.Today()}); err != nil {
+		t.Fatal(err)
 	}
-	for _, r := range append(rows, between...) {
+	s.recordPR("1", branch, 7)
+	s.recordMergeQueued(&DriveItem{ID: "1", Branch: branch, PR: 7, MergeQueued: true})
+	activeDrive.Store(nil)
+	rows := append(between, ledger.Row{ID: ledger.DriveRowID, Drive: "D1", Exit: &exit, Date: ledger.Today(), Outcomes: d1})
+	for _, r := range rows {
 		if err := s.record(r); err != nil {
 			t.Fatal(err)
 		}
@@ -702,17 +716,18 @@ func reconcileQueuedMerge(t *testing.T, drive string, d1 []ledger.Outcome, betwe
 	if err := s.reload(); err != nil {
 		t.Fatal(err)
 	}
-	if pr, queued := s.ledger.MergeQueued("1"); !queued || pr != 7 {
-		t.Fatalf("the ledger reads back queued=%v PR %d, want the merge D1 left queued on PR 7", queued, pr)
+	if pr, queued := s.ledger.MergeQueued("1"); queued != want || (want && pr != 7) {
+		t.Fatalf("the ledger reads back queued=%v PR %d, want queued=%v on PR 7", queued, pr, want)
 	}
+	read := s.ledger
 
 	var out bytes.Buffer
 	events = &eventSink{cfg: s.cfg, notifier: newNotifier(s.cfg), w: &out}
 	activeDrive.Store(&runningDrive{id: drive})
 	t.Cleanup(func() { events = nil; activeDrive.Store(nil) })
 
-	if landed, _, err := s.reconcile(); err != nil || landed != 1 {
-		t.Fatalf("reconcile finished %d (%v), want 1", landed, err)
+	if got, _, err := s.reconcile(); err != nil || got != landed {
+		t.Fatalf("reconcile finished %d (%v), want %d", got, err, landed)
 	}
 	var merged []DriveEvent
 	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
@@ -724,7 +739,43 @@ func reconcileQueuedMerge(t *testing.T, drive string, d1 []ledger.Outcome, betwe
 	if len(merged) != 1 {
 		t.Logf("events:\n%s", out.String())
 	}
-	return merged
+	return merged, read
+}
+
+// D1 queues PR 7 and keeps going; meanwhile the operator closes PR 7 and opens
+// PR 8 through open-pr, which a drive lease allows. D1's end row, written
+// later, still carries the queue it saw on PR 7. PR 8 lands with nothing
+// drover queued, so reconciliation owes no merged event, and least of all one
+// naming PR 7.
+func TestALateEndRowDoesNotReviveAQueueAReplacementPREnded(t *testing.T) {
+	d := &runningDrive{id: "D1"}
+	d.note(DriveItem{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7})
+	d.note(DriveItem{ID: "1", Outcome: outcomeHeld})
+	if !d.outcomes[0].MergeQueued || d.outcomes[0].PR != 7 {
+		t.Fatalf("D1's end row would carry %+v, want the stale queue on PR 7 this test is about", d.outcomes[0])
+	}
+	merged, l := reconcileQueued(t, "D2", d.outcomes, false, 1, ledger.Row{ID: "1", PR: 8, Date: ledger.Today()})
+	if len(merged) != 0 {
+		e := merged[0]
+		t.Errorf("reconciliation emitted %d merged event(s), first id=%s PR=%d drive=%s; want none: PR 8 replaced PR 7 before D1 ended", len(merged), e.ID, e.PR, e.Drive)
+	}
+	if n, _ := l.PR("1"); n != 8 {
+		t.Errorf("the ledger names PR %d, want the replacement PR 8", n)
+	}
+}
+
+// D1 queues PR 7 and keeps going; meanwhile the operator records the item
+// merged. D1's end row, written later, must not make the completed item read
+// queued again, and reconciliation has nothing left to finish or announce.
+func TestALateEndRowDoesNotReviveAQueueACompletionEnded(t *testing.T) {
+	yes := true
+	merged, l := reconcileQueued(t, "D2", queuedOnPR7, false, 0, ledger.Row{ID: "1", Merged: &yes, Date: ledger.Today()})
+	if len(merged) != 0 {
+		t.Errorf("reconciliation emitted %d merged event(s) for an item already recorded merged, want none", len(merged))
+	}
+	if pr, queued := l.MergeQueued("1"); queued {
+		t.Errorf("the completed item reads queued on PR %d after D1's late end row, want not queued", pr)
+	}
 }
 
 // A park naming neither the runner nor the log leaves the next operator to
@@ -4574,6 +4625,13 @@ func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
 		}
 		if !strings.Contains(errOut, "· 1: merge queued at the forge; the next drive finishes it") {
 			t.Errorf("stderr does not report the queued merge:\n%s", errOut)
+		}
+		l, err := ledger.Load("ledger.jsonl")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pr, queued := l.MergeQueued("1"); !queued || pr != got.PR {
+			t.Errorf("the ledger reads queued=%v on PR %d, want the queue on PR %d the forge accepted", queued, pr, got.PR)
 		}
 	})
 	t.Run("queued is reported as queued", func(t *testing.T) {

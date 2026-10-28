@@ -4235,6 +4235,23 @@ func (s *session) nothingWaits(trunk string) string {
 	return ""
 }
 
+// recordMergeQueued writes the pull request row saying the forge accepted d's
+// --auto merge. Reconciliation owes a merged event on the strength of it, so a
+// row that will not write is reported: the merge still lands, silently.
+func (s *session) recordMergeQueued(d *DriveItem) {
+	pr := d.PR
+	if pr <= 0 {
+		pr, _ = s.ledger.PR(d.ID)
+	}
+	if pr <= 0 {
+		fmt.Fprintf(errOut, "warn: %s: the merge is queued on a pull request the ledger does not name, so no drive will report it merged\n", d.ID)
+		return
+	}
+	if err := s.record(ledger.Row{ID: d.ID, Branch: d.Branch, PR: pr, MergeQueued: true, Date: ledger.Today()}); err != nil {
+		fmt.Fprintf(errOut, "warn: %s: the merge is queued on #%d, but the ledger row naming it failed, so no drive will report it merged: %v\n", d.ID, pr, err)
+	}
+}
+
 // afterAutoMerge reads what an accepted --auto did. gh returns nil both when
 // the forge queued the merge and when it merged on the spot, and only the forge
 // can say which.
@@ -4251,6 +4268,7 @@ func (s *session) afterAutoMerge(ctx context.Context, it backlog.Item, d *DriveI
 		d.MergeQueued = true
 		d.Reason = "merge requested, and its state could not be read (" + err.Error() + "); the next drive's reconciliation decides it"
 		fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
+		s.recordMergeQueued(d)
 		s.leaveItem(d)
 		return *d
 	case !merged:
@@ -4258,6 +4276,7 @@ func (s *session) afterAutoMerge(ctx context.Context, it backlog.Item, d *DriveI
 		d.MergeQueued = true
 		d.Reason = "merge queued at the forge; the next drive finishes it"
 		fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
+		s.recordMergeQueued(d)
 		s.leaveItem(d)
 		return *d
 	}

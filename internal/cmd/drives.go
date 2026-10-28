@@ -56,9 +56,9 @@ func (d *runningDrive) note(item DriveItem) {
 
 // keepQueue is next, the outcome replacing prev, still carrying the merge prev
 // left queued at the forge. A retry the drive held, skipped or parked left
-// that queue alone, and the end row is the only record the next drive's
-// reconciliation reads it from. The queue ends where Ledger.MergeQueued ends
-// it: the item merged, or the retry ties it to another pull request.
+// that queue alone, so the end row reports it outstanding. The queue ends where
+// Ledger.MergeQueued ends it: the item merged, or the retry ties it to another
+// pull request. Reconciliation reads the ledger's queue row, not this.
 func keepQueue(prev, next ledger.Outcome, item DriveItem) ledger.Outcome {
 	if next.MergeQueued || !prev.MergeQueued {
 		return next

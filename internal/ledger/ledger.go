@@ -135,9 +135,16 @@ type Row struct {
 	// command that learned it, so a merged item can name its pull request
 	// without asking the forge, and it folds last-row-wins: a branch that
 	// reopens as a second pull request has one current answer.
-	Branch string `json:"branch,omitempty"`
-	Head   string `json:"head,omitempty"`
-	PR     int    `json:"pr,omitempty"`
+	//
+	// MergeQueued on a pull request row is drive recording, the moment the
+	// forge accepted its --auto request, that the merge is queued there. It is
+	// a row of its own rather than the end row's outcome because the end row is
+	// written when the drive exits: a replacement pull request or a completion
+	// recorded in between would read as older than the queue it ended.
+	Branch      string `json:"branch,omitempty"`
+	Head        string `json:"head,omitempty"`
+	PR          int    `json:"pr,omitempty"`
+	MergeQueued bool   `json:"merge_queued,omitempty"`
 	// Check, Class and Evidence are the eleventh shape, sharing Head with the
 	// eighth: one row each time drive read a red check on a pushed head, naming
 	// the check, whose failure it took it for (one of the Class constants) and the
@@ -426,9 +433,12 @@ type Outcome struct {
 	Outcome string `json:"outcome"`
 	// Reason is why a skipped item was skipped, absent on every other outcome.
 	Reason string `json:"reason,omitempty"`
-	// MergeQueued is a ready_to_merge item whose --auto merge the forge
-	// accepted and the drive did not see merge. The next drive's
-	// reconciliation reads it to report that merge once it lands.
+	// MergeQueued is an item whose --auto merge the forge accepted, in this
+	// drive, and the drive did not see merge. A later take of the item that
+	// held, skipped or parked it keeps the flag, so it reads on any outcome,
+	// and only ready_to_merge counts in the exit summary. It reports what the
+	// drive saw as it exited; reconciliation reads the pull request row
+	// written when the forge accepted the request instead.
 	MergeQueued bool `json:"merge_queued,omitempty"`
 	// PR is the pull request a queued merge belongs to, absent on every
 	// outcome that queued nothing.
@@ -546,32 +556,23 @@ func (l *Ledger) Drives() []Drive {
 }
 
 // MergeQueued is the pull request whose --auto merge a drive left queued at
-// the forge for id, and whether that request is still outstanding. A later
-// drive's outcome that queues nothing does not withdraw it: a drive that held,
-// skipped or parked the item left the forge's queue alone, and the merge still
-// lands. Only a completion row ends it, or a row naming another pull request,
-// whose merge the old request cannot describe.
+// the forge for id, and whether that request is still outstanding. It reads
+// the item's rows in the order they were appended, which is the order things
+// happened: a queued pull request row starts it, and a completion row or a row
+// naming another pull request ends it. A drive's end row is not read, since it
+// is written at exit and would replay a queue something earlier ended. A drive
+// that held, skipped or parked the item writes neither, and the merge still
+// lands.
 func (l *Ledger) MergeQueued(id string) (pr int, ok bool) {
-	current := 0
 	for _, r := range l.Rows {
 		switch {
-		case r.ID == id && r.Merged != nil && *r.Merged:
+		case r.ID != id:
+		case r.Merged != nil && *r.Merged:
 			pr, ok = 0, false
-		case r.ID == id && r.PR > 0:
-			current = r.PR
-			if ok && r.PR != pr {
-				pr, ok = 0, false
-			}
-		case r.ID == DriveRowID && r.Exit != nil:
-			for _, o := range r.Outcomes {
-				if o.ID != id || !o.MergeQueued {
-					continue
-				}
-				pr, ok = o.PR, true
-				if pr == 0 {
-					pr = current
-				}
-			}
+		case r.PR > 0 && r.MergeQueued:
+			pr, ok = r.PR, true
+		case r.PR > 0 && r.PR != pr:
+			pr, ok = 0, false
 		}
 	}
 	return pr, ok
