@@ -88,7 +88,7 @@ func (s *session) exitSummary(done []DriveItem, ended string) *ExitSummary {
 		d.mu.Lock()
 		for _, o := range ledger.Latest(d.outcomes, func(o ledger.Outcome) string { return o.ID }) {
 			if !slices.ContainsFunc(all, func(x DriveItem) bool { return x.ID == o.ID }) {
-				all = append(all, DriveItem{ID: o.ID, Outcome: o.Outcome, MergeQueued: o.MergeQueued})
+				all = append(all, DriveItem{ID: o.ID, Outcome: o.Outcome, MergeQueued: o.MergeQueued && o.Outcome == outcomeReviewed})
 			}
 		}
 		d.mu.Unlock()

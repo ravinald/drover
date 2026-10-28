@@ -567,7 +567,7 @@ func TestReconcileFinishesOnlyWhatDroverLaunched(t *testing.T) {
 // merged under its own id, because the drive that queued it said only
 // merge_queued and a notify destination would otherwise never hear the merge.
 func TestReconcileEmitsMergedForAMergeAnEarlierDriveQueued(t *testing.T) {
-	merged := reconcileQueuedMerge(t, "D2")
+	merged := reconcileQueuedMerge(t, "D2", queuedOnPR7)
 	if len(merged) != 1 {
 		t.Fatalf("reconcile emitted %d merged events, want 1", len(merged))
 	}
@@ -581,7 +581,7 @@ func TestReconcileEmitsMergedForAMergeAnEarlierDriveQueued(t *testing.T) {
 // held. The merge still lands, so the reconciling drive still owes the event.
 func TestReconcileEmitsMergedAfterAnInterveningDriveHeldTheItem(t *testing.T) {
 	exit := 0
-	merged := reconcileQueuedMerge(t, "D3", ledger.Row{ID: ledger.DriveRowID, Drive: "D2", Exit: &exit, Date: ledger.Today(),
+	merged := reconcileQueuedMerge(t, "D3", queuedOnPR7, ledger.Row{ID: ledger.DriveRowID, Drive: "D2", Exit: &exit, Date: ledger.Today(),
 		Outcomes: []ledger.Outcome{{ID: "1", Outcome: outcomeHeld}}})
 	if len(merged) != 1 {
 		t.Fatalf("reconcile emitted %d merged events, want 1", len(merged))
@@ -591,9 +591,81 @@ func TestReconcileEmitsMergedAfterAnInterveningDriveHeldTheItem(t *testing.T) {
 	}
 }
 
-// reconcileQueuedMerge merges item 1's branch, records D1 queuing PR 7 for it
-// followed by between, and returns the merged events reconcile emits under drive.
-func reconcileQueuedMerge(t *testing.T, drive string, between ...ledger.Row) []DriveEvent {
+// A retry of the same item inside D1 that a usage hold kept from starting
+// replaces the attempt that queued PR 7, and the end row is the only place
+// the next drive's reconciliation can learn the merge is owed.
+func TestReconcileEmitsMergedAfterTheSameDriveHeldARetry(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(*runningDrive, DriveItem)
+	}{
+		{"note", (*runningDrive).note},
+		{"revise", (*runningDrive).revise},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d1 := &runningDrive{id: "D1"}
+			d1.note(DriveItem{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7})
+			tc.write(d1, DriveItem{ID: "1", Outcome: outcomeHeld})
+			if len(d1.outcomes) != 1 || d1.outcomes[0].Outcome != outcomeHeld {
+				t.Fatalf("D1 outcomes %+v, want one entry reading held", d1.outcomes)
+			}
+			merged := reconcileQueuedMerge(t, "D2", d1.outcomes)
+			if len(merged) != 1 {
+				t.Fatalf("reconcile emitted %d merged events, want 1", len(merged))
+			}
+			if e := merged[0]; e.ID != "1" || e.PR != 7 || e.Drive != "D2" {
+				t.Errorf("merged event is id=%q pr=%d drive=%q, want id 1, PR 7, drive D2", e.ID, e.PR, e.Drive)
+			}
+		})
+	}
+}
+
+func TestARetryEndsTheQueueOnlyByMergingOrANewPR(t *testing.T) {
+	queued := DriveItem{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7}
+	for _, tc := range []struct {
+		name   string
+		retry  DriveItem
+		wantPR int
+	}{
+		{"held", DriveItem{ID: "1", Outcome: outcomeHeld}, 7},
+		{"parked on the same PR", DriveItem{ID: "1", Outcome: outcomeParked, PR: 7}, 7},
+		{"skipped", DriveItem{ID: "1", Outcome: outcomeSkipped, Reason: "blocked"}, 7},
+		{"parked on a new PR", DriveItem{ID: "1", Outcome: outcomeParked, PR: 8}, 0},
+		{"merged by the gate", DriveItem{ID: "1", Outcome: outcomeMergedByGate, Merged: true, PR: 7}, 0},
+		{"merged at the forge", DriveItem{ID: "1", Outcome: outcomeMergedAtForge, Merged: true, PR: 7}, 0},
+		{"queued again on a new PR", DriveItem{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 8}, 8},
+	} {
+		for _, w := range []struct {
+			name  string
+			write func(*runningDrive, DriveItem)
+		}{{"note", (*runningDrive).note}, {"revise", (*runningDrive).revise}} {
+			t.Run(tc.name+"/"+w.name, func(t *testing.T) {
+				d := &runningDrive{id: "D1"}
+				d.note(queued)
+				w.write(d, tc.retry)
+				if len(d.outcomes) != 1 {
+					t.Fatalf("outcomes %+v, want one entry", d.outcomes)
+				}
+				o := d.outcomes[0]
+				if o.Outcome != tc.retry.Outcome {
+					t.Errorf("outcome %q, want the retry's %q", o.Outcome, tc.retry.Outcome)
+				}
+				if o.MergeQueued != (tc.wantPR > 0) || o.PR != tc.wantPR {
+					t.Errorf("merge_queued=%v pr=%d, want queued on PR %d", o.MergeQueued, o.PR, tc.wantPR)
+				}
+			})
+		}
+	}
+}
+
+// queuedOnPR7 is D1's end row outcome for an item whose --auto merge the forge
+// queued on PR 7.
+var queuedOnPR7 = []ledger.Outcome{{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7}}
+
+// reconcileQueuedMerge merges item 1's branch, records D1 ending with d1 after
+// opening PR 7 for it, followed by between, and returns the merged events
+// reconcile emits under drive.
+func reconcileQueuedMerge(t *testing.T, drive string, d1 []ledger.Outcome, between ...ledger.Row) []DriveEvent {
 	t.Helper()
 	s := driveProject(t)
 	dir := s.cfg.Root
@@ -620,7 +692,7 @@ func reconcileQueuedMerge(t *testing.T, drive string, between ...ledger.Row) []D
 		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Drive: "D1", Date: ledger.Today()},
 		{ID: "1", PR: 7, Branch: branch, Drive: "D1", Date: ledger.Today()},
 		{ID: ledger.DriveRowID, Drive: "D1", Exit: &exit, Date: ledger.Today(),
-			Outcomes: []ledger.Outcome{{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7}}},
+			Outcomes: d1},
 	}
 	for _, r := range append(rows, between...) {
 		if err := s.record(r); err != nil {

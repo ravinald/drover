@@ -48,10 +48,29 @@ func (d *runningDrive) note(item DriveItem) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if i := slices.IndexFunc(d.outcomes, func(x ledger.Outcome) bool { return x.ID == o.ID }); i >= 0 {
-		d.outcomes[i] = o
+		d.outcomes[i] = keepQueue(d.outcomes[i], o, item)
 		return
 	}
 	d.outcomes = append(d.outcomes, o)
+}
+
+// keepQueue is next, the outcome replacing prev, still carrying the merge prev
+// left queued at the forge. A retry the drive held, skipped or parked left
+// that queue alone, and the end row is the only record the next drive's
+// reconciliation reads it from. The queue ends where Ledger.MergeQueued ends
+// it: the item merged, or the retry ties it to another pull request.
+func keepQueue(prev, next ledger.Outcome, item DriveItem) ledger.Outcome {
+	if next.MergeQueued || !prev.MergeQueued {
+		return next
+	}
+	if item.Merged || item.Outcome == outcomeMergedByGate || item.Outcome == outcomeMergedAtForge {
+		return next
+	}
+	if item.PR > 0 && item.PR != prev.PR {
+		return next
+	}
+	next.MergeQueued, next.PR = true, prev.PR
+	return next
 }
 
 // skipped is every item this drive skipped so far, as its lease publishes them.
@@ -80,7 +99,9 @@ func (d *runningDrive) revise(item DriveItem) {
 	defer d.mu.Unlock()
 	for i := len(d.outcomes) - 1; i >= 0; i-- {
 		if d.outcomes[i].ID == item.ID {
-			d.outcomes[i].Outcome, d.outcomes[i].MergeQueued, d.outcomes[i].PR = item.Outcome, item.MergeQueued, queuedPR(item)
+			next := d.outcomes[i]
+			next.Outcome, next.MergeQueued, next.PR = item.Outcome, item.MergeQueued, queuedPR(item)
+			d.outcomes[i] = keepQueue(d.outcomes[i], next, item)
 			return
 		}
 	}
