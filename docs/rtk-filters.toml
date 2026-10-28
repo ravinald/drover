@@ -36,10 +36,43 @@ strip_ansi = true
 # on a project whose ids are all namespaced, the "here" line, and "no backlog:
 # <path> does not exist", which rendered a misconfigured path as an empty one.
 #
-# Reads as: a line whose first character is not "[", or whose second is not "x".
-# Blank lines match neither and go, which is most of what is left to save now
+# Reads as: a line whose first character is neither "[" nor a space, or whose
+# second is not "x". A merged row's second line opens " x" for this reason: rtk
+# filters one line at a time, so the line under a row has to say on its own that
+# its row was merged. Every other second line opens on spaces and is kept.
+# Blank lines match none and go, which is most of what is left to save now
 # that status hides merged rows without being asked.
-keep_lines_matching = ["^([^\\[]|\\[[^x])"]
+keep_lines_matching = ["^([^\\[ ]|\\[[^x]| [^x])"]
+
+[[tests.drover-status]]
+name = "a kept row keeps its second line, a merged row takes its own with it"
+input = """
+drover status  (ledger: docs-internal/ledger.jsonl)
+
+[x]   B1    bug         finish refuses after done                         done · verified
+ x    operator new                  Oct 20 09:21  Oct 21 10:02 accept · operator
+[>]   B2    bug         drive parks twice                                 READY
+      D20 review of B1              Oct 27 09:21 ~Oct 27 11:15 by hand
+[ ]   E3    enhancement usage rows name the model                         blocked by B2
+      unrecorded                   ≤2025-09-02    Sep 03 08:00 unrecorded
+
+1 of 3 intake done
+
+▸ here: branch main  (no item owns it)
+▸ also here: drover drive D20  pid 15290  since 2026-10-27 16:29:34 UTC  (took it on main)
+  running:  B2
+"""
+expected = """
+drover status  (ledger: docs-internal/ledger.jsonl)
+[>]   B2    bug         drive parks twice                                 READY
+      D20 review of B1              Oct 27 09:21 ~Oct 27 11:15 by hand
+[ ]   E3    enhancement usage rows name the model                         blocked by B2
+      unrecorded                   ≤2025-09-02    Sep 03 08:00 unrecorded
+1 of 3 intake done
+▸ here: branch main  (no item owns it)
+▸ also here: drover drive D20  pid 15290  since 2026-10-27 16:29:34 UTC  (took it on main)
+  running:  B2
+"""
 
 [[tests.drover-status]]
 name = "merged rows drop, outstanding rows and counts survive"

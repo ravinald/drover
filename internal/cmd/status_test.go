@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/config"
@@ -363,7 +364,7 @@ func TestPrintTableMarksHereAndNamesTheBranch(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			onBranch(t, s, c.branch)
 			var buf bytes.Buffer
-			s.printTable(&buf, s.rows(), nil)
+			s.printTable(&buf, s.rows(), nil, time.Now())
 			want := table(c.marked) + "\n" + c.footer + "\n"
 			if got := buf.String(); got != want {
 				t.Errorf("printTable wrote:\n%s\nwant:\n%s", got, want)
@@ -577,7 +578,7 @@ func TestDefaultScopeHidesMergedAndAllShowsThem(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			withAll(t, c.all)
 			var buf bytes.Buffer
-			s.printTable(&buf, s.rows(), nil)
+			s.printTable(&buf, s.rows(), nil, time.Now())
 			got := buf.String()
 			if strings.Contains(got, "Merged") != c.wantMerged {
 				t.Errorf("merged row present = %t, want %t:\n%s",
@@ -735,6 +736,7 @@ func resetStatusFlags(t *testing.T) {
 		statusTemplate, statusOut, statusForce, statusRender, statusTZ = "", "", false, false, ""
 		statusHTML, statusPrintTemplate, statusPrintCSS = false, "", ""
 		statusWindow, statusAllProjects = defaultWindow, false
+		statusShort, statusSince, sinceCut = false, "", time.Time{}
 		for _, fs := range []*pflag.FlagSet{statusCmd.Flags(), showCmd.Flags()} {
 			fs.VisitAll(func(f *pflag.Flag) { f.Changed = false })
 		}

@@ -137,12 +137,16 @@ type Show struct {
 	// Modified is the body's file-system mtime as a date. It needs nothing but
 	// the file, so it is the one timestamp drover can always answer with.
 	Modified string `json:"modified,omitempty"`
-	// Created is the date of the commit that added the body, and CreatedUnknown
-	// is why there is none. A body the project keeps outside git has no creation
-	// date to give, and a zero there would read as a file with no history rather
-	// than as a question nobody could ask.
-	Created        string `json:"created,omitempty"`
-	CreatedUnknown string `json:"created_unknown,omitempty"`
+	// Origin, Created and Edited are the objects status --json carries per
+	// item. Created reads the origin row, and only an item with none falls back
+	// to the date of the commit that added the body; CreatedUnknown is why there
+	// is neither. A body the project keeps outside git has no creation date to
+	// give, and a zero there would read as a file with no history rather than as
+	// a question nobody could ask.
+	Origin         *ItemOrigin `json:"origin"`
+	Created        *ItemTime   `json:"created"`
+	CreatedUnknown string      `json:"created_unknown,omitempty"`
+	Edited         *ItemEdit   `json:"edited"`
 	// Implementer and Reviewer are the runners that ran the two stages, as
 	// drover resolved them. Absent means nobody recorded a run of that stage,
 	// which is a different answer from the project default.
@@ -317,7 +321,11 @@ the same text as body.`,
 
   drover show B1 --json             # one object:
     {"id":"B1","state":"merged","requirements":4,"verify":"{verify}",
-     "modified":"2026-03-04","created":"2026-02-19",
+     "modified":"2026-03-04",
+     "origin":{"unrecorded":false,"text":"D20 review of B104","cmd":"new","actor":"agent","agent":"codex",
+      "session":"5e55","found_in":"B104","drive":"D20","stage":"review","of":"B104"},
+     "created":{"unrecorded":false,"at":"2026-02-19T09:21:00-08:00","source":"origin"},
+     "edited":{"unrecorded":false,"at":"2026-03-04T10:02:11-08:00","source":"body","cmd":"accept","actor":"operator"},
      "implementer":"claude","review_runner":"codex","runs":3,"rounds":2,
      "pr":{"number":236,"state":"merged","url":"https://github.com/o/r/pull/236","checks":"success"},
      "deps":[{"id":"2","state":"readable","merged":true,"level":"reviewed","weak":true}],"audits":[...]}
@@ -340,9 +348,11 @@ the same text as body.`,
   alive for whether that pid is running, and the stage row recording that
   session. A park on an item whose marker is alive is a launch still in flight.
 
-  modified is the body's mtime and is always there. created is the commit that
-  added it, so it is absent for a body git does not track, and created_unknown
-  then says which question drover could not ask.
+  modified is the body's mtime and is always there. origin, created and edited
+  are the objects drover status --json carries per item. created reads the
+  origin row; an item with none (unrecorded) falls back to the commit that
+  added the body, source git, and created_unknown says which question drover
+  could not ask when there is neither.
 
   requirements counts the top-level "N. " lines, which is what report --save
   turns into checkboxes. A zero on an item that reads as fully specified means
@@ -425,7 +435,14 @@ the same text as body.`,
 		if info, err := os.Stat(it.Path); err == nil {
 			sh.Modified = info.ModTime().Format(dateOnly)
 		}
-		sh.Created, sh.CreatedUnknown = s.created(it.Path)
+		sh.Origin, sh.Created, sh.Edited = s.provenance(it, nil)
+		if sh.Origin.Unrecorded {
+			var date string
+			if date, sh.CreatedUnknown = s.created(it.Path); date != "" {
+				sh.Created = &ItemTime{Unrecorded: true, Source: sourceGit}
+				sh.Created.set("", date)
+			}
+		}
 		base := s.cfg.Paths.LogPrefix + runlog.Base(it.ID.Stem(), it.Slug)
 		if logs, err := runlog.Find(s.cfg.LogDir(), base); err == nil {
 			sh.Logs = logs
@@ -498,13 +515,23 @@ func (sh Show) print(cfg *config.Config) {
 		}
 	}
 	if sh.Modified != "" {
-		fmt.Printf("  modified   %s\n", sh.Modified)
+		edited := ""
+		if sh.Edited != nil {
+			edited = "  edited " + sh.Edited.editor()
+		}
+		fmt.Printf("  modified   %s%s\n", sh.Modified, edited)
+	}
+	origin := "unrecorded"
+	if sh.Origin != nil {
+		origin = sh.Origin.Text
 	}
 	switch {
-	case sh.Created != "":
-		fmt.Printf("  created    %s\n", sh.Created)
+	case sh.Created != nil && !sh.Created.when.IsZero():
+		fmt.Printf("  created    %s  origin %s\n", sh.Created.when.In(time.Local).Format(dateOnly), origin)
 	case sh.CreatedUnknown != "":
-		fmt.Printf("  created    unknown (%s)\n", sh.CreatedUnknown)
+		fmt.Printf("  created    unknown (%s)  origin %s\n", sh.CreatedUnknown, origin)
+	case sh.Origin != nil:
+		fmt.Printf("  created    unknown  origin %s\n", origin)
 	}
 	for _, k := range sortedKeys(sh.Meta) {
 		if v := sh.Meta[k]; v != "" && k != "title" {
