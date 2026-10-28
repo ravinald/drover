@@ -403,17 +403,32 @@ func TestStatusSecondLineGolden(t *testing.T) {
 }
 
 // Requirement 8: CREATED starts at one column on every second line, whatever
-// the ORIGIN text before it, and so does EDITED.
+// the ORIGIN text before it, and so does EDITED. Requirement 1: every second
+// line, a merged row's included, opens on six spaces and so repeats no state;
+// only a merged row's ends in the tab the rtk filter drops it by.
 func TestSecondLineFieldsSitAtFixedColumns(t *testing.T) {
 	t.Setenv("COLUMNS", "120")
 	provenanceProject(t)
 	cell := regexp.MustCompile(`^([A-Z][a-z]{2} \d{2} \d{2}:\d{2}|\d{4}-\d{2}-\d{2}  |-           )$`)
 	created := secondIndent + originWidth + 2
 	edited := created + timeWidth + 2
+	lines := strings.Split(statusTable(t, "--all"), "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "[") || i+1 == len(lines) {
+			continue
+		}
+		next := lines[i+1]
+		if !strings.HasPrefix(next, strings.Repeat(" ", secondIndent)) || next[secondIndent] == ' ' {
+			t.Errorf("the line under %q does not open on exactly six spaces: %q", line, next)
+		}
+		if merged := strings.HasPrefix(line, "[x]"); merged != strings.HasSuffix(next, "\t") {
+			t.Errorf("row %q (merged %v) has a second line ending %q", line, merged, next[len(next)-1:])
+		}
+	}
 	n := 0
-	for _, line := range strings.Split(statusTable(t, "--all"), "\n") {
+	for _, line := range lines {
 		r := []rune(line)
-		if len(r) < edited+timeWidth || !strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, " x") {
+		if len(r) < edited+timeWidth || !strings.HasPrefix(line, strings.Repeat(" ", secondIndent)) {
 			continue
 		}
 		n++
@@ -539,8 +554,24 @@ func TestShowCarriesTheProvenanceObjects(t *testing.T) {
 		sh.Edited == nil || sh.Edited.Cmd != "request-changes" || sh.Edited.Drive != "D20" {
 		t.Errorf("show B5 carries origin %+v created %+v edited %+v", sh.Origin, sh.Created, sh.Edited)
 	}
-	if sh := show("B8"); sh.Origin == nil || !sh.Origin.Unrecorded || sh.Created == nil && sh.CreatedUnknown == "" {
-		t.Errorf("show B8 carries origin %+v created %+v (%q), want unrecorded and a git answer", sh.Origin, sh.Created, sh.CreatedUnknown)
+	// The fixture is no git work tree, so B8 has neither an origin row nor a
+	// commit: created is the bare unknown object and created_unknown says why.
+	if sh := show("B8"); sh.Origin == nil || !sh.Origin.Unrecorded || sh.Created == nil || *sh.Created != (ItemTime{Unrecorded: true}) ||
+		sh.CreatedUnknown == "" {
+		t.Errorf("show B8 carries origin %+v created %+v (%q), want unrecorded, {unrecorded:true} and a reason", sh.Origin, sh.Created, sh.CreatedUnknown)
+	}
+	resetStatusFlags(t)
+	raw := capture(t, func() {
+		if err := execute(t, "show", "B8", "--json", "--no-tracker"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &wire); err != nil {
+		t.Fatal(err)
+	}
+	if string(wire["created"]) != `{"unrecorded":true}` && !regexp.MustCompile(`^\{\s*"unrecorded": true\s*\}$`).Match(wire["created"]) {
+		t.Errorf("show B8 --json carries created %s, want the {\"unrecorded\": true} docs/automation.md documents", wire["created"])
 	}
 	resetStatusFlags(t)
 	out := capture(t, func() {
@@ -556,5 +587,87 @@ func TestShowCarriesTheProvenanceObjects(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("show B2 lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// Requirements 1, 4 and 5 on a body that will not parse: the ledger and the
+// file's mtime answer without it, so the row keeps its parse error and still
+// carries a second line, all three JSON objects, and the --since cut.
+func TestAnUnreadableRowCarriesProvenance(t *testing.T) {
+	zone := time.Local
+	time.Local = time.UTC
+	t.Cleanup(func() { time.Local = zone })
+	dir := markerProject(t, map[string]string{
+		"B01-good.md":   "---\ntitle: good\ndeps:\n---\n\n1. Do it.\n",
+		"B02-broken.md": "---\ntitle: broken\ndeps:\nunknown: bad\n---\n\n1. Do it.\n",
+	})
+	t.Chdir(dir)
+	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(filepath.Join(dir, "work", "B02-broken.md"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	fresh := time.Now().Add(-time.Hour).Format(time.RFC3339)
+	write(t, filepath.Join(dir, "ledger.jsonl"),
+		`{"id":"B1","ts":"`+fresh+`","origin":{"cmd":"new","actor":"operator"}}`+"\n"+
+			`{"id":"B2","ts":"2020-01-01T00:00:00Z","origin":{"cmd":"new","actor":"operator"}}`+"\n")
+
+	got := statusTable(t)
+	if !regexp.MustCompile(`(?m)^\[!\]   B02 .*unknown frontmatter key "unknown".*\n {6}operator new {16}  2020-01-01    2020-01-01   new · operator$`).MatchString(got) {
+		t.Errorf("the unreadable B02 lost its parse error or its second line:\n%s", got)
+	}
+
+	type objects struct {
+		ID      string      `json:"id"`
+		State   string      `json:"state"`
+		Error   string      `json:"error"`
+		Origin  *ItemOrigin `json:"origin"`
+		Created *ItemTime   `json:"created"`
+		Edited  *ItemEdit   `json:"edited"`
+	}
+	statusJSON := func(args ...string) []objects {
+		t.Helper()
+		resetStatusFlags(t)
+		out := capture(t, func() {
+			if err := execute(t, append([]string{"status", "--no-tracker", "--json"}, args...)...); err != nil {
+				t.Fatal(err)
+			}
+		})
+		var rep struct {
+			Items []objects `json:"items"`
+		}
+		if err := json.Unmarshal([]byte(out), &rep); err != nil {
+			t.Fatal(err)
+		}
+		return rep.Items
+	}
+	var broken *objects
+	items := statusJSON()
+	for i := range items {
+		if items[i].ID == "B02" {
+			broken = &items[i]
+		}
+	}
+	switch {
+	case broken == nil:
+		t.Fatalf("status --json lost B02: %+v", items)
+	case broken.State != stateBroken || !strings.Contains(broken.Error, "unknown frontmatter key"):
+		t.Errorf("B02 lost its parse error: %+v", *broken)
+	case broken.Origin == nil || broken.Origin.Unrecorded || broken.Origin.Text != "operator new":
+		t.Errorf("B02 carries origin %+v, want the recorded operator new", broken.Origin)
+	case broken.Created == nil || broken.Created.Unrecorded || broken.Created.Source != sourceOrigin || broken.Created.At != "2020-01-01T00:00:00Z":
+		t.Errorf("B02 carries created %+v, want the origin row's time", broken.Created)
+	case broken.Edited == nil || broken.Edited.Source != sourceOrigin:
+		t.Errorf("B02 carries edited %+v, want the origin row", broken.Edited)
+	}
+
+	if items := statusJSON("--since", "1d"); len(items) != 1 || items[0].ID != "B1" {
+		t.Errorf("--json --since 1d kept %+v, want B1 alone", items)
+	}
+	if items := statusJSON("--since", "2099-01-01"); len(items) != 0 {
+		t.Errorf("--json --since 2099-01-01 kept %+v, want nothing", items)
+	}
+	got = statusTable(t, "--since", "1d")
+	if strings.Contains(got, "B02") || !strings.Contains(got, "1 row hidden by --since") {
+		t.Errorf("--since 1d kept the old unreadable row or did not count it:\n%s", got)
 	}
 }

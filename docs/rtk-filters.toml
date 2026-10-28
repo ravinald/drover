@@ -36,13 +36,14 @@ strip_ansi = true
 # on a project whose ids are all namespaced, the "here" line, and "no backlog:
 # <path> does not exist", which rendered a misconfigured path as an empty one.
 #
-# Reads as: a line whose first character is neither "[" nor a space, or whose
-# second is not "x". A merged row's second line opens " x" for this reason: rtk
-# filters one line at a time, so the line under a row has to say on its own that
-# its row was merged. Every other second line opens on spaces and is kept.
-# Blank lines match none and go, which is most of what is left to save now
-# that status hides merged rows without being asked.
-keep_lines_matching = ["^([^\\[ ]|\\[[^x]| [^x])"]
+# Reads as: a line opening on neither "[" nor a space; a row whose glyph is not
+# "[x"; or a line opening on a space that does not end in a tab. A merged row's
+# second line ends in a tab for this reason: rtk filters one line at a time and
+# has no rule that reads the line above, so the line under a row has to say on
+# its own that its row was merged, and a tab says it without printing the state
+# the glyph already printed. Blank lines match none and go, which is most of
+# what is left to save now that status hides merged rows without being asked.
+keep_lines_matching = ["^([^\\[ ]|\\[[^x]| [^x](.*[^\\t])?$)"]
 
 [[tests.drover-status]]
 name = "a kept row keeps its second line, a merged row takes its own with it"
@@ -50,7 +51,7 @@ input = """
 drover status  (ledger: docs-internal/ledger.jsonl)
 
 [x]   B1    bug         finish refuses after done                         done · verified
- x    operator new                  Oct 20 09:21  Oct 21 10:02 accept · operator
+      operator new                  Oct 20 09:21  Oct 21 10:02 accept · operator\t
 [>]   B2    bug         drive parks twice                                 READY
       D20 review of B1              Oct 27 09:21 ~Oct 27 11:15 by hand
 [ ]   E3    enhancement usage rows name the model                         blocked by B2

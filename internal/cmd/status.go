@@ -124,10 +124,13 @@ type Row struct {
 	Usage *UsageTotals `json:"usage,omitempty"`
 	// Origin, Created and Edited are where the item came from, when it was
 	// created, and the latest write to its body, each saying whether the ledger
-	// recorded it. Absent on an unreadable row.
+	// recorded it. An unreadable row carries them too.
 	Origin  *ItemOrigin `json:"origin,omitempty"`
 	Created *ItemTime   `json:"created,omitempty"`
 	Edited  *ItemEdit   `json:"edited,omitempty"`
+	// path is an unreadable row's file, which provenance reads in place of
+	// the item nothing could parse.
+	path string
 }
 
 // StatusReport is what --json emits: the rows, and who else is in this
@@ -652,9 +655,10 @@ func keep(r Row) bool {
 var sinceCut time.Time
 
 // recent reports whether a row survives --since: created or edited at or after
-// it. A broken row survives for the reason it survives --sev.
+// it. A broken row is held to the same cut, through its ledger rows and mtime,
+// since --since asks what changed and an old unreadable file did not.
 func recent(r Row) bool {
-	if sinceCut.IsZero() || r.State == stateBroken {
+	if sinceCut.IsZero() {
 		return true
 	}
 	return !r.since().Before(sinceCut)
@@ -701,7 +705,7 @@ func (s *session) rows() []Row {
 	for _, b := range s.backlog.Broken {
 		rows = append(rows, Row{
 			ID: strings.SplitN(trimDir(b.Path), "-", 2)[0], Title: "(unreadable)",
-			State: stateBroken, Error: b.Err.Error(), Planned: true,
+			State: stateBroken, Error: b.Err.Error(), Planned: true, path: b.Path,
 		})
 	}
 
@@ -1041,8 +1045,6 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error, now time.Time
 		line := fmt.Sprintf("%s %s %s %s %-*s %s",
 			glyph(r.State), mark, id, cell, width, trunc(r.Title, width), note)
 		fmt.Fprintln(w, paint(line, tint && r.Current))
-		// An unreadable row has no origin to report, and a blank line of
-		// dashes under it would read as an item nobody created.
 		if !statusShort && r.Origin != nil {
 			fmt.Fprintln(w, sgr(r.secondLine(now), pal.Muted, tint))
 		}

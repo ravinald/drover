@@ -76,11 +76,10 @@ const (
 // provenance reads where it came from and who last wrote it, through the
 // ledger's Provenance helper. first is the earliest row naming the item, the
 // fallback creation time for an item with no origin row.
-func (s *session) provenance(it backlog.Item, first *ledger.Row) (*ItemOrigin, *ItemTime, *ItemEdit) {
-	id := it.ID.Bare()
-	raw, _ := os.ReadFile(it.Path) // #nosec G304 -- the path came from the backlog
+func (s *session) provenance(id, path string, first *ledger.Row) (*ItemOrigin, *ItemTime, *ItemEdit) {
+	raw, _ := os.ReadFile(path) // #nosec G304 -- the path came from the backlog
 	var mtime time.Time
-	if info, err := os.Stat(it.Path); err == nil {
+	if info, err := os.Stat(path); err == nil {
 		mtime = info.ModTime()
 	}
 	p := s.ledger.Provenance(id, bodySum(raw), digestBytes(raw))
@@ -228,13 +227,15 @@ const (
 )
 
 // secondLine is a row's provenance as the table prints it under the row, plain.
-// A merged row's line carries an x under its glyph: rtk filters a line at a
-// time, so this line has to say on its own that it belongs to a merged row for
-// the drover-status filter to drop it with that row.
+// A merged row's line ends in a tab: rtk filters a line at a time, so this line
+// has to say on its own that it belongs to a merged row for the drover-status
+// filter to drop it with that row, and the glyph above already says merged to a
+// reader, so the mark is one nobody sees.
 func (r Row) secondLine(now time.Time) string {
 	indent := strings.Repeat(" ", secondIndent)
+	merged := ""
 	if r.State == stateDone {
-		indent = " x" + strings.Repeat(" ", secondIndent-2)
+		merged = "\t"
 	}
 	created, edited := "", ""
 	var cAt, eAt time.Time
@@ -258,11 +259,11 @@ func (r Row) secondLine(now time.Time) string {
 	if r.Origin != nil {
 		origin = r.Origin.Text
 	}
-	return fmt.Sprintf("%s%-*s %s%-*s %s%-*s %s", indent,
+	return fmt.Sprintf("%s%-*s %s%-*s %s%-*s %s%s", indent,
 		originWidth, trunc(origin, originWidth),
 		cMark, timeWidth, created,
 		eMark, timeWidth, cellTime(eAt, eClock, now),
-		edited)
+		edited, merged)
 }
 
 // since is when the row was last created or edited, the later of the two.
@@ -277,7 +278,9 @@ func (r Row) since() time.Time {
 	return t
 }
 
-// attachProvenance sets each row's origin, created and edited objects.
+// attachProvenance sets each row's origin, created and edited objects. An
+// unreadable row gets them too, read under the id its filename names: the
+// ledger and the file's mtime answer without parsing the body.
 func (s *session) attachProvenance(rows []Row) {
 	first := map[string]*ledger.Row{}
 	firstAt := map[string]time.Time{}
@@ -299,11 +302,17 @@ func (s *session) attachProvenance(rows []Row) {
 		items[it.ID.Bare()] = it
 	}
 	for i := range rows {
-		it, ok := items[rows[i].ID]
-		if !ok || rows[i].State == stateBroken {
+		id, path := rows[i].ID, rows[i].path
+		if rows[i].State == stateBroken {
+			if parsed, ok := (backlog.Broken{Path: path}).ID(s.cfg.Prefixes()); ok {
+				id = parsed.Bare()
+			}
+		} else if it, ok := items[id]; ok {
+			path = it.Path
+		} else {
 			continue
 		}
-		rows[i].Origin, rows[i].Created, rows[i].Edited = s.provenance(it, first[rows[i].ID])
+		rows[i].Origin, rows[i].Created, rows[i].Edited = s.provenance(id, path, first[id])
 	}
 }
 

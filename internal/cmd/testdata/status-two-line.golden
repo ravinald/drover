@@ -21,7 +21,7 @@ fixture status  (ledger: ledger.jsonl)
 [>]   F1    feature unknown (--no-tracker) item 10                                                      READY
       claude split of B1234567890…  Mar 10 09:21  Mar 10 09:21 split · claude
 [x]   F2    feature unknown (--no-tracker) item 11                                                      done · UNAUDITED
- x    operator new                  Mar 11 09:21  Mar 11 09:21 new · operator
+      operator new                  Mar 11 09:21  Mar 11 09:21 new · operator	
 
 1 of 11 intake done
 1 merged unaudited (drover unaudited)

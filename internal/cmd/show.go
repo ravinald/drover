@@ -435,7 +435,7 @@ the same text as body.`,
 		if info, err := os.Stat(it.Path); err == nil {
 			sh.Modified = info.ModTime().Format(dateOnly)
 		}
-		sh.Origin, sh.Created, sh.Edited = s.provenance(it, nil)
+		sh.Origin, sh.Created, sh.Edited = s.provenance(it.ID.Bare(), it.Path, nil)
 		if sh.Origin.Unrecorded {
 			var date string
 			if date, sh.CreatedUnknown = s.created(it.Path); date != "" {
