@@ -73,6 +73,8 @@ func (p palette) event(name string) string {
 	switch name {
 	case evMerged:
 		return p.OK
+	case evMergeQueued:
+		return p.Warn
 	case evParked:
 		return p.Fail
 	case evCheck, evStarted, evQueued, evDispatched, evStage, evFiled, evResumed, evExit:

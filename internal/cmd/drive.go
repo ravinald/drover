@@ -494,8 +494,15 @@ type DriveItem struct {
 	// branch the gate and the review both passed. Zero says none opened, which
 	// is every park before the gate went green, and also the one case gh printed
 	// a URL drover could not read a number out of.
-	PR     int  `json:"pr,omitempty"`
-	Merged bool `json:"merged,omitempty"`
+	PR int `json:"pr,omitempty"`
+	// Merged is a merge the forge has reported made. MergeQueued is an --auto
+	// request the forge accepted that this drive did not see merge, queued or
+	// with its state unreadable: the item is still ready_to_merge, and the next
+	// drive's reconciliation finishes it once the forge merges. Apart, because
+	// the forge may never merge it, and a reader told "merged" acts on work that
+	// is not on the trunk.
+	Merged      bool `json:"merged,omitempty"`
+	MergeQueued bool `json:"merge_queued,omitempty"`
 	// Finished is a merge this drive also recorded, ledger row and tracker closes,
 	// which only a merge drover performed itself can be: one the forge queued
 	// completes after drive has moved on, and the next drive finishes it.
@@ -3061,7 +3068,7 @@ func driveFollowUp(d DriveItem, item string, drafted bool, maxReviewRounds int, 
 	switch d.Outcome {
 	case outcomeReviewed:
 		switch {
-		case d.Merged:
+		case d.MergeQueued:
 			return followUp{
 				"green and reviewed; " + pr + " went to the forge to merge" + because,
 				"nothing yet: the next drover drive finishes it, or drover finish " + id + " once the forge has merged it",
@@ -3670,6 +3677,7 @@ func (s *session) reconcile() (landed, left int, err error) {
 			return landed, left, err
 		}
 		fmt.Fprintf(errOut, "· %s merged since the last drive; finishing it\n", id)
+		pr, queued := s.ledger.MergeQueued(id)
 		finishInDrive = true
 		lerr := finishCmd.RunE(finishCmd, []string{id})
 		finishInDrive = false
@@ -3680,8 +3688,9 @@ func (s *session) reconcile() (landed, left int, err error) {
 		landed++
 		// While id is still listed, so a notifier hearing it merged never finds
 		// it free for an outside write the drive has not finished making.
-		pr, _ := s.ledger.PR(id)
-		events.emit(DriveEvent{Event: evMerged, ID: id, PR: pr, Title: id + ": " + it.Title()})
+		if queued {
+			events.emit(DriveEvent{Event: evMerged, ID: id, PR: pr, Title: id + ": " + it.Title()})
+		}
 		if err := s.reload(); err != nil {
 			return landed, left, err
 		}
@@ -4306,6 +4315,85 @@ func (s *session) nothingWaits(trunk string) string {
 	return ""
 }
 
+// recordMergeQueued writes the pull request row saying the forge accepted d's
+// --auto merge. Reconciliation owes a merged event on the strength of it, so a
+// row that will not write is reported: the merge still lands, silently.
+//
+// The row is decided under the ledger's lock, against the file as it stands.
+// The forge accepted --auto before the merged-state query, and an operator can
+// finish the item or open a replacement pull request while that query waits.
+// A row written from what this drive read earlier would then restart a queue
+// that already ended, and name the closed pull request as the item's current
+// one. since is how many rows the ledger held before the query: any row for d
+// from there on that records a completion, or its withdrawal, or names another
+// pull request ended this lifecycle, whatever the item's state reads now. A
+// withdrawal counts because it is evidence a completion happened, and folding
+// the two to the latest boolean would replay an acceptance that preceded both.
+// The current state is checked as well, and d is rewritten to the lifecycle
+// the ledger holds.
+func (s *session) recordMergeQueued(d *DriveItem, since int) {
+	pr := d.PR
+	if pr <= 0 {
+		pr, _ = s.ledger.PR(d.ID)
+	}
+	if pr <= 0 {
+		fmt.Fprintf(errOut, "warn: %s: the merge is queued on a pull request the ledger does not name, so no drive will report it merged\n", d.ID)
+		return
+	}
+	path := s.cfg.Abs(s.cfg.Paths.Ledger)
+	row := ledger.Stamp(driveStamp(s.verifyStamp(ledger.Row{ID: d.ID, Branch: d.Branch, PR: pr, MergeQueued: true, Date: ledger.Today()})))
+	current, merged, replaced := 0, false, false
+	wrote, err := ledger.AppendUnless(path, row, func(l *ledger.Ledger) bool {
+		current, _ = l.PR(d.ID)
+		merged = l.State(d.ID).Merged
+		replaced = current > 0 && current != pr
+		for _, r := range l.Rows[min(max(since, 0), len(l.Rows)):] {
+			switch {
+			case r.ID != d.ID:
+			case r.Merged != nil:
+				merged = true
+			case r.PR > 0 && r.PR != pr:
+				replaced = true
+			}
+		}
+		return merged || replaced
+	})
+	switch {
+	case err != nil:
+		fmt.Fprintf(errOut, "warn: %s: the merge is queued on #%d, but the ledger row naming it failed, so no drive will report it merged: %v\n", d.ID, pr, err)
+		return
+	case wrote:
+		s.ledger.Rows = append(s.ledger.Rows, row)
+		appended()
+		return
+	}
+	if l, err := ledger.Load(path); err == nil {
+		s.ledger = l
+	}
+	d.MergeQueued = false
+	if current > 0 && current != pr {
+		d.PR = current
+	}
+	if merged {
+		d.Outcome, d.Park = outcomeSkipped, stateDone
+		d.Reason = fmt.Sprintf("merge requested on #%d, and the ledger recorded a completion for the item before the queue was written; nothing is left queued", pr)
+	} else {
+		d.Reason = fmt.Sprintf("merge requested on #%d, and the ledger recorded #%d for the item before the queue was written; #%d is the one to merge", pr, d.PR, d.PR)
+	}
+	fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
+}
+
+// ledgerLen is how many rows the ledger holds on disk now, which marks where a
+// later read starts counting what happened since. An unreadable file falls back
+// to the rows in memory, which are never more than the file holds, so the mark
+// can only move earlier and treat more as having happened since.
+func (s *session) ledgerLen() int {
+	if l, err := ledger.Load(s.cfg.Abs(s.cfg.Paths.Ledger)); err == nil {
+		return len(l.Rows)
+	}
+	return len(s.ledger.Rows)
+}
+
 // afterAutoMerge reads what an accepted --auto did. gh returns nil both when
 // the forge queued the merge and when it merged on the spot, and only the forge
 // can say which.
@@ -4315,22 +4403,27 @@ func (s *session) nothingWaits(trunk string) string {
 // but a red head on the trunk is something every later item would build on, so
 // a refusal stops the drive.
 func (s *session) afterAutoMerge(ctx context.Context, it backlog.Item, d *DriveItem, trunk string, deadline time.Time) DriveItem {
-	d.Merged = true
+	since := s.ledgerLen()
 	n, merged, err := gh.MergedPR(s.labels(), d.Branch)
 	switch {
 	case err != nil:
 		d.Outcome = outcomeReviewed
+		d.MergeQueued = true
 		d.Reason = "merge requested, and its state could not be read (" + err.Error() + "); the next drive's reconciliation decides it"
 		fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
+		s.recordMergeQueued(d, since)
 		s.leaveItem(d)
 		return *d
 	case !merged:
 		d.Outcome = outcomeReviewed
+		d.MergeQueued = true
 		d.Reason = "merge queued at the forge; the next drive finishes it"
 		fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
+		s.recordMergeQueued(d, since)
 		s.leaveItem(d)
 		return *d
 	}
+	d.Merged = true
 	if n > 0 {
 		d.PR = n
 	}

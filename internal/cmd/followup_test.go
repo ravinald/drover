@@ -246,7 +246,7 @@ func TestDriveEndsEachItemOnItsNextStep(t *testing.T) {
 		deny    config.Policy
 		absent  string
 	}{
-		{"merged", DriveItem{ID: "3", Outcome: outcomeReviewed, PR: 12, Merged: true}, "drover finish 3 once the forge has merged it", false, "", ""},
+		{"merge queued", DriveItem{ID: "3", Outcome: outcomeReviewed, PR: 12, MergeQueued: true}, "drover finish 3 once the forge has merged it", false, "", ""},
 		{"held by --no-merge", DriveItem{ID: "3", Outcome: outcomeReviewed, PR: 12}, "merge PR #12, then drover finish 3", false, "", ""},
 		{"no merge gate", DriveItem{ID: "3", Outcome: outcomeReviewed}, "drover open-pr 3 --force", false, "", ""},
 		{"scaffold", DriveItem{ID: "3", Outcome: outcomeSkipped, Park: stateScaffold}, "write them in work/03-x.md, then drover accept 3", false, "", ""},

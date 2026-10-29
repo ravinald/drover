@@ -571,6 +571,343 @@ func TestReconcileFinishesOnlyWhatDroverLaunched(t *testing.T) {
 	}
 }
 
+// A merge an earlier drive left queued at the forge lands between drives, and
+// the drive that reconciles it is the first to see it land. It says so with
+// merged under its own id, because the drive that queued it said only
+// merge_queued and a notify destination would otherwise never hear the merge.
+func TestReconcileEmitsMergedForAMergeAnEarlierDriveQueued(t *testing.T) {
+	merged := reconcileQueuedMerge(t, "D2", queuedOnPR7)
+	if len(merged) != 1 {
+		t.Fatalf("reconcile emitted %d merged events, want 1", len(merged))
+	}
+	if e := merged[0]; e.ID != "1" || e.PR != 7 || e.Drive != "D2" {
+		t.Errorf("merged event is id=%q pr=%d drive=%q, want id 1, PR 7, drive D2", e.ID, e.PR, e.Drive)
+	}
+}
+
+// A drive between the one that queued the merge and the one that reconciles it
+// can record the item without touching the forge's queue: a usage hold notes it
+// held. The merge still lands, so the reconciling drive still owes the event.
+func TestReconcileEmitsMergedAfterAnInterveningDriveHeldTheItem(t *testing.T) {
+	exit := 0
+	merged := reconcileQueuedMerge(t, "D3", queuedOnPR7, ledger.Row{ID: ledger.DriveRowID, Drive: "D2", Exit: &exit, Date: ledger.Today(),
+		Outcomes: []ledger.Outcome{{ID: "1", Outcome: outcomeHeld}}})
+	if len(merged) != 1 {
+		t.Fatalf("reconcile emitted %d merged events, want 1", len(merged))
+	}
+	if e := merged[0]; e.ID != "1" || e.PR != 7 || e.Drive != "D3" {
+		t.Errorf("merged event is id=%q pr=%d drive=%q, want id 1, PR 7, drive D3", e.ID, e.PR, e.Drive)
+	}
+}
+
+// A retry of the same item inside D1 that a usage hold kept from starting
+// replaces the attempt that queued PR 7, and the merge it queued is still owed
+// to the next drive's reconciliation.
+func TestReconcileEmitsMergedAfterTheSameDriveHeldARetry(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(*runningDrive, DriveItem)
+	}{
+		{"note", (*runningDrive).note},
+		{"revise", (*runningDrive).revise},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d1 := &runningDrive{id: "D1"}
+			d1.note(DriveItem{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7})
+			tc.write(d1, DriveItem{ID: "1", Outcome: outcomeHeld})
+			if len(d1.outcomes) != 1 || d1.outcomes[0].Outcome != outcomeHeld {
+				t.Fatalf("D1 outcomes %+v, want one entry reading held", d1.outcomes)
+			}
+			merged := reconcileQueuedMerge(t, "D2", d1.outcomes)
+			if len(merged) != 1 {
+				t.Fatalf("reconcile emitted %d merged events, want 1", len(merged))
+			}
+			if e := merged[0]; e.ID != "1" || e.PR != 7 || e.Drive != "D2" {
+				t.Errorf("merged event is id=%q pr=%d drive=%q, want id 1, PR 7, drive D2", e.ID, e.PR, e.Drive)
+			}
+		})
+	}
+}
+
+func TestARetryEndsTheQueueOnlyByMergingOrANewPR(t *testing.T) {
+	queued := DriveItem{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7}
+	for _, tc := range []struct {
+		name   string
+		retry  DriveItem
+		wantPR int
+	}{
+		{"held", DriveItem{ID: "1", Outcome: outcomeHeld}, 7},
+		{"parked on the same PR", DriveItem{ID: "1", Outcome: outcomeParked, PR: 7}, 7},
+		{"skipped", DriveItem{ID: "1", Outcome: outcomeSkipped, Reason: "blocked"}, 7},
+		{"parked on a new PR", DriveItem{ID: "1", Outcome: outcomeParked, PR: 8}, 0},
+		{"merged by the gate", DriveItem{ID: "1", Outcome: outcomeMergedByGate, Merged: true, PR: 7}, 0},
+		{"merged at the forge", DriveItem{ID: "1", Outcome: outcomeMergedAtForge, Merged: true, PR: 7}, 0},
+		{"queued again on a new PR", DriveItem{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 8}, 8},
+	} {
+		for _, w := range []struct {
+			name  string
+			write func(*runningDrive, DriveItem)
+		}{{"note", (*runningDrive).note}, {"revise", (*runningDrive).revise}} {
+			t.Run(tc.name+"/"+w.name, func(t *testing.T) {
+				d := &runningDrive{id: "D1"}
+				d.note(queued)
+				w.write(d, tc.retry)
+				if len(d.outcomes) != 1 {
+					t.Fatalf("outcomes %+v, want one entry", d.outcomes)
+				}
+				o := d.outcomes[0]
+				if o.Outcome != tc.retry.Outcome {
+					t.Errorf("outcome %q, want the retry's %q", o.Outcome, tc.retry.Outcome)
+				}
+				if o.MergeQueued != (tc.wantPR > 0) || o.PR != tc.wantPR {
+					t.Errorf("merge_queued=%v pr=%d, want queued on PR %d", o.MergeQueued, o.PR, tc.wantPR)
+				}
+			})
+		}
+	}
+}
+
+// queuedOnPR7 is D1's end row outcome for an item whose --auto merge the forge
+// queued on PR 7.
+var queuedOnPR7 = []ledger.Outcome{{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7}}
+
+// reconcileQueuedMerge merges item 1's branch, records D1 opening PR 7 for it
+// and the forge accepting its --auto merge, then between, then D1's end row
+// carrying d1, and returns the merged events reconcile emits under drive.
+// between lands before the end row because D1 keeps running after the queue
+// is accepted, and anything an operator records meanwhile is older than the
+// end row and newer than the queue.
+func reconcileQueuedMerge(t *testing.T, drive string, d1 []ledger.Outcome, between ...ledger.Row) []DriveEvent {
+	t.Helper()
+	merged, _ := reconcileQueued(t, drive, d1, true, 1, between...)
+	return merged
+}
+
+// reconcileQueued is reconcileQueuedMerge, returning the ledger reconcile read,
+// asserting the queue reads back outstanding only when want is and that
+// reconcile finishes landed items.
+func reconcileQueued(t *testing.T, drive string, d1 []ledger.Outcome, want bool, landed int, between ...ledger.Row) ([]DriveEvent, *ledger.Ledger) {
+	t.Helper()
+	s := driveProject(t)
+	dir := s.cfg.Root
+	it, err := s.item("1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch, err := s.branchFor(it)
+	if err != nil || branch == "" {
+		t.Fatalf("branchFor: %q %v", branch, err)
+	}
+	git(t, dir, "switch", "-q", "-c", branch)
+	write(t, filepath.Join(dir, "shipped.txt"), "work\n")
+	git(t, dir, "add", "shipped.txt")
+	git(t, dir, "commit", "-q", "-m", "work")
+	if err := s.recordHead("1", branch); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "switch", "-q", "main")
+	git(t, dir, "merge", "-q", "--no-ff", "-m", "merge", branch)
+
+	exit := 0
+	activeDrive.Store(&runningDrive{id: "D1"})
+	if err := s.record(ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: ledger.Today()}); err != nil {
+		t.Fatal(err)
+	}
+	s.recordPR("1", branch, 7)
+	s.recordMergeQueued(&DriveItem{ID: "1", Branch: branch, PR: 7, MergeQueued: true}, s.ledgerLen())
+	activeDrive.Store(nil)
+	rows := append(between, ledger.Row{ID: ledger.DriveRowID, Drive: "D1", Exit: &exit, Date: ledger.Today(), Outcomes: d1})
+	for _, r := range rows {
+		if err := s.record(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.reload(); err != nil {
+		t.Fatal(err)
+	}
+	if pr, queued := s.ledger.MergeQueued("1"); queued != want || (want && pr != 7) {
+		t.Fatalf("the ledger reads back queued=%v PR %d, want queued=%v on PR 7", queued, pr, want)
+	}
+	read := s.ledger
+
+	var out bytes.Buffer
+	events = &eventSink{cfg: s.cfg, notifier: newNotifier(s.cfg), w: &out}
+	activeDrive.Store(&runningDrive{id: drive})
+	t.Cleanup(func() { events = nil; activeDrive.Store(nil) })
+
+	if got, _, err := s.reconcile(); err != nil || got != landed {
+		t.Fatalf("reconcile finished %d (%v), want %d", got, err, landed)
+	}
+	var merged []DriveEvent
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var e DriveEvent
+		if json.Unmarshal([]byte(line), &e) == nil && e.Event == evMerged {
+			merged = append(merged, e)
+		}
+	}
+	if len(merged) != 1 {
+		t.Logf("events:\n%s", out.String())
+	}
+	return merged, read
+}
+
+// D1 queues PR 7 and keeps going; meanwhile the operator closes PR 7 and opens
+// PR 8 through open-pr, which a drive lease allows. D1's end row, written
+// later, still carries the queue it saw on PR 7. PR 8 lands with nothing
+// drover queued, so reconciliation owes no merged event, and least of all one
+// naming PR 7.
+func TestALateEndRowDoesNotReviveAQueueAReplacementPREnded(t *testing.T) {
+	d := &runningDrive{id: "D1"}
+	d.note(DriveItem{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7})
+	d.note(DriveItem{ID: "1", Outcome: outcomeHeld})
+	if !d.outcomes[0].MergeQueued || d.outcomes[0].PR != 7 {
+		t.Fatalf("D1's end row would carry %+v, want the stale queue on PR 7 this test is about", d.outcomes[0])
+	}
+	merged, l := reconcileQueued(t, "D2", d.outcomes, false, 1, ledger.Row{ID: "1", PR: 8, Date: ledger.Today()})
+	if len(merged) != 0 {
+		e := merged[0]
+		t.Errorf("reconciliation emitted %d merged event(s), first id=%s PR=%d drive=%s; want none: PR 8 replaced PR 7 before D1 ended", len(merged), e.ID, e.PR, e.Drive)
+	}
+	if n, _ := l.PR("1"); n != 8 {
+		t.Errorf("the ledger names PR %d, want the replacement PR 8", n)
+	}
+}
+
+// D1 queues PR 7 and keeps going; meanwhile the operator records the item
+// merged. D1's end row, written later, must not make the completed item read
+// queued again, and reconciliation has nothing left to finish or announce.
+func TestALateEndRowDoesNotReviveAQueueACompletionEnded(t *testing.T) {
+	yes := true
+	merged, l := reconcileQueued(t, "D2", queuedOnPR7, false, 0, ledger.Row{ID: "1", Merged: &yes, Date: ledger.Today()})
+	if len(merged) != 0 {
+		t.Errorf("reconciliation emitted %d merged event(s) for an item already recorded merged, want none", len(merged))
+	}
+	if pr, queued := l.MergeQueued("1"); queued {
+		t.Errorf("the completed item reads queued on PR %d after D1's late end row, want not queued", pr)
+	}
+}
+
+// The forge accepts --auto on PR 7, and while drive waits on the merged-state
+// query an operator either opens replacement PR 8 or records the item merged,
+// both through the real writers. The queue row drive writes after the query must
+// not restore PR 7 as the item's pull request or revive the ended lifecycle,
+// and reconciliation of the landed branch owes no merged event for PR 7.
+func TestAQueueWrittenAfterTheMergedQueryKeepsWhatTheOperatorRecorded(t *testing.T) {
+	for _, replacement := range []bool{true, false} {
+		t.Run(fmt.Sprintf("replacement=%v", replacement), func(t *testing.T) {
+			s := driveProject(t)
+			it, err := s.item("1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			branch, err := s.branchFor(it)
+			if err != nil {
+				t.Fatal(err)
+			}
+			git(t, s.cfg.Root, "switch", "-q", "-c", branch)
+			write(t, filepath.Join(s.cfg.Root, "shipped.txt"), "work\n")
+			git(t, s.cfg.Root, "add", "shipped.txt")
+			git(t, s.cfg.Root, "commit", "-q", "-m", "work")
+			if err := s.recordHead("1", branch); err != nil {
+				t.Fatal(err)
+			}
+			git(t, s.cfg.Root, "switch", "-q", "main")
+			git(t, s.cfg.Root, "merge", "-q", "--no-ff", "-m", "merge", branch)
+			if err := s.record(ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: ledger.Today()}); err != nil {
+				t.Fatal(err)
+			}
+			s.recordPR("1", branch, 7)
+			operator := *s
+			operator.ledger = &ledger.Ledger{}
+
+			state := t.TempDir()
+			signal, done := filepath.Join(state, "signal"), filepath.Join(state, "done")
+			t.Setenv("QUERY_SIGNAL", signal)
+			t.Setenv("QUERY_DONE", done)
+			ghPath, err := exec.LookPath("gh")
+			if err != nil {
+				t.Fatal(err)
+			}
+			stub(t, ghPath, `#!/bin/sh
+case "$*" in *'--state merged'*)
+  touch "$QUERY_SIGNAL"
+  i=0
+  while [ ! -f "$QUERY_DONE" ]; do
+    i=$((i+1)); [ "$i" -lt 500 ] || exit 1
+    sleep 0.01
+  done
+  ;;
+esac
+echo '[]'
+`)
+			finished := make(chan error, 1)
+			go func() {
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					if _, err := os.Stat(signal); err == nil {
+						break
+					}
+					if time.Now().After(deadline) {
+						finished <- errors.New("the merged-state query never ran")
+						return
+					}
+					time.Sleep(time.Millisecond)
+				}
+				var err error
+				if replacement {
+					operator.recordPR("1", branch, 8)
+				} else {
+					yes := true
+					err = operator.record(ledger.Row{ID: "1", Merged: &yes, Date: ledger.Today()})
+				}
+				if err == nil {
+					err = os.WriteFile(done, nil, 0o600)
+				}
+				finished <- err
+			}()
+
+			d := DriveItem{ID: "1", Branch: branch, PR: 7}
+			got := s.afterAutoMerge(context.Background(), it, &d, "main", time.Time{})
+			if err := <-finished; err != nil {
+				t.Fatal(err)
+			}
+			if got.MergeQueued || got.Merged {
+				t.Errorf("drive reports MergeQueued=%v Merged=%v, want neither: the lifecycle ended during the query", got.MergeQueued, got.Merged)
+			}
+			if replacement && (got.PR != 8 || got.Outcome != outcomeReviewed) {
+				t.Errorf("drive reports %s on PR %d, want %s on the replacement PR 8", got.Outcome, got.PR, outcomeReviewed)
+			}
+			if !replacement && (got.Outcome != outcomeSkipped || got.Park != stateDone) {
+				t.Errorf("drive reports %s %s, want %s %s for an item the operator recorded merged", got.Outcome, got.Park, outcomeSkipped, stateDone)
+			}
+
+			if err := s.reload(); err != nil {
+				t.Fatal(err)
+			}
+			if pr, queued := s.ledger.MergeQueued("1"); queued {
+				t.Errorf("the ledger reads queued on PR %d, want the ended lifecycle left ended", pr)
+			}
+			if current, _ := s.ledger.PR("1"); replacement && current != 8 {
+				t.Errorf("the ledger names PR %d, want the replacement PR 8", current)
+			}
+
+			var out bytes.Buffer
+			events = &eventSink{cfg: s.cfg, notifier: newNotifier(s.cfg), w: &out}
+			activeDrive.Store(&runningDrive{id: "D2"})
+			t.Cleanup(func() { events = nil; activeDrive.Store(nil) })
+			if _, _, err := s.reconcile(); err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range strings.Split(out.String(), "\n") {
+				var e DriveEvent
+				if json.Unmarshal([]byte(line), &e) == nil && e.Event == evMerged {
+					t.Errorf("reconciliation announced the ended queue: id=%s PR=%d drive=%s", e.ID, e.PR, e.Drive)
+				}
+			}
+		})
+	}
+}
+
 // A park naming neither the runner nor the log leaves the next operator to
 // diagnose "it died" from nothing: the cause lives in [runners] and the
 // evidence lives in the log, and a launch that never wrote one is its own
@@ -1041,9 +1378,9 @@ func TestDriveMergesWhatPassedAndParksWhatDidNot(t *testing.T) {
 	if pass.PR == 0 {
 		t.Error("the merged item reports no pull request; drover opens one for what it merges")
 	}
-	if !pass.Merged || pass.Outcome != outcomeReviewed {
-		t.Errorf("the reviewed item is %q/merged=%v, want %q/true; drive stopped short of the merge it was run to perform",
-			pass.Outcome, pass.Merged, outcomeReviewed)
+	if !pass.MergeQueued || pass.Outcome != outcomeReviewed {
+		t.Errorf("the reviewed item is %q/merge_queued=%v, want %q/true; drive stopped short of the merge it was run to perform",
+			pass.Outcome, pass.MergeQueued, outcomeReviewed)
 	}
 	if park.Merged || park.Outcome != outcomeParked || park.Park != passSilent {
 		t.Errorf("the silent item is %q/%q/merged=%v, want %q/%q/false; a park is never merged",
@@ -4409,15 +4746,61 @@ func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
 		var rows []DriveItem
 		errOut := captureErr(t, func() { rows = driveAll(t) })
 		got := rows[0]
-		if got.Outcome != outcomeReviewed || !got.Merged || got.Finished {
-			t.Fatalf("item 1 is %q merged=%v finished=%v (%s), want reviewed, merged, not finished",
-				got.Outcome, got.Merged, got.Finished, got.Reason)
+		if got.Outcome != outcomeReviewed || got.Merged || !got.MergeQueued || got.Finished {
+			t.Fatalf("item 1 is %q merged=%v merge_queued=%v finished=%v (%s), want reviewed, queued, not merged, not finished",
+				got.Outcome, got.Merged, got.MergeQueued, got.Finished, got.Reason)
 		}
 		if merges := mergeCalls(t, ghLog); len(merges) != 1 || !strings.Contains(merges[0], "--auto") {
 			t.Errorf("merges = %q, want the one --auto request", merges)
 		}
 		if !strings.Contains(errOut, "· 1: merge queued at the forge; the next drive finishes it") {
 			t.Errorf("stderr does not report the queued merge:\n%s", errOut)
+		}
+		l, err := ledger.Load("ledger.jsonl")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pr, queued := l.MergeQueued("1"); !queued || pr != got.PR {
+			t.Errorf("the ledger reads queued=%v on PR %d, want the queue on PR %d the forge accepted", queued, pr, got.PR)
+		}
+	})
+	t.Run("queued is reported as queued", func(t *testing.T) {
+		ghLog := mergeProject(t)
+		forge(t, ghLog)
+
+		evs, _, err := driveEventsOf(t)
+		if err != nil {
+			t.Fatalf("drive: %v", err)
+		}
+		var queued, merged, queuedPR int
+		var summary *ExitSummary
+		for _, e := range evs {
+			switch e.Event {
+			case evMergeQueued:
+				if e.ID == "1" && e.PR > 0 && e.Title != "" {
+					queued, queuedPR = queued+1, e.PR
+				}
+			case evMerged:
+				merged++
+			case evExit:
+				summary = e.Summary
+			}
+		}
+		if queued != 1 || merged != 0 {
+			t.Errorf("the stream holds %d merge_queued for item 1 and %d merged, want 1 and 0", queued, merged)
+		}
+		if summary == nil {
+			t.Fatal("no exit event carried a summary")
+		}
+		if summary.Merged != 0 || summary.MergeQueued != 1 {
+			t.Errorf("the exit counts merged %d merge_queued %d, want 0 and 1", summary.Merged, summary.MergeQueued)
+		}
+		s, err := open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pr, queued := s.ledger.MergeQueued("1"); !queued || pr != queuedPR {
+			t.Errorf("the drive's end row records queued=%v on PR %d, want the merge queued on PR %d, so the next drive can report it", queued, pr, queuedPR)
 		}
 	})
 	t.Run("merged at once", func(t *testing.T) {
@@ -4521,9 +4904,9 @@ func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
 		t.Setenv("DROVER_TEST_MERGED_FAIL", "1")
 
 		got := driveAll(t)[0]
-		if got.Outcome != outcomeReviewed || !got.Merged || got.Finished {
-			t.Fatalf("item 1 is %q merged=%v finished=%v (%s), want reviewed, merged, not finished",
-				got.Outcome, got.Merged, got.Finished, got.Reason)
+		if got.Outcome != outcomeReviewed || got.Merged || !got.MergeQueued || got.Finished {
+			t.Fatalf("item 1 is %q merged=%v merge_queued=%v finished=%v (%s), want reviewed, queued, not merged, not finished",
+				got.Outcome, got.Merged, got.MergeQueued, got.Finished, got.Reason)
 		}
 		if !strings.Contains(got.Reason, "could not be read") || !strings.Contains(got.Reason, "reconciliation decides it") {
 			t.Errorf("the reason does not say the merge state went unread: %s", got.Reason)
@@ -4698,7 +5081,7 @@ func TestATrunkThatMovedIsMergedInBeforeTheGate(t *testing.T) {
 
 	rows := driveAll(t)
 	got := rows[0]
-	if got.Outcome != outcomeReviewed || !got.Merged {
+	if got.Outcome != outcomeReviewed || !got.MergeQueued {
 		t.Fatalf("item 1 is %q/%q (%s), want reviewed and merged", got.Outcome, got.Park, got.Reason)
 	}
 	git(t, dir, "fetch", "-q", "origin")
@@ -4892,7 +5275,7 @@ func TestAnUnmovedTrunkRerunsNoVerify(t *testing.T) {
 	dir, _ := forge(t, ghLog)
 
 	got := driveAll(t)[0]
-	if got.Outcome != outcomeReviewed || !got.Merged {
+	if got.Outcome != outcomeReviewed || !got.MergeQueued {
 		t.Fatalf("item 1 is %q/%q (%s), want reviewed and merged", got.Outcome, got.Park, got.Reason)
 	}
 	if runs := checkLog(t, dir); len(runs) != 0 {
@@ -5101,7 +5484,7 @@ func TestACatchUpWithNoVerifyCommandSaysSoAndMerges(t *testing.T) {
 	var rows []DriveItem
 	stderr := captureErr(t, func() { rows = driveAll(t) })
 	got := rows[0]
-	if got.Outcome != outcomeReviewed || !got.Merged {
+	if got.Outcome != outcomeReviewed || !got.MergeQueued {
 		t.Fatalf("item 1 is %q/%q (%s), want reviewed and merged", got.Outcome, got.Park, got.Reason)
 	}
 	if got.CatchUp == nil || got.CatchUp.Verify != catchUpSkipped {
@@ -5284,7 +5667,7 @@ func TestACatchUpDoesNotChargeTheItemWithTheTrunksFiles(t *testing.T) {
 				t.Fatalf("item 1 is %q/%q (%s), want parked protected_paths", got.Outcome, got.Park, got.Reason)
 			case tc.hold && strings.Contains(got.Reason, "deny.txt"):
 				t.Errorf("the hold names the trunk's file as the item's:\n%s", got.Reason)
-			case !tc.hold && (got.Outcome != outcomeReviewed || !got.Merged):
+			case !tc.hold && (got.Outcome != outcomeReviewed || !got.MergeQueued):
 				t.Fatalf("item 1 is %q/%q (%s), want reviewed and merged", got.Outcome, got.Park, got.Reason)
 			}
 			git(t, dir, "fetch", "-q", "origin")
@@ -5599,7 +5982,7 @@ func TestAClearedBlockPasses(t *testing.T) {
 	if len(rows) == 0 || rows[0].ID != "1" {
 		t.Fatalf("drive reported %+v, want item 1 first", rows)
 	}
-	if got := rows[0]; got.Park != "" || !got.Merged {
+	if got := rows[0]; got.Park != "" || !got.MergeQueued {
 		t.Errorf("item 1 is %q/%q merged=%v (%s), want merged", got.Outcome, got.Park, got.Merged, got.Reason)
 	}
 }
@@ -6443,7 +6826,7 @@ func TestAGateSayingBehindIsRetriedOnceAfterACatchUp(t *testing.T) {
 				t.Fatalf("item 1 parked %q (%s), want %q", got.Park, got.Reason, c.park)
 			}
 			if c.park == "" {
-				if !got.Merged {
+				if !got.MergeQueued {
 					t.Errorf("item 1 is %q (%s), want the merge requested after the retry", got.Outcome, got.Reason)
 				}
 				return
@@ -6540,7 +6923,7 @@ func TestAGateExitingOneOnAHeadBehindTheTrunkIsReadAsBehind(t *testing.T) {
 			case c.park == "":
 				git(t, dir, "fetch", "-q", "origin")
 				moved := git(t, dir, "rev-parse", "origin/main")
-				if !got.Merged || got.CatchUp == nil || got.CatchUp.To != moved {
+				if !got.MergeQueued || got.CatchUp == nil || got.CatchUp.To != moved {
 					t.Errorf("item 1 is %q with update_branch %+v (%s), want the retry's merge of %s merged",
 						got.Outcome, got.CatchUp, got.Reason, moved)
 				}
@@ -6586,7 +6969,7 @@ func TestTheTrunkIsCaughtUpAgainWhenItMovesBeforeTheGate(t *testing.T) {
 	}
 	git(t, dir, "fetch", "-q", "origin")
 	moved := git(t, dir, "rev-parse", "origin/main")
-	if !got.Merged || got.CatchUp == nil || got.CatchUp.To != moved {
+	if !got.MergeQueued || got.CatchUp == nil || got.CatchUp.To != moved {
 		t.Errorf("item 1 is %q with update_branch %+v (%s), want %s merged in before the gate", got.Outcome, got.CatchUp, got.Reason, moved)
 	}
 }
@@ -8054,6 +8437,243 @@ cd "$DROVER_ROOT" && DROVER_TEST_AS_DROVER=1 "$DROVER_TEST_SELF" request-changes
 			for _, want := range []string{"decide R3", `drover amend 1 -f <file> --reason "<why>"`, `drover signoff 1 3 "<what was checked>"`} {
 				if !strings.Contains(e.Run, want) {
 					t.Errorf("needs_operator run lacks %q: %s", want, e.Run)
+				}
+			}
+		})
+	}
+}
+
+func TestAuditCompletionWithdrawalCannotReviveAnOldQueue(t *testing.T) {
+	for _, replacement := range []bool{false} {
+		t.Run(fmt.Sprintf("replacement=%v", replacement), func(t *testing.T) {
+			s := driveProject(t)
+			it, err := s.item("1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			branch, err := s.branchFor(it)
+			if err != nil {
+				t.Fatal(err)
+			}
+			git(t, s.cfg.Root, "switch", "-q", "-c", branch)
+			write(t, filepath.Join(s.cfg.Root, "shipped.txt"), "work\n")
+			git(t, s.cfg.Root, "add", "shipped.txt")
+			git(t, s.cfg.Root, "commit", "-q", "-m", "work")
+			if err := s.recordHead("1", branch); err != nil {
+				t.Fatal(err)
+			}
+			git(t, s.cfg.Root, "switch", "-q", "main")
+			git(t, s.cfg.Root, "merge", "-q", "--no-ff", "-m", "merge", branch)
+			if err := s.record(ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: ledger.Today()}); err != nil {
+				t.Fatal(err)
+			}
+			s.recordPR("1", branch, 7)
+			operator := *s
+			operator.ledger = &ledger.Ledger{}
+
+			state := t.TempDir()
+			signal, done := filepath.Join(state, "signal"), filepath.Join(state, "done")
+			t.Setenv("QUERY_SIGNAL", signal)
+			t.Setenv("QUERY_DONE", done)
+			ghPath, err := exec.LookPath("gh")
+			if err != nil {
+				t.Fatal(err)
+			}
+			stub(t, ghPath, `#!/bin/sh
+case "$*" in *'--state merged'*)
+  touch "$QUERY_SIGNAL"
+  i=0
+  while [ ! -f "$QUERY_DONE" ]; do
+    i=$((i+1)); [ "$i" -lt 500 ] || exit 1
+    sleep 0.01
+  done
+  ;;
+esac
+echo '[]'
+`)
+			finished := make(chan error, 1)
+			go func() {
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					if _, err := os.Stat(signal); err == nil {
+						break
+					}
+					if time.Now().After(deadline) {
+						finished <- errors.New("the merged-state query never ran")
+						return
+					}
+					time.Sleep(time.Millisecond)
+				}
+				var err error
+				if replacement {
+					operator.recordPR("1", branch, 8)
+				} else {
+					yes := true
+					err = operator.record(ledger.Row{ID: "1", Merged: &yes, Date: ledger.Today()})
+					if err == nil {
+						no := false
+						err = operator.record(ledger.Row{ID: "1", Merged: &no, Date: ledger.Today()})
+					}
+				}
+				if err == nil {
+					err = os.WriteFile(done, nil, 0o600)
+				}
+				finished <- err
+			}()
+
+			d := DriveItem{ID: "1", Branch: branch, PR: 7}
+			got := s.afterAutoMerge(context.Background(), it, &d, "main", time.Time{})
+			if err := <-finished; err != nil {
+				t.Fatal(err)
+			}
+			if got.MergeQueued || got.Merged {
+				t.Errorf("drive reports MergeQueued=%v Merged=%v, want neither: the lifecycle ended during the query", got.MergeQueued, got.Merged)
+			}
+			if replacement && (got.PR != 8 || got.Outcome != outcomeReviewed) {
+				t.Errorf("drive reports %s on PR %d, want %s on the replacement PR 8", got.Outcome, got.PR, outcomeReviewed)
+			}
+
+			if err := s.reload(); err != nil {
+				t.Fatal(err)
+			}
+			if pr, queued := s.ledger.MergeQueued("1"); queued {
+				t.Errorf("the ledger reads queued on PR %d, want the ended lifecycle left ended", pr)
+			}
+			if current, _ := s.ledger.PR("1"); replacement && current != 8 {
+				t.Errorf("the ledger names PR %d, want the replacement PR 8", current)
+			}
+
+			var out bytes.Buffer
+			events = &eventSink{cfg: s.cfg, notifier: newNotifier(s.cfg), w: &out}
+			activeDrive.Store(&runningDrive{id: "D2"})
+			t.Cleanup(func() { events = nil; activeDrive.Store(nil) })
+			if _, _, err := s.reconcile(); err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range strings.Split(out.String(), "\n") {
+				var e DriveEvent
+				if json.Unmarshal([]byte(line), &e) == nil && e.Event == evMerged {
+					t.Errorf("reconciliation announced the ended queue: id=%s PR=%d drive=%s", e.ID, e.PR, e.Drive)
+				}
+			}
+		})
+	}
+}
+
+func TestAWithdrawalDuringTheMergedQueryEndsTheQueue(t *testing.T) {
+	for _, replacement := range []bool{false} {
+		t.Run(fmt.Sprintf("replacement=%v", replacement), func(t *testing.T) {
+			s := driveProject(t)
+			it, err := s.item("1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			branch, err := s.branchFor(it)
+			if err != nil {
+				t.Fatal(err)
+			}
+			git(t, s.cfg.Root, "switch", "-q", "-c", branch)
+			write(t, filepath.Join(s.cfg.Root, "shipped.txt"), "work\n")
+			git(t, s.cfg.Root, "add", "shipped.txt")
+			git(t, s.cfg.Root, "commit", "-q", "-m", "work")
+			if err := s.recordHead("1", branch); err != nil {
+				t.Fatal(err)
+			}
+			git(t, s.cfg.Root, "switch", "-q", "main")
+			git(t, s.cfg.Root, "merge", "-q", "--no-ff", "-m", "merge", branch)
+			if err := s.record(ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: ledger.Today()}); err != nil {
+				t.Fatal(err)
+			}
+			s.recordPR("1", branch, 7)
+			yes := true
+			if err := s.record(ledger.Row{ID: "1", Merged: &yes, Date: ledger.Today()}); err != nil {
+				t.Fatal(err)
+			}
+			operator := *s
+			operator.ledger = &ledger.Ledger{}
+
+			state := t.TempDir()
+			signal, done := filepath.Join(state, "signal"), filepath.Join(state, "done")
+			t.Setenv("QUERY_SIGNAL", signal)
+			t.Setenv("QUERY_DONE", done)
+			ghPath, err := exec.LookPath("gh")
+			if err != nil {
+				t.Fatal(err)
+			}
+			stub(t, ghPath, `#!/bin/sh
+case "$*" in *'--state merged'*)
+  touch "$QUERY_SIGNAL"
+  i=0
+  while [ ! -f "$QUERY_DONE" ]; do
+    i=$((i+1)); [ "$i" -lt 500 ] || exit 1
+    sleep 0.01
+  done
+  ;;
+esac
+echo '[]'
+`)
+			finished := make(chan error, 1)
+			go func() {
+				deadline := time.Now().Add(5 * time.Second)
+				for {
+					if _, err := os.Stat(signal); err == nil {
+						break
+					}
+					if time.Now().After(deadline) {
+						finished <- errors.New("the merged-state query never ran")
+						return
+					}
+					time.Sleep(time.Millisecond)
+				}
+				var err error
+				if replacement {
+					operator.recordPR("1", branch, 8)
+				} else {
+					no := false
+					err = operator.record(ledger.Row{ID: "1", Merged: &no, Date: ledger.Today()})
+				}
+				if err == nil {
+					err = os.WriteFile(done, nil, 0o600)
+				}
+				finished <- err
+			}()
+
+			d := DriveItem{ID: "1", Branch: branch, PR: 7}
+			got := s.afterAutoMerge(context.Background(), it, &d, "main", time.Time{})
+			if err := <-finished; err != nil {
+				t.Fatal(err)
+			}
+			if got.MergeQueued || got.Merged {
+				t.Errorf("drive reports MergeQueued=%v Merged=%v, want neither: the lifecycle ended during the query", got.MergeQueued, got.Merged)
+			}
+			if !replacement && (got.Outcome != outcomeSkipped || got.Park != stateDone) {
+				t.Errorf("drive reports %s %s, want %s %s: a completion row landed during the query", got.Outcome, got.Park, outcomeSkipped, stateDone)
+			}
+			if replacement && (got.PR != 8 || got.Outcome != outcomeReviewed) {
+				t.Errorf("drive reports %s on PR %d, want %s on the replacement PR 8", got.Outcome, got.PR, outcomeReviewed)
+			}
+
+			if err := s.reload(); err != nil {
+				t.Fatal(err)
+			}
+			if pr, queued := s.ledger.MergeQueued("1"); queued {
+				t.Errorf("the ledger reads queued on PR %d, want the ended lifecycle left ended", pr)
+			}
+			if current, _ := s.ledger.PR("1"); replacement && current != 8 {
+				t.Errorf("the ledger names PR %d, want the replacement PR 8", current)
+			}
+
+			var out bytes.Buffer
+			events = &eventSink{cfg: s.cfg, notifier: newNotifier(s.cfg), w: &out}
+			activeDrive.Store(&runningDrive{id: "D2"})
+			t.Cleanup(func() { events = nil; activeDrive.Store(nil) })
+			if _, _, err := s.reconcile(); err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range strings.Split(out.String(), "\n") {
+				var e DriveEvent
+				if json.Unmarshal([]byte(line), &e) == nil && e.Event == evMerged {
+					t.Errorf("reconciliation announced the ended queue: id=%s PR=%d drive=%s", e.ID, e.PR, e.Drive)
 				}
 			}
 		})

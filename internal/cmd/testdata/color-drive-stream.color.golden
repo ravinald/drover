@@ -50,6 +50,6 @@
   Outcome:    the review recorded nothing: no audit and no request for changes, so what it found is unknown
   Next steps: [35mdrover drive 2[0m, or record what you found with [35mdrover audit 2[0m
 == stdout
-{"id":"1","title":"First","branch":"first","outcome":"ready_to_merge","reason":"merge queued at the forge; the next drive finishes it","rounds":0,"reviews":1,"changes_requested":0,"audits":1,"implementer":"impl","review_runner":"rev","pr":7,"merged":true,"started":"<time>","ended":"<time>"}
+{"id":"1","title":"First","branch":"first","outcome":"ready_to_merge","reason":"merge queued at the forge; the next drive finishes it","rounds":0,"reviews":1,"changes_requested":0,"audits":1,"implementer":"impl","review_runner":"rev","pr":7,"merge_queued":true,"started":"<time>","ended":"<time>"}
 {"id":"2","title":"Second","branch":"second","outcome":"parked","park":"no_record","reason":"the review recorded nothing: no audit and no request for changes, so what it found is unknown","detail":"unknown","evidence":"{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false}","log":"<path>","rounds":0,"reviews":1,"changes_requested":0,"audits":0,"implementer":"impl","review_runner":"rev","started":"<time>","ended":"<time>"}
 {"findings_by_coverage":{"blocked":0,"orphaned":0,"queued":0,"scaffold":0,"unowned":0,"unqueued":0},"findings_needing_triage":[]}

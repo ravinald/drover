@@ -806,6 +806,7 @@ func reconcileFixture(t *testing.T) (s *session, path, snaps string) {
 	if err := s.record(ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: ledger.Today()}); err != nil {
 		t.Fatal(err)
 	}
+	s.recordMergeQueued(&DriveItem{ID: "1", Branch: branch, PR: 7, MergeQueued: true}, s.ledgerLen())
 	if err := s.reload(); err != nil {
 		t.Fatal(err)
 	}

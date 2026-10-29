@@ -41,17 +41,36 @@ func (d *runningDrive) note(item DriveItem) {
 	if d == nil {
 		return
 	}
-	o := ledger.Outcome{ID: item.ID, Outcome: item.Outcome}
+	o := ledger.Outcome{ID: item.ID, Outcome: item.Outcome, MergeQueued: item.MergeQueued, PR: queuedPR(item)}
 	if item.Outcome == outcomeSkipped {
 		o.Reason = item.Reason
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if i := slices.IndexFunc(d.outcomes, func(x ledger.Outcome) bool { return x.ID == o.ID }); i >= 0 {
-		d.outcomes[i] = o
+		d.outcomes[i] = keepQueue(d.outcomes[i], o, item)
 		return
 	}
 	d.outcomes = append(d.outcomes, o)
+}
+
+// keepQueue is next, the outcome replacing prev, still carrying the merge prev
+// left queued at the forge. A retry the drive held, skipped or parked left
+// that queue alone, so the end row reports it outstanding. The queue ends where
+// Ledger.MergeQueued ends it: the item merged, or the retry ties it to another
+// pull request. Reconciliation reads the ledger's queue row, not this.
+func keepQueue(prev, next ledger.Outcome, item DriveItem) ledger.Outcome {
+	if next.MergeQueued || !prev.MergeQueued {
+		return next
+	}
+	if item.Merged || item.Outcome == outcomeMergedByGate || item.Outcome == outcomeMergedAtForge {
+		return next
+	}
+	if item.PR > 0 && item.PR != prev.PR {
+		return next
+	}
+	next.MergeQueued, next.PR = true, prev.PR
+	return next
 }
 
 // skipped is every item this drive skipped so far, as its lease publishes them.
@@ -80,11 +99,22 @@ func (d *runningDrive) revise(item DriveItem) {
 	defer d.mu.Unlock()
 	for i := len(d.outcomes) - 1; i >= 0; i-- {
 		if d.outcomes[i].ID == item.ID {
-			d.outcomes[i].Outcome = item.Outcome
+			next := d.outcomes[i]
+			next.Outcome, next.MergeQueued, next.PR = item.Outcome, item.MergeQueued, queuedPR(item)
+			d.outcomes[i] = keepQueue(d.outcomes[i], next, item)
 			return
 		}
 	}
-	d.outcomes = append(d.outcomes, ledger.Outcome{ID: item.ID, Outcome: item.Outcome})
+	d.outcomes = append(d.outcomes, ledger.Outcome{ID: item.ID, Outcome: item.Outcome, MergeQueued: item.MergeQueued, PR: queuedPR(item)})
+}
+
+// queuedPR is the pull request an end row ties a queued merge to, and zero for
+// an item that queued none.
+func queuedPR(item DriveItem) int {
+	if !item.MergeQueued {
+		return 0
+	}
+	return item.PR
 }
 
 func (d *runningDrive) sawRegister(index gh.Index) {

@@ -22,7 +22,11 @@ import (
 // account an operator away from the terminal needs: a drive that exits 0 with
 // one item parked and another skipped behind it has still left work waiting.
 type ExitSummary struct {
-	Merged       int `json:"merged"`
+	Merged int `json:"merged"`
+	// MergeQueued is the ready_to_merge items whose --auto merge the forge
+	// accepted and this drive did not see merge. They count under
+	// ready_to_merge as well, because that is still their outcome.
+	MergeQueued  int `json:"merge_queued"`
 	ReadyToMerge int `json:"ready_to_merge"`
 	Parked       int `json:"parked"`
 	Skipped      int `json:"skipped"`
@@ -84,7 +88,7 @@ func (s *session) exitSummary(done []DriveItem, ended string) *ExitSummary {
 		d.mu.Lock()
 		for _, o := range ledger.Latest(d.outcomes, func(o ledger.Outcome) string { return o.ID }) {
 			if !slices.ContainsFunc(all, func(x DriveItem) bool { return x.ID == o.ID }) {
-				all = append(all, DriveItem{ID: o.ID, Outcome: o.Outcome})
+				all = append(all, DriveItem{ID: o.ID, Outcome: o.Outcome, MergeQueued: o.MergeQueued && o.Outcome == outcomeReviewed})
 			}
 		}
 		d.mu.Unlock()
@@ -95,6 +99,9 @@ func (s *session) exitSummary(done []DriveItem, ended string) *ExitSummary {
 	}
 	sum := &ExitSummary{Ended: ended}
 	for _, d := range all {
+		if d.MergeQueued {
+			sum.MergeQueued++
+		}
 		if d.Merged || d.Outcome == outcomeMergedByGate || d.Outcome == outcomeMergedAtForge {
 			sum.Merged++
 			continue
@@ -748,8 +755,11 @@ func noticeBody(e DriveEvent) string {
 			return b + ", until " + localTime(e.Deadline)
 		}
 		return b + ", no deadline"
-	case evMerged:
+	case evMerged, evMergeQueued:
 		b := "merged"
+		if e.Event == evMergeQueued {
+			b = "merge queued"
+		}
 		if e.PR > 0 {
 			b += fmt.Sprintf(" #%d", e.PR)
 		}
@@ -860,6 +870,9 @@ func exitBody(e DriveEvent, held []notice) string {
 	counts := fmt.Sprintf("%d merged · %d parked · %d skipped · %d held", s.Merged, s.Parked, s.Skipped, s.Held)
 	if s.ReadyToMerge > 0 {
 		counts += fmt.Sprintf(" · %d ready to merge", s.ReadyToMerge)
+	}
+	if s.MergeQueued > 0 {
+		counts += fmt.Sprintf(", %d merge queued at the forge", s.MergeQueued)
 	}
 	head = append(head, counts)
 	var items []string

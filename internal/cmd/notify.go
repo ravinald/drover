@@ -150,7 +150,7 @@ func sampleEvent(kind, project string) DriveEvent {
 		e.Reason, e.Action, e.Policy, e.Run = "", "test", string(polOperator), testReason
 	case evNeedsSupervisor:
 		e.Reason, e.Action, e.Policy, e.Run = "", "test", string(polSupervisor), testReason
-	case evMerged:
+	case evMerged, evMergeQueued:
 		e.Reason, e.Title = "", "TEST: "+testReason
 	case evReexecWaiting:
 		e.ID, e.Waiting = "", []WaitingItem{{ID: "TEST", Stage: "review"}}

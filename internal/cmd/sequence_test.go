@@ -134,7 +134,7 @@ func TestABranchNumberedAboveTheTrunkMerges(t *testing.T) {
 	t.Setenv("DROVER_TEST_ADD", "db/000114_ours.up.sql")
 
 	got := driveAll(t)[0]
-	if !got.Merged || got.CatchUp == nil || got.CatchUp.Verify != catchUpPassed {
+	if !got.MergeQueued || got.CatchUp == nil || got.CatchUp.Verify != catchUpPassed {
 		t.Fatalf("item 1 is %q/%q merged=%v update_branch=%+v (%s), want merged after a passing branch update",
 			got.Outcome, got.Park, got.Merged, got.CatchUp, got.Reason)
 	}

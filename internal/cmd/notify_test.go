@@ -676,3 +676,19 @@ func TestNotifyTestExitsByWhatTheDestinationsDid(t *testing.T) {
 		t.Errorf("no destination configured exits %d, want 2:\n%s", Code(err), out)
 	}
 }
+
+// A held retry keeps the merge its earlier attempt queued on the end row, for
+// reconciliation. The summary of a drive that resumed onto that row reads the
+// item as held, and counts merge_queued only for a ready_to_merge entry.
+func TestASummaryFromHandedOffOutcomesCountsAHeldRetryAsHeld(t *testing.T) {
+	d := &runningDrive{id: "D1"}
+	d.note(DriveItem{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7})
+	d.note(DriveItem{ID: "1", Outcome: outcomeHeld})
+	d.note(DriveItem{ID: "2", Outcome: outcomeReviewed, MergeQueued: true, PR: 9})
+	activeDrive.Store(d)
+	t.Cleanup(func() { activeDrive.Store(nil) })
+	sum := (&session{}).exitSummary(nil, endedDrained)
+	if sum.MergeQueued != 1 || sum.Merged != 0 || sum.Held != 1 {
+		t.Errorf("summary merge_queued=%d merged=%d held=%d, want 1, 0, 1", sum.MergeQueued, sum.Merged, sum.Held)
+	}
+}
