@@ -4455,7 +4455,9 @@ func TestRecordHeadWritesOnlyForABranchOffTheTrunk(t *testing.T) {
 // DROVER_TEST_AUTO_MERGES says. Under DROVER_TEST_LANDS_ON=N a queued branch's
 // pull request #7 reads as open until the Nth merged read of it, which makes
 // the merge; unset, it reads as neither open nor merged, a pull request the
-// forge closed.
+// forge closed. DROVER_TEST_LANDS_AFTER names a file instead: a queued pull
+// request reads open until the file lists its branch, and the next merged read
+// makes the merge.
 func forge(t *testing.T, ghLog string) (dir, remote string) {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -4503,11 +4505,12 @@ case "$1 $2" in
         n=$(grep -cxF -- "$head" "$DROVER_TEST_POLLS")
         [ "$n" -lt "$DROVER_TEST_LANDS_ON" ] || land "$head"
       fi
+      if [ -n "${DROVER_TEST_LANDS_AFTER:-}" ] && waiting "$head" && grep -qxF -- "$head" "$DROVER_TEST_LANDS_AFTER" 2>/dev/null; then land "$head"; fi
       if [ -f "$DROVER_TEST_MERGED" ] && grep -qxF -- "$head" "$DROVER_TEST_MERGED"; then
         echo '[{"number":7,"mergedAt":"2026-10-07T00:00:00Z"}]'; exit 0
       fi ;;
     *'--state open'*)
-      if [ -n "${DROVER_TEST_LANDS_ON:-}" ] && waiting "$head"; then echo '[{"number":7}]'; exit 0; fi
+      if [ -n "${DROVER_TEST_LANDS_ON:-}${DROVER_TEST_LANDS_AFTER:-}" ] && waiting "$head"; then echo '[{"number":7}]'; exit 0; fi
       for b in ${DROVER_TEST_OPEN:-}; do
         if [ "$b" = "$head" ]; then echo '[{"number":8}]'; exit 0; fi
       done ;;
