@@ -123,6 +123,12 @@ func (q *driveSched) enter(seq int, at lease.Hold) error {
 		return stop
 	}
 	q.trunk.Lock()
+	// A queued merge's landing takes the trunk outside the turn order, and may
+	// drain the drive before letting go of it.
+	if stop := q.draining(); stop != nil {
+		q.trunk.Unlock()
+		return stop
+	}
 	return nil
 }
 

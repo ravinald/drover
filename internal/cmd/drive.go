@@ -1916,6 +1916,18 @@ type queuedMerge struct {
 	polled time.Time
 	// landing is set once a poll saw the merge land, while a slot finishes it.
 	landing bool
+	// read carries the answer of the forge read in flight, nil while none is.
+	// The read runs off the dispatcher, which alone writes the fields above.
+	read chan mergeRead
+}
+
+// mergeRead is what the forge said about a queued merge's pull request: merged
+// under pr, closed without merging, still open, or err when it would not say.
+type mergeRead struct {
+	pr     int
+	merged bool
+	closed bool
+	err    error
 }
 
 // mergeUnreadLimit is how many polls running may fail to read a queued merge
@@ -1994,7 +2006,10 @@ func (s *session) nextMergeWake(merging map[string]*queuedMerge, deadline time.T
 			continue
 		}
 		at, _ := s.mergeBound(m, deadline)
-		next = min(next, max(time.Until(m.polled.Add(checksPoll)), 0), max(time.Until(at), 0))
+		next = min(next, max(time.Until(at), 0))
+		if m.read == nil {
+			next = min(next, max(time.Until(m.polled.Add(checksPoll)), 0))
+		}
 	}
 	return next
 }
@@ -2008,18 +2023,24 @@ func dependsOn(pending []queued, dep string) bool {
 // every bound on each pass whether or not a poll is due, so a merge_wait
 // shorter than checksPoll or a deadline between two polls is answered on time.
 //
-// A merge the forge reports landed is handed to land, which finishes it off
-// the dispatcher: the finish waits for the trunk stage, which another item may
-// hold for minutes, and the dispatcher has to stay free to answer a --pause or
-// a --stop. It stays in merging, holding its dependents, until that slot
-// reports back. One the forge closed unmerged, one whose state would not read
-// mergeUnreadLimit polls running and one past its bound release their
-// dependents as skips naming the cause.
+// The bound comes first. A wait past it releases its dependents before a poll
+// is started, while one is in flight, and before an answer that arrived late is
+// read, so no merge is finished on a pass the bound has already ended; the dep
+// stays ready_to_merge for the next drive's reconciliation.
 //
-// Each forge read is made with the merge listed as running in the drive's
-// lease, so finish, mark-merged, unmark-merged and open-pr refuse it from
-// another process while the drive reads and records its state. A lease that
-// will not list it costs that poll and never the bound.
+// Each forge read runs off the dispatcher and is collected on a later pass:
+// gh answers in seconds or times out at 30, and the dispatcher has to stay free
+// to answer a --pause or a --stop. A merge the forge reports landed is handed
+// to land, which finishes it on a slot of its own, since the finish waits for
+// the trunk stage. It stays in merging, holding its dependents, until that slot
+// reports back. One the forge closed unmerged and one whose state would not
+// read mergeUnreadLimit polls running release their dependents as skips naming
+// the cause.
+//
+// Each read is made with the merge listed as running in the drive's lease, so
+// finish, mark-merged, unmark-merged and open-pr refuse it from another process
+// while the drive reads and records its state. A lease that will not list it
+// costs that poll and never the bound.
 func (s *session) pollMerges(pending *[]queued, merging map[string]*queuedMerge, deadline time.Time,
 	account func(DriveItem) error, land func(dep string, m *queuedMerge) error,
 ) error {
@@ -2028,7 +2049,7 @@ func (s *session) pollMerges(pending *[]queued, merging map[string]*queuedMerge,
 	}
 	now := time.Now()
 	due := slices.ContainsFunc(slices.Collect(maps.Values(merging)), func(m *queuedMerge) bool {
-		return !m.landing && now.Sub(m.polled) >= checksPoll
+		return !m.landing && m.read == nil && now.Sub(m.polled) >= checksPoll
 	})
 	if due {
 		if err := s.reload(); err != nil {
@@ -2036,23 +2057,42 @@ func (s *session) pollMerges(pending *[]queued, merging map[string]*queuedMerge,
 			due = false
 		}
 	}
+	labels := s.labels()
 	for _, dep := range slices.Sorted(maps.Keys(merging)) {
 		m := merging[dep]
 		if m.landing {
 			continue
 		}
-		if due && s.ledger.State(dep).Merged {
+		if due && m.read == nil && s.ledger.State(dep).Merged {
 			delete(merging, dep)
 			fmt.Fprintf(errOut, "· %s is recorded merged, so what waited for it dispatches\n", dep)
 			continue
 		}
 		if !driveFollow && !dependsOn(*pending, dep) {
+			stopReading(dep, m)
 			delete(merging, dep)
 			continue
 		}
-		if due && now.Sub(m.polled) >= checksPoll {
-			m.polled = now
-			landed, why, read := s.pollOwned(dep, m)
+		var r *mergeRead
+		if m.read != nil {
+			select {
+			case got := <-m.read:
+				m.read = nil
+				r = &got
+			default:
+			}
+		}
+		// Read after the answer is taken, so one that arrived past the bound is
+		// discarded rather than finished.
+		if why, over := s.pastMergeBound(dep, m, deadline, time.Now()); over {
+			if err := s.releaseMergeWait(dep, m, why, pending, merging, account); err != nil {
+				return err
+			}
+			continue
+		}
+		switch {
+		case r != nil:
+			landed, why := s.applyMergeRead(dep, m, *r)
 			if landed {
 				m.landing = true
 				err := land(dep, m)
@@ -2062,37 +2102,34 @@ func (s *session) pollMerges(pending *[]queued, merging map[string]*queuedMerge,
 				m.landing = false
 				why = fmt.Sprintf("it merged at the forge on %s, and the drive could not finish it: %v", prRef(m.PR), err)
 			}
-			if read {
-				disownMerge(dep)
-			}
+			disownMerge(dep)
 			if why != "" {
 				if err := s.releaseMergeWait(dep, m, why, pending, merging, account); err != nil {
 					return err
 				}
+			}
+		case m.read == nil && due && now.Sub(m.polled) >= checksPoll:
+			m.polled = now
+			if err := ownMerge(dep); err != nil {
+				fmt.Fprintf(errOut, "  · %s could not be listed as running in the drive's lease, so another process could write its "+
+					"merge state while this one asks the forge; not polling it this time: %v\n", dep, err)
 				continue
 			}
-		}
-		if why, over := s.pastMergeBound(dep, m, deadline, now); over {
-			if err := s.releaseMergeWait(dep, m, why, pending, merging, account); err != nil {
-				return err
-			}
+			m.read = make(chan mergeRead, 1)
+			go func(out chan<- mergeRead, branch string) { out <- readMergeState(labels, branch) }(m.read, m.Branch)
 		}
 	}
 	return nil
 }
 
-// pollOwned lists dep as running in the drive's lease and reads its merge
-// state. read is false when the lease would not list it, and then nothing was
-// asked of the forge. A landed merge is left listed, for the slot that
-// finishes it; the caller unlists any other.
-func (s *session) pollOwned(dep string, m *queuedMerge) (landed bool, why string, read bool) {
-	if err := ownMerge(dep); err != nil {
-		fmt.Fprintf(errOut, "  · %s could not be listed as running in the drive's lease, so another process could write its "+
-			"merge state while this one asks the forge; not polling it this time: %v\n", dep, err)
-		return false, "", false
+// stopReading abandons dep's forge read in flight, if one is, and unlists it
+// from the lease. The read's answer lands in a buffered channel nobody takes.
+func stopReading(dep string, m *queuedMerge) {
+	if m.read == nil {
+		return
 	}
-	landed, why = s.readQueuedMerge(dep, m)
-	return landed, why, true
+	m.read = nil
+	disownMerge(dep)
 }
 
 // pastMergeBound reports whether the wait for dep has reached its bound at now,
@@ -2160,43 +2197,43 @@ func disownMerge(id string) {
 	}
 }
 
-// readQueuedMerge asks the forge whether dep's queued merge landed. why is set
-// when the wait ends without one: the pull request closed unmerged, or its
-// state unread mergeUnreadLimit polls running. An open pull request is read
-// after the merged one, so a merge landing between the two reads is read again
-// rather than taken for a close.
-func (s *session) readQueuedMerge(dep string, m *queuedMerge) (landed bool, why string) {
-	unread := func(err error) (bool, string) {
+// readMergeState asks the forge whether branch's pull request merged. The open
+// pull request is read after the merged one, so a merge landing between the
+// two reads is read again rather than taken for a close. It touches no drive
+// state, since it runs off the dispatcher.
+func readMergeState(labels gh.Labels, branch string) mergeRead {
+	n, merged, err := gh.MergedPR(labels, branch)
+	if err != nil || merged {
+		return mergeRead{pr: n, merged: merged, err: err}
+	}
+	if _, open, err := gh.OpenPR(labels, branch); err != nil || open {
+		return mergeRead{err: err}
+	}
+	n, merged, err = gh.MergedPR(labels, branch)
+	return mergeRead{pr: n, merged: merged, closed: err == nil && !merged, err: err}
+}
+
+// applyMergeRead records what a read of dep's queued merge said. why is set
+// when the wait ends without a merge: the pull request closed unmerged, or its
+// state unread mergeUnreadLimit polls running.
+func (s *session) applyMergeRead(dep string, m *queuedMerge, r mergeRead) (landed bool, why string) {
+	switch {
+	case r.err != nil:
 		m.Unread++
-		fmt.Fprintf(errOut, "  · %s: the merge state of %s did not read (%d of %d): %v\n", dep, prRef(m.PR), m.Unread, mergeUnreadLimit, err)
+		fmt.Fprintf(errOut, "  · %s: the merge state of %s did not read (%d of %d): %v\n", dep, prRef(m.PR), m.Unread, mergeUnreadLimit, r.err)
 		if m.Unread < mergeUnreadLimit {
 			return false, ""
 		}
 		return false, fmt.Sprintf("the merge state of %s could not be read %d polls running (%v), so the drive stopped waiting on it",
-			prRef(m.PR), mergeUnreadLimit, err)
+			prRef(m.PR), mergeUnreadLimit, r.err)
+	case r.closed:
+		return false, fmt.Sprintf("%s was closed at the forge without merging", prRef(m.PR))
+	case !r.merged:
+		m.Unread = 0
+		return false, ""
 	}
-	n, merged, err := gh.MergedPR(s.labels(), m.Branch)
-	if err != nil {
-		return unread(err)
-	}
-	if !merged {
-		_, open, oerr := gh.OpenPR(s.labels(), m.Branch)
-		if oerr != nil {
-			return unread(oerr)
-		}
-		if open {
-			m.Unread = 0
-			return false, ""
-		}
-		if n, merged, err = gh.MergedPR(s.labels(), m.Branch); err != nil {
-			return unread(err)
-		}
-		if !merged {
-			return false, fmt.Sprintf("%s was closed at the forge without merging", prRef(m.PR))
-		}
-	}
-	if n > 0 {
-		m.PR = n
+	if r.pr > 0 {
+		m.PR = r.pr
 	}
 	return true, ""
 }
@@ -2218,7 +2255,7 @@ func (s *session) landQueuedMerge(ctx context.Context, sched *driveSched, it bac
 	d := DriveItem{ID: dep, Title: it.Title(), Branch: m.Branch, PR: m.PR, Outcome: outcomeMergedAtForge, Merged: true,
 		Started: m.Since.Format(time.RFC3339), Ended: now.Format(time.RFC3339),
 		Reason: fmt.Sprintf("the forge merged %s, queued earlier in this drive, after %s", prRef(m.PR), now.Sub(m.Since).Round(time.Second))}
-	if cause := sched.draining(); cause != nil {
+	if cause := stopping(ctx, sched); cause != nil {
 		d.Reason += fmt.Sprintf("; the drive stopped (%v) before finishing it, so the next drive's reconciliation finishes it", cause)
 		fmt.Fprintf(errOut, "· %s: %s\n", dep, d.Reason)
 		return d
@@ -2235,10 +2272,32 @@ func (s *session) landQueuedMerge(ctx context.Context, sched *driveSched, it bac
 			return d
 		}
 	}
+	if cause := stopping(ctx, sched); cause != nil {
+		fmt.Fprintf(errOut, "  · %s: the drive stopped (%v), so the other open pull requests were not caught up to its merge\n", dep, cause)
+		return d
+	}
 	s.trunkResults, s.forgeWait = sched.trunkResults, sched.forgeWait
 	s.afterMerge(ctx, &d)
 	sched.forgeWait = s.forgeWait
+	// Drained while the trunk is still held, so no item waiting for the stage
+	// catches up to a trunk this catch-up just found red.
+	if d.stop != nil {
+		sched.drain(d.stop)
+	}
 	return d
+}
+
+// stopping is why a landing slot may write nothing more: the drive draining,
+// or its context ended. A drive at --jobs 1 has no watcher draining it on an
+// interrupt, so the context is read here as well.
+func stopping(ctx context.Context, sched *driveSched) error {
+	if cause := sched.draining(); cause != nil {
+		return cause
+	}
+	if ctx.Err() != nil {
+		return errors.New("interrupted")
+	}
+	return nil
 }
 
 // releaseMergeWait stops waiting on dep and skips each pending item depending
@@ -2255,6 +2314,7 @@ func (s *session) releaseMergeWait(dep string, m *queuedMerge, why string, pendi
 		}
 		i++
 	}
+	stopReading(dep, m)
 	delete(merging, dep)
 	if len(skip) == 0 {
 		fmt.Fprintf(errOut, "· no longer waiting for %s: %s\n", dep, why)
@@ -2324,6 +2384,13 @@ func publishQueue(last []string, pending []queued, running map[int]queued, opera
 	slots := slices.Sorted(maps.Keys(running))
 	for _, n := range slots {
 		now = append(now, running[n].it.ID.Bare())
+	}
+	// A queued merge stays listed while the forge is asked about it, which
+	// ownMerge began and only the answer ends.
+	for _, dep := range slices.Sorted(maps.Keys(merging)) {
+		if merging[dep].read != nil && !slices.Contains(now, dep) {
+			now = append(now, dep)
+		}
 	}
 	skipped := activeDrive.Load().skipped()
 	key := append(append(slices.Clone(queue), "|"), now...)
@@ -3242,6 +3309,10 @@ func (s *session) catchUpPlan(it backlog.Item) string {
 // driveSummary is the count on stderr, so --json's stdout carries the document
 // and nothing else.
 func (s *session) driveSummary(done []DriveItem, totals DriveTotals) {
+	// One line and one count per item, its latest: a merge queued and then
+	// landed in the same drive is accounted twice, and only the landing is
+	// what the item came to.
+	done = ledger.Latest(done, func(d DriveItem) string { return d.ID })
 	var reviewed, byGate, atForge, parked, skipped, heldBack int
 	for _, d := range done {
 		switch d.Outcome {

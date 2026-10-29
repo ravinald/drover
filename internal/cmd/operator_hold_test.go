@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"maps"
 	"os"
@@ -621,10 +623,10 @@ func appendLine(t *testing.T, path, line string) {
 	}
 }
 
-// pendingItem is item id as the queue holds it.
-func pendingItem(t *testing.T, s *session, id string) queued {
+// pendingSecond is item 2 as the queue holds it.
+func pendingSecond(t *testing.T, s *session) queued {
 	t.Helper()
-	it, err := s.item(id)
+	it, err := s.item("2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -632,6 +634,25 @@ func pendingItem(t *testing.T, s *session, id string) queued {
 }
 
 func noLanding(string, *queuedMerge) error { return nil }
+
+// pollSettled runs pollMerges until no forge read it started is still in
+// flight, as the dispatcher's passes do.
+func pollSettled(t *testing.T, s *session, pending *[]queued, merging map[string]*queuedMerge,
+	account func(DriveItem) error, land func(string, *queuedMerge) error,
+) error {
+	t.Helper()
+	for until := time.Now().Add(time.Minute); ; time.Sleep(10 * time.Millisecond) {
+		if err := s.pollMerges(pending, merging, time.Time{}, account, land); err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(slices.Collect(maps.Values(merging)), func(m *queuedMerge) bool { return m.read != nil }) {
+			return nil
+		}
+		if time.Now().After(until) {
+			t.Fatal("a forge read never answered")
+		}
+	}
+}
 
 // An item depending on two queued merges keeps both held, whichever its deps
 // line names first, so the one it lists second is not dropped while the first
@@ -643,14 +664,14 @@ func TestAQueuedMergeStaysHeldWhileAnyPendingItemDependsOnIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending := []queued{pendingItem(t, s, "2")}
+	pending := []queued{pendingSecond(t, s)}
 	now := time.Now()
 	merging := map[string]*queuedMerge{
 		"1": {PR: 7, Branch: "first", Since: now, polled: now},
 		"3": {PR: 8, Branch: "third", Since: now, polled: now.Add(-time.Hour)},
 	}
-	t.Setenv("DROVER_TEST_OPEN", "third")
-	if err := s.pollMerges(&pending, merging, time.Time{}, func(DriveItem) error { return nil }, noLanding); err != nil {
+	t.Setenv("DROVER_TEST_OPEN", "first third")
+	if err := pollSettled(t, s, &pending, merging, func(DriveItem) error { return nil }, noLanding); err != nil {
 		t.Fatal(err)
 	}
 	if merging["1"] == nil || merging["3"] == nil {
@@ -716,7 +737,7 @@ func TestAnExpiredMergeWaitReleasesBeforeTheNextPoll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending := []queued{pendingItem(t, s, "2")}
+	pending := []queued{pendingSecond(t, s)}
 	merging := map[string]*queuedMerge{"1": {PR: 7, Branch: "first", Since: time.Now().Add(-time.Minute), polled: time.Now()}}
 	var skipped []DriveItem
 	if err := s.pollMerges(&pending, merging, time.Time{},
@@ -805,7 +826,7 @@ func TestPollingALandedMergeLeavesTheDispatcherFree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending := []queued{pendingItem(t, s, "2")}
+	pending := []queued{pendingSecond(t, s)}
 	write(t, os.Getenv("DROVER_TEST_MERGED"), branch+"\n")
 	merging := map[string]*queuedMerge{"1": {PR: 7, Branch: branch, Since: time.Now(), polled: time.Now().Add(-time.Hour)}}
 	sched := newDriveSched()
@@ -825,7 +846,7 @@ func TestPollingALandedMergeLeavesTheDispatcherFree(t *testing.T) {
 	sched.trunk.Lock()
 	done := make(chan error, 1)
 	go func() {
-		done <- s.pollMerges(&pending, merging, time.Time{}, func(DriveItem) error { return nil }, land)
+		done <- pollSettled(t, s, &pending, merging, func(DriveItem) error { return nil }, land)
 	}()
 	select {
 	case err := <-done:
@@ -956,7 +977,7 @@ func TestPollingAQueuedMergeListsItAsRunning(t *testing.T) {
 		finished = append(finished, s.landQueuedMerge(t.Context(), newDriveSched(), it, m))
 		return nil
 	}
-	if err := s.pollMerges(&pending, merging, time.Time{}, func(DriveItem) error { return nil }, land); err != nil {
+	if err := pollSettled(t, s, &pending, merging, func(DriveItem) error { return nil }, land); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(snaps) // #nosec G304 -- the fixture's own file
@@ -1020,5 +1041,304 @@ func TestAQueuedMergeThatLandsCatchesUpTheOpenPullRequests(t *testing.T) {
 	}
 	if c := evs[caught]; c.Result != "passed" || !strings.Contains(c.Reason, "pushed") {
 		t.Errorf("item 2's catch-up after 1 landed is %q (%s), want verified and pushed", c.Result, c.Reason)
+	}
+}
+
+// slowMergedReads makes every read of a merged pull request take delay, as a
+// forge near its 30-second timeout does.
+func slowMergedReads(t *testing.T, delay string) {
+	t.Helper()
+	ghPath, err := exec.LookPath("gh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped := filepath.Join(t.TempDir(), "gh")
+	if err := os.Rename(ghPath, wrapped); err != nil {
+		t.Fatal(err)
+	}
+	stub(t, ghPath, `#!/bin/sh
+case "$*" in *'--state merged'*) sleep `+delay+` ;; esac
+exec "`+wrapped+`" "$@"
+`)
+}
+
+// A poll due on a pass the bound has already ended asks the forge nothing and
+// finishes nothing: the dependent skips naming the bound, whether merge_wait or
+// the drive's deadline ended it.
+func TestAnExpiredBoundWinsOverADuePoll(t *testing.T) {
+	for _, c := range []struct {
+		name, extra, want string
+		deadline          time.Time
+	}{
+		{"merge_wait", `merge_wait = "1ms"`, "[drive] merge_wait", time.Time{}},
+		{"deadline", "", "the drive's deadline", time.Now().Add(-time.Second)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			branch := queuedMergeProject(t, c.extra)
+			s, err := open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending := []queued{pendingSecond(t, s)}
+			write(t, os.Getenv("DROVER_TEST_MERGED"), branch+"\n")
+			merging := map[string]*queuedMerge{"1": {PR: 7, Branch: branch, Since: time.Now().Add(-time.Minute), polled: time.Now().Add(-time.Hour)}}
+			landed := false
+			var skips []DriveItem
+			if err := s.pollMerges(&pending, merging, c.deadline, func(d DriveItem) error { skips = append(skips, d); return nil },
+				func(string, *queuedMerge) error { landed = true; return nil }); err != nil {
+				t.Fatal(err)
+			}
+			if landed || len(skips) != 1 || len(merging) != 0 {
+				t.Fatalf("an expired wait with a poll due launched finish=%v, skips=%d, merging=%d", landed, len(skips), len(merging))
+			}
+			for _, want := range []string{c.want, "#7", "1 stays ready_to_merge"} {
+				if !strings.Contains(skips[0].Reason, want) {
+					t.Errorf("the skip reason does not carry %q: %s", want, skips[0].Reason)
+				}
+			}
+		})
+	}
+}
+
+// A forge read that answers after the bound is discarded: the wait ends at the
+// bound while the read is in flight, and the merge it reports is left for the
+// next drive's reconciliation.
+func TestAReadCrossingTheBoundFinishesNothing(t *testing.T) {
+	branch := queuedMergeProject(t, `merge_wait = "300ms"`)
+	slowMergedReads(t, "1")
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := []queued{pendingSecond(t, s)}
+	write(t, os.Getenv("DROVER_TEST_MERGED"), branch+"\n")
+	merging := map[string]*queuedMerge{"1": {PR: 7, Branch: branch, Since: time.Now(), polled: time.Now().Add(-time.Hour)}}
+	landed := false
+	var skips []DriveItem
+	start := time.Now()
+	if err := pollSettled(t, s, &pending, merging, func(d DriveItem) error { skips = append(skips, d); return nil },
+		func(string, *queuedMerge) error { landed = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 900*time.Millisecond {
+		t.Errorf("the wait ended after %s, when the read answered rather than at the bound", took)
+	}
+	if landed || len(skips) != 1 || !strings.Contains(skips[0].Reason, "[drive] merge_wait") {
+		t.Fatalf("a read crossing the bound landed=%v, skips %+v", landed, skips)
+	}
+
+	// An answer already waiting when the bound is read is discarded too.
+	pending = []queued{pendingSecond(t, s)}
+	answer := make(chan mergeRead, 1)
+	answer <- mergeRead{pr: 7, merged: true}
+	merging = map[string]*queuedMerge{"1": {PR: 7, Branch: branch, Since: time.Now().Add(-time.Minute), polled: time.Now(), read: answer}}
+	skips = nil
+	if err := s.pollMerges(&pending, merging, time.Time{}, func(d DriveItem) error { skips = append(skips, d); return nil },
+		func(string, *queuedMerge) error { landed = true; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if landed || len(skips) != 1 {
+		t.Fatalf("a late merged answer landed=%v, skips %d", landed, len(skips))
+	}
+}
+
+// A forge read never holds the dispatcher: pollMerges returns at once while gh
+// takes seconds to answer, and collects the answer on a later pass.
+func TestASlowForgeReadLeavesTheDispatcherFree(t *testing.T) {
+	branch := queuedMergeProject(t, "")
+	slowMergedReads(t, "1")
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := []queued{pendingSecond(t, s)}
+	t.Setenv("DROVER_TEST_OPEN", branch)
+	merging := map[string]*queuedMerge{"1": {PR: 7, Branch: branch, Since: time.Now(), polled: time.Now().Add(-time.Hour)}}
+	start := time.Now()
+	if err := s.pollMerges(&pending, merging, time.Time{}, func(DriveItem) error { return nil }, noLanding); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 500*time.Millisecond {
+		t.Fatalf("the dispatcher was held %s by a forge read (enqueuePoll=%s)", took, enqueuePoll)
+	}
+	if merging["1"] == nil || merging["1"].read == nil {
+		t.Fatalf("no read was started: %+v", merging)
+	}
+	if err := pollSettled(t, s, &pending, merging, func(DriveItem) error { return nil }, noLanding); err != nil {
+		t.Fatal(err)
+	}
+	if merging["1"] == nil || len(pending) != 1 {
+		t.Errorf("an open pull request stopped holding item 2: merging %+v, pending %d", merging, len(pending))
+	}
+}
+
+// A --stop sent while a forge read of a queued merge is slow is answered on the
+// usual poll, and nothing waiting on the merge dispatches.
+func TestAStopIsAnsweredWhileAForgeReadIsSlow(t *testing.T) {
+	queuedMergeProject(t, "")
+	ownState(t)
+	one := branchOf(t, "1")
+	t.Setenv("DROVER_TEST_LANDS_ON", "1000")
+
+	ran := make(chan driveRun, 1)
+	go func() {
+		evs, stderr, err := driveEventsOf(t, "1", "2")
+		ran <- driveRun{evs, stderr, err}
+	}()
+	waitForLine(t, os.Getenv("DROVER_TEST_QUEUED"), one)
+	time.Sleep(200 * time.Millisecond)
+	slowMergedReads(t, "10")
+	time.Sleep(200 * time.Millisecond)
+
+	stopped := make(chan error, 1)
+	start := time.Now()
+	go func() { stopped <- stopDrive(io.Discard) }()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("--stop: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("--stop went unanswered while a forge read was in flight")
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("--stop took %s, as if it waited for the forge read", took)
+	}
+	var r driveRun
+	select {
+	case r = <-ran:
+	case <-time.After(2 * time.Minute):
+		t.Fatal("the stopped drive never exited")
+	}
+	if r.err != nil {
+		t.Fatalf("drive: %v\n%s", r.err, r.stderr)
+	}
+	if eventIndex(r.evs, evDispatched, "2") >= 0 {
+		t.Errorf("item 2 was dispatched after --stop: %+v", r.evs)
+	}
+}
+
+// An interrupt between the forge's answer and the finish finishes nothing, at
+// the default --jobs 1 where no watcher drains the schedule: no completion row,
+// and the merge is left to the next drive's reconciliation.
+func TestAnInterruptedLandingFinishesNothing(t *testing.T) {
+	s, _, _ := reconcileFixture(t)
+	it, err := s.item("1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch, err := s.branchFor(it)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	d := s.landQueuedMerge(ctx, newDriveSched(), it, &queuedMerge{PR: 7, Branch: branch, Since: time.Now()})
+	if d.Finished {
+		t.Fatalf("a canceled landing finished the merge: %+v", d)
+	}
+	if !strings.Contains(d.Reason, "the next drive's reconciliation finishes it") {
+		t.Errorf("the landing did not leave the merge to reconciliation: %s", d.Reason)
+	}
+	if err := s.reload(); err != nil {
+		t.Fatal(err)
+	}
+	if s.ledger.State("1").Merged {
+		t.Error("a canceled landing wrote the completion row")
+	}
+}
+
+// A catch-up that finds the trunk red after a landing drains the drive before
+// the landing lets go of the trunk, so the item next in line for the stage
+// parks rather than catching up to it.
+func TestALandingThatFindsTheTrunkRedDrainsBeforeReleasingIt(t *testing.T) {
+	branch := queuedMergeProject(t, "")
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	openSibling(t, s.cfg.Root, "two.txt", "two")
+	rows, _, err := driveWithEvents(t, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !latestRows(rows)["1"].MergeQueued {
+		t.Fatal("setup: item 1's merge was not queued")
+	}
+	if out, err := exec.Command("gh", "pr", "merge", branch).CombinedOutput(); err != nil {
+		t.Fatalf("land: %v %s", err, out)
+	}
+	if s, err = open(); err != nil {
+		t.Fatal(err)
+	}
+	it, err := s.item("1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	check, err := exec.LookPath("check")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stub(t, check, "#!/bin/sh\necho red\nexit 1\n")
+
+	sched := newDriveSched()
+	d := s.landQueuedMerge(t.Context(), sched, it, &queuedMerge{PR: 7, Branch: branch, Since: time.Now()})
+	if d.stop == nil {
+		t.Fatalf("setup: the catch-up raised no stop: %+v", d)
+	}
+	if sched.draining() == nil {
+		t.Fatalf("the landing returned stop=%v and released the trunk with the schedule still admitting work", d.stop)
+	}
+	if err := sched.enter(0, lease.Hold{ID: "3", At: stageCatchUp}); err == nil {
+		sched.leave(0)
+		t.Fatal("the next item entered the trunk stage after the landing found the trunk red")
+	}
+}
+
+// An item whose turn came while a landing held the trunk finds the drain that
+// landing raised once it gets the trunk, and enters nothing.
+func TestAnItemWaitingOnTheTrunkFindsADrainRaisedUnderIt(t *testing.T) {
+	sched := newDriveSched()
+	sched.trunk.Lock()
+	entered := make(chan error, 1)
+	go func() { entered <- sched.enter(0, lease.Hold{ID: "3", At: stageCatchUp}) }()
+	time.Sleep(100 * time.Millisecond)
+	sched.drain(errors.New("the trunk fails the verify command on its own"))
+	sched.trunk.Unlock()
+	select {
+	case err := <-entered:
+		if err == nil {
+			sched.leave(0)
+			t.Fatal("the item entered the trunk stage after a drain raised while it waited for the lock")
+		}
+	case <-time.After(time.Minute):
+		t.Fatal("the waiting item never returned")
+	}
+	if !sched.trunk.TryLock() {
+		t.Fatal("the refused item kept the trunk")
+	}
+}
+
+// The text summary counts each item once, at what it came to: a merge queued
+// and then landed in the same drive is merged, with nothing left to run.
+func TestTheDriveSummaryReportsALandedMergeOnce(t *testing.T) {
+	s := driveProject(t)
+	var out string
+	errOut := captureErr(t, func() {
+		out = capture(t, func() {
+			s.driveSummary([]DriveItem{
+				{ID: "1", Outcome: outcomeReviewed, MergeQueued: true, PR: 7},
+				{ID: "1", Outcome: outcomeMergedAtForge, Merged: true, Finished: true, PR: 7},
+			}, DriveTotals{})
+		})
+	})
+	if !strings.Contains(errOut, "1 attempted · 0 ready to merge · 1 merged immediately") {
+		t.Errorf("one landed merge is not counted once:\n%s", errOut)
+	}
+	if strings.Contains(errOut, "the next drover drive finishes it") || strings.Count(errOut, "Next steps:") != 1 {
+		t.Errorf("the superseded ready_to_merge advice is still printed:\n%s", errOut)
+	}
+	if strings.Count(out, "\n") != 1 {
+		t.Errorf("the item table prints one row per report, not per item:\n%s", out)
 	}
 }
