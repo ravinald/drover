@@ -127,6 +127,9 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 			return err
 		}
 		id := it.ID.Bare()
+		if err := s.itemNotDriving("finish", id); err != nil {
+			return err
+		}
 		if err := s.itemTreeFree(it); err != nil {
 			return err
 		}
