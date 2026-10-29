@@ -44,6 +44,9 @@ var doneCmd = &cobra.Command{
 			return err
 		}
 		id := it.ID.Bare()
+		if err := s.itemNotDriving("mark-merged", id); err != nil {
+			return err
+		}
 		if s.ledger.State(id).Merged {
 			fmt.Printf("already done: %s\n", id)
 			return nil
@@ -79,6 +82,9 @@ var undoneCmd = &cobra.Command{
 			return err
 		}
 		id := it.ID.Bare()
+		if err := s.itemNotDriving("unmark-merged", id); err != nil {
+			return err
+		}
 		if !s.ledger.State(id).Merged {
 			fmt.Printf("not done, nothing to withdraw: %s\n", id)
 			return nil

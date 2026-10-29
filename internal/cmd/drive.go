@@ -3590,6 +3590,7 @@ func (s *session) reconcile() (landed, left int, err error) {
 	restore := finishNoTracker
 	finishNoTracker = true
 	defer func() { finishNoTracker = restore }()
+	defer reconciling("")
 
 	for _, it := range s.backlog.Items {
 		id := it.ID.Bare()
@@ -3600,6 +3601,7 @@ func (s *session) reconcile() (landed, left int, err error) {
 		if err != nil || branch == "" {
 			continue
 		}
+		reconciling(id)
 		answer, _, err := s.mergedInto(branch, trunk)
 		if err != nil || answer == mergeNo {
 			continue
@@ -3664,6 +3666,22 @@ func (s *session) reconcile() (landed, left int, err error) {
 		}
 	}
 	return landed, left, nil
+}
+
+// reconciling lists id as the drive's one running item, or none when id is
+// empty, so that mark-merged, unmark-merged, open-pr and finish refuse it from
+// another process while reconcile asks the forge whether it merged and records
+// the answer. It runs before the queue is read, so nothing else is running to
+// overwrite, and publishQueue replaces it once the queue moves.
+func reconciling(id string) {
+	if held == nil {
+		return
+	}
+	var running []string
+	if id != "" {
+		running = []string{id}
+	}
+	_ = held.Update(func(l *lease.Lease) { l.Running = running })
 }
 
 // errDirtyTree is the sentinel a dirty tree raises: a switch would carry that

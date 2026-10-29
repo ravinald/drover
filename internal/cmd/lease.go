@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -86,6 +87,42 @@ func (s *session) leaseFree() error {
 		return nil
 	}
 	return leaseRefusal(lease.Held{Lease: l, Payload: l.PID != 0})
+}
+
+// itemNotDriving refuses when a live drive in this checkout lists id as
+// running, for the commands that write an item's merge state: mark-merged,
+// unmark-merged, open-pr and finish.
+//
+// leaseFree lets those through a drive, which is right for every item but the
+// ones it is working. For those the drive is mid-way through forge calls whose
+// answers it writes and announces afterwards, and it cannot order those writes
+// against a writer it does not exclude, so each such interleaving is closed
+// here rather than one at a time inside the drive. The drive's own finish is
+// this process, and held lets it through.
+//
+// A holder that has not written its account yet names no items, so it is let
+// through: there is nothing to say it is working this one.
+func (s *session) itemNotDriving(command, id string) error {
+	if held != nil {
+		return nil
+	}
+	path, err := s.leasePath()
+	if err != nil {
+		return err
+	}
+	l, busy, err := lease.Read(path)
+	if err != nil || !busy || l.Command != "drive" || !slices.Contains(l.Running, id) {
+		return err
+	}
+	who, waitWith := "a drive", "drover watch --until exit"
+	if l.Drive != "" {
+		who, waitWith = "drive "+l.Drive, "drover watch "+l.Drive+" --until exit"
+	}
+	return Refusal{fmt.Errorf(
+		"%s (pid %d) is running %s, and %s writes its merge state: the drive is reading the forge for it "+
+			"and records what it read afterwards.\n"+
+			"Wait for the drive to end (%s), or stop it (drover drive --stop), then run %s %s again",
+		who, l.PID, id, command, waitWith, command, id)}
 }
 
 // itemTreeFree refuses when another live process holds the lease on an item's

@@ -308,6 +308,9 @@ history of one contract across two places.`,
 		if err != nil {
 			return err
 		}
+		if err := s.itemNotDriving("open-pr", it.ID.Bare()); err != nil {
+			return err
+		}
 		branch, err := s.branchFor(it)
 		if err != nil {
 			return err
