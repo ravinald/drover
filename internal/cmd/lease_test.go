@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -682,8 +683,21 @@ func TestMergeStateWritersRefuseAnItemTheDriveIsRunning(t *testing.T) {
 	t.Run("open-pr", func(t *testing.T) {
 		dir, _, ghLog := openPRReady(t)
 		h := holdDriveRunning(t, dir, "1")
+		// Every gh invocation, gh auth status included: the refusal has to come
+		// before the forge hears from this process at all.
+		realGH, err := exec.LookPath("gh")
+		if err != nil {
+			t.Fatal(err)
+		}
+		bin, calls := t.TempDir(), filepath.Join(t.TempDir(), "calls")
+		stub(t, filepath.Join(bin, "gh"), fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %q\nexec %q \"$@\"\n",
+			calls, realGH))
+		t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 		assertRefusedForDrive(t, dir, "open-pr", "1")
+		if b, err := os.ReadFile(calls); err == nil && len(b) > 0 { // #nosec G304 -- a test fixture
+			t.Errorf("open-pr refused after calling gh:\n%s", b)
+		}
 		if n := prCreates(t, ghLog); len(n) != 0 {
 			t.Errorf("open-pr refused and opened %d pull requests: %v", len(n), n)
 		}
@@ -764,13 +778,13 @@ func TestADeadDrivesRunningListRefusesNothing(t *testing.T) {
 	}
 }
 
-// reconcile asks the forge whether an item merged and then records it, which
-// is the window a second process's mark-merged or finish would land in. The
-// gh wrapper snapshots the lease at every forge call, which mergedInto and the
-// finish it leads to both make, so what is asserted is the lease as another
-// process would have read it mid-reconcile.
-func TestReconcileListsTheItemItIsFinishing(t *testing.T) {
-	s := driveProject(t)
+// reconcileFixture is a drive holding the lease over item 1, implemented by a
+// launch drover recorded and merged into main since. Every gh call appends the
+// lease as it stands on disk to snaps, so a test reads the lease as another
+// process would have read it at each forge call.
+func reconcileFixture(t *testing.T) (s *session, path, snaps string) {
+	t.Helper()
+	s = driveProject(t)
 	dir := s.cfg.Root
 	it, err := s.item("1")
 	if err != nil {
@@ -804,7 +818,7 @@ func TestReconcileListsTheItemItIsFinishing(t *testing.T) {
 		release()
 		held = nil
 	})
-	path, err := s.leasePath()
+	path, err = s.leasePath()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -812,10 +826,20 @@ func TestReconcileListsTheItemItIsFinishing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the fixture puts no gh on PATH, so no forge call happens to observe: %v", err)
 	}
-	bin, snaps := t.TempDir(), filepath.Join(t.TempDir(), "snaps")
+	bin := t.TempDir()
+	snaps = filepath.Join(t.TempDir(), "snaps")
 	stub(t, filepath.Join(bin, "gh"), fmt.Sprintf("#!/bin/sh\n/bin/cat %q >> %q\nexec %q \"$@\"\n",
 		path, snaps, realGH))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return s, path, snaps
+}
+
+// reconcile asks the forge whether an item merged and then records it, which
+// is the window a second process's mark-merged or finish would land in.
+// mergedInto and the finish it leads to both call gh, so what is asserted is
+// the lease as another process would have read it mid-reconcile.
+func TestReconcileListsTheItemItIsFinishing(t *testing.T) {
+	s, _, snaps := reconcileFixture(t)
 
 	landed, _, err := s.reconcile()
 	if err != nil || landed != 1 {
@@ -835,5 +859,89 @@ func TestReconcileListsTheItemItIsFinishing(t *testing.T) {
 	}
 	if !s.ledger.State("1").Merged {
 		t.Error("reconcile recorded no completion")
+	}
+}
+
+// mergeObserver is an event writer that, on the merged event, reads the lease
+// and the ledger from disk: the state a notifier, or an operator it wakes,
+// meets at the moment the drive announces the merge.
+type mergeObserver struct {
+	lease, ledger   string
+	seen            bool
+	running, merged bool
+}
+
+func (o *mergeObserver) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), `"event":"merged"`) {
+		o.seen = true
+		l, busy, err := lease.Read(o.lease)
+		o.running = err == nil && busy && slices.Contains(l.Running, "1")
+		if led, err := ledger.Load(o.ledger); err == nil {
+			o.merged = led.State("1").Merged
+		}
+	}
+	return len(p), nil
+}
+
+// A merge reconciliation finishes is announced like one the drive made, and
+// the announcement comes after the completion row and before the item leaves
+// Running: heard any earlier, an outside finish would find it free with the
+// drive's own record still to be written.
+func TestReconcileAnnouncesTheMergeBeforeFreeingTheItem(t *testing.T) {
+	s, path, _ := reconcileFixture(t)
+	obs := &mergeObserver{lease: path, ledger: s.cfg.Abs(s.cfg.Paths.Ledger)}
+	previous := events
+	events = &eventSink{w: obs, cfg: s.cfg}
+	t.Cleanup(func() { events = previous })
+
+	landed, _, err := s.reconcile()
+	if err != nil || landed != 1 {
+		t.Fatalf("reconcile finished %d (%v), want 1", landed, err)
+	}
+	if !obs.seen {
+		t.Fatal("reconcile finished 1 and emitted no merged event")
+	}
+	if !obs.merged {
+		t.Error("merged was emitted before the completion row was on disk")
+	}
+	if !obs.running {
+		t.Error("merged was emitted after 1 had already left the lease's running list")
+	}
+	l, busy, err := lease.Read(path)
+	if err != nil || !busy || len(l.Running) != 0 {
+		t.Errorf("after reconcile the lease reads running %v (busy %v, %v), want none", l.Running, busy, err)
+	}
+}
+
+// The exclusion is only as good as the list on disk. A rewrite that fails
+// leaves outside writers reading the item as free, so reconciliation stops
+// there: no forge question, no completion.
+func TestReconcileStopsWhenTheLeaseWillNotListTheItem(t *testing.T) {
+	s, path, snaps := reconcileFixture(t)
+	// The rewrite takes a lock file beside the lease; a directory in its place
+	// fails every rewrite while leaving the lease itself held and readable.
+	if err := os.Mkdir(path+lease.QueueSuffix, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	landed, _, err := s.reconcile()
+	if err == nil {
+		t.Fatalf("reconcile finished %d with the lease unwritable, want an error", landed)
+	}
+	if landed != 0 {
+		t.Errorf("reconcile finished %d with the lease unwritable, want 0", landed)
+	}
+	if !strings.Contains(err.Error(), "1 could not be listed as running") {
+		t.Errorf("the error does not name the item it stopped on: %v", err)
+	}
+	if b, err := os.ReadFile(snaps); err == nil { // #nosec G304 -- a test fixture
+		t.Errorf("reconcile asked the forge with the item unlisted:\n%s", b)
+	}
+	led, err := ledger.Load(s.cfg.Abs(s.cfg.Paths.Ledger))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if led.State("1").Merged {
+		t.Error("reconcile recorded a completion with the item unlisted")
 	}
 }

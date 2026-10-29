@@ -3590,7 +3590,16 @@ func (s *session) reconcile() (landed, left int, err error) {
 	restore := finishNoTracker
 	finishNoTracker = true
 	defer func() { finishNoTracker = restore }()
-	defer reconciling("")
+	listed := false
+	defer func() {
+		if !listed {
+			return
+		}
+		if cerr := reconciling(""); cerr != nil {
+			fmt.Fprintf(errOut, "· the drive's lease still lists the last item reconciled as running, "+
+				"so outside writers refuse it until the drive rewrites the lease or ends: %v\n", cerr)
+		}
+	}()
 
 	for _, it := range s.backlog.Items {
 		id := it.ID.Bare()
@@ -3601,7 +3610,15 @@ func (s *session) reconcile() (landed, left int, err error) {
 		if err != nil || branch == "" {
 			continue
 		}
-		reconciling(id)
+		// Stopping is the only safe answer to a failed write: carrying on asks
+		// the forge and records a completion while mark-merged, unmark-merged,
+		// open-pr and finish from another process all read the item as free.
+		if err := reconciling(id); err != nil {
+			return landed, left, fmt.Errorf(
+				"%s could not be listed as running in the drive's lease, so another process could write its "+
+					"merge state while this one asks the forge; not reconciling it: %w", id, err)
+		}
+		listed = true
 		answer, _, err := s.mergedInto(branch, trunk)
 		if err != nil || answer == mergeNo {
 			continue
@@ -3661,6 +3678,10 @@ func (s *session) reconcile() (landed, left int, err error) {
 			continue
 		}
 		landed++
+		// While id is still listed, so a notifier hearing it merged never finds
+		// it free for an outside write the drive has not finished making.
+		pr, _ := s.ledger.PR(id)
+		events.emit(DriveEvent{Event: evMerged, ID: id, PR: pr, Title: id + ": " + it.Title()})
 		if err := s.reload(); err != nil {
 			return landed, left, err
 		}
@@ -3673,15 +3694,15 @@ func (s *session) reconcile() (landed, left int, err error) {
 // another process while reconcile asks the forge whether it merged and records
 // the answer. It runs before the queue is read, so nothing else is running to
 // overwrite, and publishQueue replaces it once the queue moves.
-func reconciling(id string) {
+func reconciling(id string) error {
 	if held == nil {
-		return
+		return nil
 	}
 	var running []string
 	if id != "" {
 		running = []string{id}
 	}
-	_ = held.Update(func(l *lease.Lease) { l.Running = running })
+	return held.Update(func(l *lease.Lease) { l.Running = running })
 }
 
 // errDirtyTree is the sentinel a dirty tree raises: a switch would carry that
