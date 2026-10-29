@@ -382,11 +382,15 @@ type heldApart struct {
 // running, so nothing can run beside it, and once its dep merges the running
 // items it overlaps hold it in turn.
 //
+// merging is each dep whose --auto merge this drive queued at the forge, and
+// an item depending on one is held the same way: the forge may merge it while
+// the drive runs, and the drive polls it until then.
+//
 // A dep in none of these is left alone: it already finished, or it is not in
 // this drive, and driveItem reads its state when the item starts, as it does at
 // --jobs 1. A dep pending behind the item is left alone for the same reason, so
 // an item named before its own dep skips as blocked whatever --jobs is.
-func dispatchable(pending []queued, running map[int]queued, operator map[string]string) (int, []heldApart) { //nolint:unparam // the holds name why each skipped item waits, kept for a caller that reports them
+func dispatchable(pending []queued, running map[int]queued, operator map[string]string, merging map[string]*queuedMerge) (int, []heldApart) { //nolint:unparam // the holds name why each skipped item waits, kept for a caller that reports them
 	slots := make([]int, 0, len(running))
 	for n := range running {
 		slots = append(slots, n)
@@ -401,6 +405,11 @@ func dispatchable(pending []queued, running map[int]queued, operator map[string]
 	for i, q := range pending {
 		if dep := operatorDep(q, operator); dep != "" {
 			held = append(held, heldApart{q.it.ID.Bare(), dep, "parked " + operator[dep] + " for the operator"})
+			stalled = append(stalled, q)
+			continue
+		}
+		if dep := mergingDep(q, merging); dep != "" {
+			held = append(held, heldApart{q.it.ID.Bare(), dep, fmt.Sprintf("waits for %s's merge, queued at the forge on %s", dep, prRef(merging[dep].PR))})
 			stalled = append(stalled, q)
 			continue
 		}
@@ -428,6 +437,17 @@ func dependsOnAny(q queued, items []queued) bool {
 func operatorDep(q queued, operator map[string]string) string {
 	for _, dep := range q.it.Deps() {
 		if _, ok := operator[dep]; ok {
+			return dep
+		}
+	}
+	return ""
+}
+
+// mergingDep is the first of q's deps whose merge is queued at the forge, empty
+// for none.
+func mergingDep(q queued, merging map[string]*queuedMerge) string {
+	for _, dep := range q.it.Deps() {
+		if _, ok := merging[dep]; ok {
 			return dep
 		}
 	}
@@ -462,7 +482,7 @@ func planWaves(items []queued, jobs int) (waves [][]string, held []heldApart) {
 		running := map[int]queued{}
 		var wave []string
 		for len(running) < jobs {
-			i, _ := dispatchable(pending, running, nil)
+			i, _ := dispatchable(pending, running, nil, nil)
 			if i < 0 {
 				break
 			}

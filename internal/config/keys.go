@@ -68,6 +68,7 @@ var resolved = map[string]string{
 	"ids.remote":              strconv.Quote("origin"),
 	"forge.reruns":            strconv.Itoa(DefaultReruns),
 	"forge.checks_wait":       strconv.Quote("10m"),
+	"drive.merge_wait":        strconv.Quote("30m"),
 	"usage.session_max_hours": strconv.Itoa(DefaultSessionMaxHours),
 	"usage.context_warn":      strconv.Itoa(DefaultContextWarn),
 	"usage.overage.mode":      strconv.Quote(OveragePause),

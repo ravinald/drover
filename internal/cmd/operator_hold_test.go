@@ -323,16 +323,16 @@ func TestAnItemOnlyOverlappingAnOperatorHeldOneIsNotHeldByIt(t *testing.T) {
 		{"depends on the held item", []queued{q(2, "1"), q(3, "2")}, -1},
 	}
 	for _, c := range cases {
-		if i, held := dispatchable(c.pending, map[int]queued{}, operator); i != c.want {
+		if i, held := dispatchable(c.pending, map[int]queued{}, operator, nil); i != c.want {
 			t.Errorf("%s: dispatchable = %d (held %+v), want %d", c.name, i, held, c.want)
 		}
 	}
 	running := map[int]queued{1: q(5, "")}
-	if i, held := dispatchable([]queued{q(2, "1"), q(3, "")}, running, operator); i != -1 {
+	if i, held := dispatchable([]queued{q(2, "1"), q(3, "")}, running, operator, nil); i != -1 {
 		t.Errorf("an item overlapping a running one dispatched at %d (held %+v)", i, held)
 	}
 	delete(operator, "1")
-	if i, held := dispatchable([]queued{q(2, "1"), q(3, "")}, map[int]queued{}, operator); i != 0 {
+	if i, held := dispatchable([]queued{q(2, "1"), q(3, "")}, map[int]queued{}, operator, nil); i != 0 {
 		t.Errorf("released item 2 is not first to dispatch: %d (held %+v)", i, held)
 	}
 }
@@ -366,5 +366,209 @@ func TestAnOverlappingItemOvertakesAHeldDependent(t *testing.T) {
 	}
 	if !slices.Contains(starts[four], treeName(t, "3")) {
 		t.Errorf("item 4 waited for item 3 to end behind held item 2: %v", starts)
+	}
+}
+
+// queuedMergeProject writes item 1 and item 2 depending on it, each passing
+// review, on a forge whose required checks hold item 1's --auto merge in its
+// queue and merge item 2's at once. drive polls every 10ms. extra is appended
+// to the [drive] table and committed. It returns item 1's branch.
+func queuedMergeProject(t *testing.T, extra string) (branch string) {
+	t.Helper()
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, _ := forge(t, ghLog)
+	jobsStubs(t, filepath.Join(t.TempDir(), "starts.log"))
+	for v, d := range map[*time.Duration]time.Duration{&enqueuePoll: 20 * time.Millisecond, &checksPoll: 10 * time.Millisecond} {
+		was := *v
+		*v = d
+		t.Cleanup(func() { *v = was })
+	}
+	write(t, filepath.Join(dir, "work", "01-first.md"), "---\ntitle: First\ndeps:\n---\n\n1. Do it. REVIEW-PASSES-1\n")
+	write(t, filepath.Join(dir, "work", "02-second.md"), "---\ntitle: Second\ndeps: 1\n---\n\n1. Do it. REVIEW-PASSES-2\n")
+	if extra != "" {
+		f, err := os.OpenFile(filepath.Join(dir, config.FileName), os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.WriteString(extra + "\n"); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Close(); err != nil {
+			t.Fatal(err)
+		}
+		git(t, dir, "commit", "-q", "-am", "configure the merge wait")
+		git(t, dir, "push", "-q", "origin", "main")
+	}
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	it, err := s.item("1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branch, err = s.branchFor(it); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DROVER_TEST_QUEUE", branch)
+	t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
+	return branch
+}
+
+// latestRows is each item's last report in a drive's stream.
+func latestRows(rows []DriveItem) map[string]DriveItem {
+	got := map[string]DriveItem{}
+	for _, r := range rows {
+		got[r.ID] = r
+	}
+	return got
+}
+
+// A merge queued at the forge holds its dependent rather than skipping it, and
+// once a poll sees it land the drive finishes it and dispatches the dependent,
+// which merges in the same drive.
+func TestADependentWaitsForAQueuedMergeAndDispatchesOnItsLanding(t *testing.T) {
+	queuedMergeProject(t, "")
+	t.Setenv("DROVER_TEST_LANDS_ON", "4")
+
+	var rows []DriveItem
+	var evs []DriveEvent
+	var err error
+	errOut := captureErr(t, func() { rows, evs, err = driveWithEvents(t, "1", "2") })
+	if err != nil {
+		t.Fatalf("drive: %v\n%s", err, errOut)
+	}
+	if len(rows) == 0 || rows[0].ID != "1" || !rows[0].MergeQueued {
+		t.Fatalf("item 1 was not first reported with its merge queued: %+v", rows)
+	}
+	got := latestRows(rows)
+	if one := got["1"]; one.Outcome != outcomeMergedAtForge || !one.Merged || !one.Finished || one.PR != 7 {
+		t.Errorf("item 1 ends %q merged=%v finished=%v pr=%d (%s), want merged at the forge on #7 and finished",
+			one.Outcome, one.Merged, one.Finished, one.PR, one.Reason)
+	}
+	if two := got["2"]; two.Outcome != outcomeMergedAtForge || !two.Merged || !two.Finished {
+		t.Errorf("item 2 ends %q merged=%v finished=%v (%s), want merged and finished in this drive",
+			two.Outcome, two.Merged, two.Finished, two.Reason)
+	}
+	var merged []string
+	for _, e := range evs {
+		switch e.Event {
+		case evSkipped:
+			t.Errorf("a skipped event arrived: %+v", e)
+		case evMerged:
+			merged = append(merged, e.ID)
+			if e.ID == "1" && e.PR != 7 {
+				t.Errorf("merged for item 1 names PR %d, want 7", e.PR)
+			}
+		}
+	}
+	if !slices.Equal(merged, []string{"1", "2"}) {
+		t.Errorf("merged events for %v, want 1 then 2", merged)
+	}
+	if n := strings.Count(errOut, "· waiting for 1's merge, queued at the forge on #7, holding 2;"); n != 1 {
+		t.Errorf("stderr carries %d waiting lines for 1, want 1:\n%s", n, errOut)
+	}
+	if !strings.Contains(errOut, "up to 30m0s ([drive] merge_wait)") {
+		t.Errorf("the waiting line does not name the bound:\n%s", errOut)
+	}
+	b, err := os.ReadFile(os.Getenv("DROVER_TEST_POLLS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(b), "\n"); n != 4 {
+		t.Errorf("the merged state was read %d times before it landed, want 4: the read at the merge and three polls", n)
+	}
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"1", "2"} {
+		if !s.ledger.State(id).Merged {
+			t.Errorf("item %s is not recorded merged", id)
+		}
+	}
+}
+
+// The wait is bounded: past [drive] merge_wait the dependent skips naming the
+// queued dep, its pull request and how long the drive waited, and the dep
+// stays queued for the next drive's reconciliation.
+func TestADependentOfAQueuedMergeSkipsAtMergeWait(t *testing.T) {
+	queuedMergeProject(t, `merge_wait = "100ms"`)
+	t.Setenv("DROVER_TEST_LANDS_ON", "1000")
+
+	rows, _, err := driveWithEvents(t, "1", "2")
+	if err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	got := latestRows(rows)
+	two := got["2"]
+	if two.Outcome != outcomeSkipped || two.Park != stateBlocked {
+		t.Fatalf("item 2 is %q/%q (%s), want skipped blocked", two.Outcome, two.Park, two.Reason)
+	}
+	for _, want := range []string{"blocked by 1", "#7", "the drive waited", "[drive] merge_wait", "1 stays ready_to_merge"} {
+		if !strings.Contains(two.Reason, want) {
+			t.Errorf("the skip reason does not carry %q: %s", want, two.Reason)
+		}
+	}
+	if one := got["1"]; one.Outcome != outcomeReviewed || !one.MergeQueued || one.Merged {
+		t.Errorf("item 1 is %q queued=%v merged=%v, want ready_to_merge with its merge still queued", one.Outcome, one.MergeQueued, one.Merged)
+	}
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr, queued := s.ledger.MergeQueued("1"); !queued || pr != 7 {
+		t.Errorf("the ledger reads 1 queued=%v on #%d, want queued on #7 for reconciliation", queued, pr)
+	}
+}
+
+// A pull request the forge closes without merging ends the wait at once.
+func TestADependentOfAQueuedMergeSkipsWhenThePullRequestCloses(t *testing.T) {
+	queuedMergeProject(t, "")
+
+	start := time.Now()
+	rows, _, err := driveWithEvents(t, "1", "2")
+	if err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	two := latestRows(rows)["2"]
+	if two.Outcome != outcomeSkipped || !strings.Contains(two.Reason, "blocked by 1") ||
+		!strings.Contains(two.Reason, "#7 was closed at the forge without merging") {
+		t.Errorf("item 2 is %q (%s), want skipped naming the closed pull request", two.Outcome, two.Reason)
+	}
+	if took := time.Since(start); took > time.Minute {
+		t.Errorf("the drive took %s, as if it waited out merge_wait", took)
+	}
+}
+
+// A merge state gh cannot read three polls running ends the wait.
+func TestADependentOfAQueuedMergeSkipsWhenTheMergeStateWillNotRead(t *testing.T) {
+	branch := queuedMergeProject(t, "")
+	t.Setenv("DROVER_TEST_LANDS_ON", "1000")
+	// The read at the merge itself must answer, or the merge reads as unreadable
+	// at once; the poll's reads fail once the queue file names the branch.
+	checks := filepath.Join(t.TempDir(), "gh")
+	ghPath, err := exec.LookPath("gh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(ghPath, checks); err != nil {
+		t.Fatal(err)
+	}
+	stub(t, ghPath, `#!/bin/sh
+case "$*" in *'--state merged'*)
+  if [ -s "$DROVER_TEST_POLLS" ]; then echo 'gh: Server Error (HTTP 502)' >&2; exit 1; fi ;;
+esac
+exec "`+checks+`" "$@"
+`)
+
+	rows, _, err := driveWithEvents(t, "1", "2")
+	if err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	two := latestRows(rows)["2"]
+	if two.Outcome != outcomeSkipped || !strings.Contains(two.Reason, "could not be read 3 polls running") {
+		t.Errorf("item 2 is %q (%s), want skipped naming the unreadable merge state of %s", two.Outcome, two.Reason, branch)
 	}
 }

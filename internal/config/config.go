@@ -544,6 +544,25 @@ type Loop struct {
 	// well before it ran out of memory, and the CPU count is where a load
 	// average starts to mean waiting. Read it through LoadCeiling.
 	MaxLoad float64 `toml:"max_load"`
+	// MergeWait is how long drive waits, with nothing else left to run, for an
+	// --auto merge the forge queued before it skips the items depending on it,
+	// as a Go duration. Read it through DriveMergeWait; "0" never waits.
+	MergeWait string `toml:"merge_wait"`
+}
+
+// DefaultMergeWait is [drive] merge_wait undeclared: long enough for a
+// required-checks run of the usual length, short enough that a forge which
+// never merges does not hold a night's queue.
+const DefaultMergeWait = 30 * time.Minute
+
+// DriveMergeWait is [drive] merge_wait, or its default when undeclared or
+// unreadable; validate refuses an unreadable one at load.
+func (c *Config) DriveMergeWait() time.Duration {
+	d, err := time.ParseDuration(c.Loop.MergeWait)
+	if c.Loop.MergeWait == "" || err != nil {
+		return DefaultMergeWait
+	}
+	return d
 }
 
 // LoadCeiling is [drive] max_load, or the CPU count where none is declared.
@@ -1495,6 +1514,11 @@ func (c *Config) validate(path string) error {
 	}
 	if c.Loop.MaxLoad < 0 {
 		return fmt.Errorf("%s: drive.max_load is %g: give a load average above 0, or leave it unset for the CPU count", path, c.Loop.MaxLoad)
+	}
+	if w := c.Loop.MergeWait; w != "" {
+		if d, err := time.ParseDuration(w); err != nil || d < 0 {
+			return fmt.Errorf("%s: drive.merge_wait is %q: give a duration such as \"30m\", or \"0\" to never wait", path, w)
+		}
 	}
 	if err := c.validateForge(path); err != nil {
 		return err

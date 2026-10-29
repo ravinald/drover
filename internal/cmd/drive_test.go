@@ -4451,6 +4451,11 @@ func TestRecordHeadWritesOnlyForABranchOffTheTrunk(t *testing.T) {
 // the branches whose pull request #8 reads as open.
 // DROVER_TEST_CHECKS names a script that answers every other gh api read and
 // gh run in its place, for a test that needs check runs of its own.
+// DROVER_TEST_QUEUE names the branches whose --auto the forge queues whatever
+// DROVER_TEST_AUTO_MERGES says. Under DROVER_TEST_LANDS_ON=N a queued branch's
+// pull request #7 reads as open until the Nth merged read of it, which makes
+// the merge; unset, it reads as neither open nor merged, a pull request the
+// forge closed.
 func forge(t *testing.T, ghLog string) (dir, remote string) {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -4470,20 +4475,39 @@ func forge(t *testing.T, ghLog string) (dir, remote string) {
 	t.Setenv("DROVER_TEST_GH_LOG", ghLog)
 	t.Setenv("DROVER_TEST_MERGED", filepath.Join(state, "merged"))
 	t.Setenv("DROVER_TEST_READS", filepath.Join(state, "reads"))
+	t.Setenv("DROVER_TEST_QUEUED", filepath.Join(state, "queued"))
+	t.Setenv("DROVER_TEST_POLLS", filepath.Join(state, "polls"))
 	t.Setenv("DROVER_TEST_REMOTE", remote)
 	stub(t, ghPath, `#!/bin/sh
 if [ "$1 $2" = 'auth status' ]; then exit 0; fi
 printf '%s\n' "$*" >> "$DROVER_TEST_GH_LOG"
+land() {
+  tmp=$(mktemp -d)
+  git clone -q "$DROVER_TEST_REMOTE" "$tmp/c" >/dev/null 2>&1 &&
+    git -C "$tmp/c" -c user.name=f -c user.email=f@example.invalid -c commit.gpgsign=false \
+      merge -q --no-ff --no-edit "origin/$1" >/dev/null 2>&1 &&
+    git -C "$tmp/c" push -q origin HEAD:main >/dev/null 2>&1 || { echo "merge of $1 failed" >&2; exit 1; }
+  printf '%s\n' "$1" >> "$DROVER_TEST_MERGED"
+}
+waiting() {
+  grep -qxF -- "$1" "$DROVER_TEST_QUEUED" 2>/dev/null && ! grep -qxF -- "$1" "$DROVER_TEST_MERGED" 2>/dev/null
+}
 case "$1 $2" in
   'pr list')
     head=""; prev=""
     for a; do [ "$prev" = "--head" ] && head=$a; prev=$a; done
     case "$*" in *'--state merged'*)
       if [ -n "${DROVER_TEST_MERGED_FAIL:-}" ]; then echo 'gh: Server Error (HTTP 502)' >&2; exit 1; fi
+      if [ -n "${DROVER_TEST_LANDS_ON:-}" ] && waiting "$head"; then
+        printf '%s\n' "$head" >> "$DROVER_TEST_POLLS"
+        n=$(grep -cxF -- "$head" "$DROVER_TEST_POLLS")
+        [ "$n" -lt "$DROVER_TEST_LANDS_ON" ] || land "$head"
+      fi
       if [ -f "$DROVER_TEST_MERGED" ] && grep -qxF -- "$head" "$DROVER_TEST_MERGED"; then
         echo '[{"number":7,"mergedAt":"2026-10-07T00:00:00Z"}]'; exit 0
       fi ;;
     *'--state open'*)
+      if [ -n "${DROVER_TEST_LANDS_ON:-}" ] && waiting "$head"; then echo '[{"number":7}]'; exit 0; fi
       for b in ${DROVER_TEST_OPEN:-}; do
         if [ "$b" = "$head" ]; then echo '[{"number":8}]'; exit 0; fi
       done ;;
@@ -4496,15 +4520,14 @@ case "$1 $2" in
         echo 'GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)' >&2
         exit 1
       fi
+      for b; do :; done
+      for q in ${DROVER_TEST_QUEUE:-}; do
+        if [ "$q" = "$b" ]; then printf '%s\n' "$b" >> "$DROVER_TEST_QUEUED"; exit 0; fi
+      done
       [ -n "${DROVER_TEST_AUTO_MERGES:-}" ] || exit 0 ;;
     esac
     for b; do :; done
-    tmp=$(mktemp -d)
-    git clone -q "$DROVER_TEST_REMOTE" "$tmp/c" >/dev/null 2>&1 &&
-      git -C "$tmp/c" -c user.name=f -c user.email=f@example.invalid -c commit.gpgsign=false \
-        merge -q --no-ff --no-edit "origin/$b" >/dev/null 2>&1 &&
-      git -C "$tmp/c" push -q origin HEAD:main >/dev/null 2>&1 || { echo "merge of $b failed" >&2; exit 1; }
-    printf '%s\n' "$b" >> "$DROVER_TEST_MERGED" ;;
+    land "$b" ;;
   'pr '*) : ;;
   'api '*/required_status_checks)
     case "${DROVER_TEST_REQUIRED:-}" in
@@ -4912,6 +4935,31 @@ func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
 			t.Errorf("the reason does not say the merge state went unread: %s", got.Reason)
 		}
 	})
+}
+
+// merge_wait = "0" turns the wait off: the dependent of a queued merge
+// dispatches, reads its dep unmerged, skips as blocked, and the drive exits
+// without polling the forge.
+func TestMergeWaitZeroSkipsTheDependentOfAQueuedMerge(t *testing.T) {
+	queuedMergeProject(t, `merge_wait = "0"`)
+	t.Setenv("DROVER_TEST_LANDS_ON", "2")
+
+	var rows []DriveItem
+	var err error
+	errOut := captureErr(t, func() { rows, _, err = driveWithEvents(t, "1", "2") })
+	if err != nil {
+		t.Fatalf("drive: %v", err)
+	}
+	got := latestRows(rows)
+	if two := got["2"]; two.Outcome != outcomeSkipped || two.Park != stateBlocked || strings.Contains(two.Reason, "merge was queued") {
+		t.Errorf("item 2 is %q/%q (%s), want the blocked skip a drive with no wait gives", two.Outcome, two.Park, two.Reason)
+	}
+	if one := got["1"]; one.Merged || !one.MergeQueued {
+		t.Errorf("item 1 is merged=%v queued=%v, want its merge left queued", one.Merged, one.MergeQueued)
+	}
+	if strings.Contains(errOut, "waiting for 1's merge") {
+		t.Errorf("a drive with merge_wait = \"0\" waited:\n%s", errOut)
+	}
 }
 
 // With no gate declared --auto is the only path, and a merge the forge made on

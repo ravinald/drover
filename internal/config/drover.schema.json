@@ -388,6 +388,11 @@
           "type": "number",
           "exclusiveMinimum": 0,
           "description": "The 1-minute load average above which drive holds dispatch while [supervise] host_load_admission is auto. Unset means the host's CPU count. At off, the default, drive never reads the load."
+        },
+        "merge_wait": {
+          "type": "string",
+          "default": "30m",
+          "description": "How long drive waits for an --auto merge the forge queued, polling it, before it skips the items depending on it, as a Go duration. The drive's --for or --until deadline bounds the wait too, whichever comes first. \"0\" never waits: dependents of a queued merge skip as blocked, and the next drive's reconciliation finishes the merge."
         }
       }
     },
