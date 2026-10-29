@@ -7167,7 +7167,9 @@ func TestAnEnqueueToARunningDriveIsDispatchedAfterWhatIsAhead(t *testing.T) {
 		t.Fatal(err)
 	}
 	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(20 * time.Millisecond) {
-		if l, busy, _ := lease.Read(path); busy && slices.Contains(l.Running, "1") {
+		// Jobs as well as Running, because reconciliation lists the item it is
+		// checking before the queue is read, and only a dispatch writes Jobs.
+		if l, busy, _ := lease.Read(path); busy && l.Jobs > 0 && slices.Contains(l.Running, "1") {
 			break
 		}
 		if time.Now().After(deadline) {

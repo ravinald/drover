@@ -288,15 +288,6 @@ history of one contract across two places.`,
 			return Refusal{fmt.Errorf(
 				"[git] enabled is false, so there is no branch to open a pull request for")}
 		}
-		// Before --force short-circuits anything. --force overrides drover's own
-		// evidence, which is a judgement an operator may substitute for; it cannot
-		// conjure a forge, so a missing gh is a refusal either way.
-		if !gh.Available() {
-			return Refusal{fmt.Errorf(
-				"gh cannot be reached, so nothing here can open a pull request.\n" +
-					"Install gh and run `gh auth login`. --force overrides the merge gate and the recorded " +
-					"review, not the forge")}
-		}
 		// Before the gate and before any read of the tree, for finish's reason: a
 		// run, draft or review has a session mid-edit in this checkout, and the
 		// verify runs against whatever branch is out. A drive's sessions work in
@@ -307,6 +298,20 @@ history of one contract across two places.`,
 		it, err := s.itemArg(args)
 		if err != nil {
 			return err
+		}
+		// Ahead of the first gh call, auth status included: the drive is
+		// itself asking the forge about this item.
+		if err := s.itemNotDriving("open-pr", it.ID.Bare()); err != nil {
+			return err
+		}
+		// Before --force short-circuits anything. --force overrides drover's own
+		// evidence, which is a judgement an operator may substitute for; it cannot
+		// conjure a forge, so a missing gh is a refusal either way.
+		if !gh.Available() {
+			return Refusal{fmt.Errorf(
+				"gh cannot be reached, so nothing here can open a pull request.\n" +
+					"Install gh and run `gh auth login`. --force overrides the merge gate and the recorded " +
+					"review, not the forge")}
 		}
 		branch, err := s.branchFor(it)
 		if err != nil {
