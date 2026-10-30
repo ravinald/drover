@@ -8820,3 +8820,27 @@ func TestOpenPRRefusesAnItemTheCapParked(t *testing.T) {
 		t.Errorf("after an amend and a passing review = %v, want it to pass", err)
 	}
 }
+
+func TestE92CapRefusalWithoutAuditNeedsDecision(t *testing.T) {
+	p := pass{before: bodyCounts(1, 2), after: bodyCounts(1, 2),
+		logged: true, res: ok, cap: 2, refused: true, body: launchBody}
+	p.after.Refusals = 1
+	p.after.RefusedFindings = "reports/01-first.refused-1.md"
+	if got := passResult(p); got != passNeedsDecision {
+		t.Fatalf("cap refusal without audit = %q, want %q", got, passNeedsDecision)
+	}
+}
+
+func TestE92SendBackDoesNotAnswerCapDecision(t *testing.T) {
+	t.Cleanup(func() { openPRForce = false })
+	openPRForce = true
+	const kept = "reports/01-first.refused-1.md"
+	rows := []ledger.Row{
+		{ID: "1", Refused: "max_review_rounds", Findings: kept},
+		{ID: "1", Changes: "later send-back", ChangesSource: ledger.ChangesReview},
+	}
+	_, err := reviewPassedOver(t, "", rows)
+	if Code(err) != ExitRefused || !strings.Contains(fmt.Sprint(err), kept) {
+		t.Fatalf("unanswered cap after send-back: %v, want exit 3 naming %s", err, kept)
+	}
+}

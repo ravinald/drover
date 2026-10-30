@@ -835,3 +835,14 @@ func TestCountsKeepReviewRoundsApartFromDriveSendBacks(t *testing.T) {
 		t.Errorf("ChangesRequested = %d, want under a cap of 2", n)
 	}
 }
+
+func TestE92OnlyReviewOrAbsentSourceConsumesReviewRounds(t *testing.T) {
+	l := &Ledger{Rows: []Row{
+		{ID: "1", Changes: "old"},
+		{ID: "1", Changes: "review", ChangesSource: ChangesReview},
+		{ID: "1", Changes: "other", ChangesSource: "external_check"},
+	}}
+	if got := l.Counts("1").ChangesRequested; got != 2 {
+		t.Fatalf("review rounds = %d, want 2 (review and absent source only)", got)
+	}
+}

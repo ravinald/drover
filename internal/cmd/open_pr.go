@@ -263,10 +263,10 @@ session that died, because a human ran it and the question does not arise.
 
 Before either, a request for changes the cap refused holds the branch, with or
 without --force, until a drover amend, a drover signoff or a review that passed
-is recorded after it, or a request-changes --over-limit sends the findings
-back. The refused findings are the item's own unfinished work, kept in the
-refused-N file the refusal names, and a pull request would merge the item
-carrying them.
+is recorded after it. A request-changes --over-limit sending the findings back
+answers nothing on its own: the branch still holds until a review passes. The
+refused findings are the item's own unfinished work, kept in the refused-N file
+the refusal names, and a pull request would merge the item carrying them.
 
 A review_result row reading "findings_open" is a review that recorded its audit beside a
 sent-back block an earlier round wrote, and said neither that the block was closed
@@ -512,8 +512,9 @@ func (s *session) reviewPassed(it backlog.Item) error {
 
 // capRefusalStands reports a request for changes the cap refused that nothing
 // has answered since, with the findings file its row names. An amend, a
-// signoff or a passing review answers it, and so does a review's send-back
-// past the cap, which put the findings in the body after all.
+// signoff or a passing review answers it. A send-back past the cap does not:
+// it hands the findings to the branch, and only a later passing review says
+// the branch closed them.
 func (s *session) capRefusalStands(id string) (findings string, ok bool) {
 	for _, r := range s.ledger.Rows {
 		if r.ID != id {
@@ -522,8 +523,7 @@ func (s *session) capRefusalStands(id string) (findings string, ok bool) {
 		switch {
 		case r.Refused != "":
 			findings, ok = r.Findings, true
-		case r.Amend != nil, r.Signoff > 0, r.Pass == passPassed,
-			r.Changes != "" && (r.ChangesSource == "" || r.ChangesSource == ledger.ChangesReview):
+		case r.Amend != nil, r.Signoff > 0, r.Pass == passPassed:
 			findings, ok = "", false
 		}
 	}

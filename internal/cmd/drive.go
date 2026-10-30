@@ -176,8 +176,6 @@ func rowResult(p pass) string {
 	audits := p.after.Audits - p.before.Audits
 	changes := p.after.ChangesRequested - p.before.ChangesRequested
 	switch {
-	case audits == 0 && changes == 0:
-		return passSilent
 	// The refusal, not the count. An item at the cap whose review sent nothing
 	// back is a review that found nothing, and reading the count alone makes that
 	// unsayable: once an item has taken max_review_rounds rounds, every later pass on it
@@ -185,9 +183,13 @@ func rowResult(p pass) string {
 	// open-pr would refuse it. A refusal row is written when the cap actually
 	// turns a request-changes away, which is the evidence the count would stand
 	// in for. The findings it turned away are the unmerged item's own, so they
-	// go to the operator to decide rather than to anybody's backlog.
+	// go to the operator to decide rather than to anybody's backlog. Ahead of
+	// the no-record row, because the refusal row and its findings file are a
+	// record whether or not the review also wrote an audit.
 	case p.cap > 0 && p.refused:
 		return passNeedsDecision
+	case audits == 0 && changes == 0:
+		return passSilent
 	// Ahead of repeating and changes_requested, because both relaunch or park
 	// on a loop the implementer could close, and a requirement the reviewer
 	// judged unmeetable as written is one no implementing session can: every

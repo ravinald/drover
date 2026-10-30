@@ -1106,7 +1106,7 @@ func (l *Ledger) Counts(id string) Counts {
 			c.ConflictSendBacks++
 		case r.ChangesSource == ChangesNumberedFiles:
 			c.NumberedSendBacks++
-		default:
+		case r.ChangesSource == "", r.ChangesSource == ChangesReview:
 			c.ChangesRequested++
 			c.RepeatedChanges = last != "" && r.Changes == last
 			c.StillOpenReqs = shared(prevStillOpen, r.StillOpen)
