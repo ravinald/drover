@@ -314,6 +314,7 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `MIRROR STALE`        | A mirrored issue's label, open state or blocked links lag the backlog.                |
 | `MIRROR SHELVED`      | A shelved body's issue is still open or lacks `drover:deferred`.                      |
 | `NO DISPOSITION`      | A merged item's `closes` issue has no disposition.                                    |
+| `UNREVIEWED MERGE`    | A merged item's completion row lists commits no review read.                          |
 | `STALE CONFIG`        | `.drover.toml` lacks a key `drover init` would write today.                           |
 | `SUPERVISOR UNSET`    | A project that has driven leaves `supervisor` defaults with no `[supervise]` table.   |
 | `BAD TEMPLATE`        | A `[prompts]` template will not read or render.                                       |

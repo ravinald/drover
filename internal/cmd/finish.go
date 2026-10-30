@@ -173,6 +173,30 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 			fmt.Printf("  ! %s does not look merged (%s) — recording anyway (--force)\n", branch, how)
 		}
 
+		// The merge has happened, so for the operator this reports and records
+		// rather than refuses: check carries the finding until a review names the
+		// merged head. A supervisor is refused, because merge_drive_pr covers a
+		// pull request drive's review read, and this one holds more than that.
+		merged := s.mergedHead(branch)
+		reviewed, unreviewed, uerr := s.unreviewedSince(id, merged)
+		switch {
+		case uerr != nil:
+			fmt.Printf("  · could not list the commits after the last passing review (%s): %v\n", shortSHA(reviewed), uerr)
+		case len(unreviewed) > 0 && supervising():
+			return Refusal{fmt.Errorf(
+				"%s merged at %s holding %d %s after the last passing review read %s, which no review read:\n%s\n"+
+					"merge_drive_pr covers what drive's review read. Report it and let the operator finish %s and run drover review %s",
+				id, shortSHA(merged), len(unreviewed), plural(len(unreviewed), "commit", "commits"), shortSHA(reviewed),
+				commitList(unreviewed, "  "), id, id)}
+		case len(unreviewed) > 0:
+			fmt.Printf("  ! %d %s merged after the last passing review read %s, and no review read %s:\n%s\n",
+				len(unreviewed), plural(len(unreviewed), "commit", "commits"), shortSHA(reviewed),
+				plural(len(unreviewed), "it", "them"), commitList(unreviewed, "      "))
+			fmt.Printf("      drover check reports UNREVIEWED MERGE until drover review %s reads %s and an audit names it:\n"+
+				"      drover audit %s reviewed --head %s --code-by <who> [--reviewer <name>] \"<what you read>\"\n",
+				id, shortSHA(merged), id, merged)
+		}
+
 		// A prior `drover mark-merged` already wrote the row. That is one of finish's five
 		// steps, not a reason to skip the other four, so this is idempotent rather
 		// than fatal — otherwise recording the merge by hand strands the branch.
@@ -181,7 +205,8 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 			warnUndeclaredRunner(errOut, runner, s.cfg.Runners)
 			yes := true
 			agent := s.attribution(runner, id)
-			row := ledger.Row{ID: id, Merged: &yes, MergedRunner: agent, Date: ledger.Today()}
+			row := ledger.Row{ID: id, Merged: &yes, MergedRunner: agent, MergedHead: merged,
+				ReviewedHead: reviewed, Unreviewed: unreviewed, Date: ledger.Today()}
 			if wrote, err = s.recordDone(row); err != nil {
 				return err
 			}
@@ -675,6 +700,93 @@ func (s *session) recordHead(id, branch string) error {
 	default:
 		return fmt.Errorf("could not ask whether %s is on %s: %w", branch, trunk, err)
 	}
+}
+
+// reviewedHead is the head the item's latest passing review read: a passed
+// pass row, or an audit at reviewed or verified naming a head. ok is false when
+// neither exists. A passed pass row without a head was written before pass rows
+// carried one and covers no particular head, so it answers ok with no head, and
+// a caller compares nothing.
+//
+// A headless audit is skipped rather than read as covering no head, because a
+// review session writes one before drive writes the pass row that names the
+// head it read, and a hand audit typed on the trunk names nothing either.
+func reviewedHead(l *ledger.Ledger, id string) (head string, ok bool) {
+	for _, r := range l.Rows {
+		switch {
+		case r.ID != id:
+		case r.Pass == passPassed:
+			head, ok = r.Head, true
+		case r.Head != "" && (r.Level == ledger.LevelReviewed || r.Level == ledger.LevelVerified):
+			head, ok = r.Head, true
+		}
+	}
+	return head, ok
+}
+
+// unreviewedCommits is each commit on head after from, as "<short hash>
+// <subject>", oldest first, leaving out what a review owes nothing for: a merge
+// commit, which is the trunk brought in, and a commit whose subject opens with
+// review:, which the reviewer wrote. --first-parent keeps the trunk's own
+// commits, reachable only through such a merge, off the list.
+//
+// A commit missing from this clone, a squash-merged branch's head being the
+// usual one, is fetched from origin by hash first.
+func unreviewedCommits(root, from, head string) ([]string, error) {
+	for _, c := range []string{from, head} {
+		if gitcmd.Command(root, "cat-file", "-e", c+"^{commit}").Run() != nil {
+			_ = gitcmd.Command(root, "fetch", "--quiet", "origin", c).Run()
+		}
+	}
+	out, err := gitcmd.Command(root, "log", "--first-parent", "--no-merges", "--reverse",
+		"--format=%h %s", from+".."+head).Output()
+	if err != nil {
+		return nil, fmt.Errorf("git log %s..%s: %w", shortSHA(from), shortSHA(head), err)
+	}
+	var commits []string
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		if _, subject, _ := strings.Cut(line, " "); strings.HasPrefix(subject, "review:") {
+			continue
+		}
+		commits = append(commits, line)
+	}
+	return commits, nil
+}
+
+// unreviewedSince is unreviewedCommits from the item's latest passing review
+// to head, with that review's head. No passing review, or one that covers no
+// particular head, compares nothing.
+func (s *session) unreviewedSince(id, head string) (reviewed string, commits []string, err error) {
+	reviewed, ok := reviewedHead(s.ledger, id)
+	if !ok || reviewed == "" || head == "" || ledger.SameCommit(reviewed, head) {
+		return reviewed, nil, nil
+	}
+	commits, err = unreviewedCommits(s.cfg.Root, reviewed, head)
+	return reviewed, commits, err
+}
+
+// mergedHead is the commit the merged pull request carried: what the forge
+// reports, else the branch as this clone holds it, else as origin does.
+func (s *session) mergedHead(branch string) string {
+	if len(s.cfg.Git.MergeCheck) == 0 {
+		if _, head, merged, err := gh.MergedPRHead(s.labels(), branch); err == nil && merged && head != "" {
+			return head
+		}
+	}
+	for _, ref := range []string{"refs/heads/" + branch, "refs/remotes/origin/" + branch} {
+		if head, err := revParse(s.cfg.Root, ref); err == nil {
+			return head
+		}
+	}
+	return ""
+}
+
+// commitList is commits one per line under indent, for a message a person reads.
+func commitList(commits []string, indent string) string {
+	return indent + strings.Join(commits, "\n"+indent)
 }
 
 // refuseFinish is the refusal for each kind of no, because the remedy differs and

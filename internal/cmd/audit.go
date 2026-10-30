@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/runner"
 	"github.com/spf13/cobra"
@@ -13,6 +14,7 @@ import (
 var (
 	auditCodeBy   string
 	auditReviewer string
+	auditHead     string
 )
 
 var auditCmd = &cobra.Command{
@@ -47,11 +49,18 @@ chose is a reviewer nobody can go and ask.
 
 The most recent row wins, not the strongest, so a level can be corrected in
 either direction. The note is the value: name what you re-checked and what you
-found, not that you looked.`,
+found, not that you looked.
+
+--head names the commit the audit read. Standing on the item's branch, the row
+records that branch's head without it. A merged item whose completion row lists
+commits no review read (check's UNREVIEWED MERGE) clears once a reviewed or
+verified row names the merged head, and the trunk is where you stand by then,
+so name it: drover audit <id> reviewed --head <sha> ...`,
 	Example: `  drover audit B1 claimed --code-by agent "the run's own report, captured"
   drover audit B1 reviewed --code-by agent "read the diff against internal/cmd/resolve.go"
   drover audit B1 verified --code-by agent "R1-R4 traced to shipped code, verify command re-run"
   drover audit B1 verified --code-by agent,dana --reviewer sam "R1-R4 traced by hand"
+  drover audit B1 reviewed --code-by sam --head 1a2b3c4 "read the hand fix merged after the last review"
 
   verified exits 3 when the grader matches a --code-by entry, and names it. If
   you ran the item and are now reviewing it, the honest level is claimed or
@@ -101,12 +110,16 @@ found, not that you looked.`,
 		if err := ledger.ValidateCodeBy(level, entry, why); err != nil {
 			return Refusal{err}
 		}
+		head, err := s.auditHead(it)
+		if err != nil {
+			return Refusal{err}
+		}
 		prev := s.ledger.State(id)
 		if entry == "" {
 			warnSameRunner(errOut, id, reviewer, prev)
 		}
 		row := ledger.Row{ID: id, Level: level, Reviewer: reviewer, CodeBy: strings.Join(codeBy, ","),
-			Independent: entry == "", Date: ledger.Today(), Note: note}
+			Independent: entry == "", Head: head, Date: ledger.Today(), Note: note}
 		if err := s.record(row); err != nil {
 			return err
 		}
@@ -128,6 +141,43 @@ found, not that you looked.`,
 		}
 		return nil
 	},
+}
+
+// auditHead is the commit the audit names: --head resolved to a full hash, or
+// the checkout's head when it stands on the item's branch, or none. A --head git
+// cannot resolve is kept as typed when it is a hash, because a squash-merged
+// pull request's head need not be in this clone.
+func (s *session) auditHead(it backlog.Item) (string, error) {
+	if h := strings.TrimSpace(auditHead); h != "" {
+		if full, err := revParse(s.cfg.Root, h); err == nil {
+			return full, nil
+		}
+		if !isHexSHA(h) {
+			return "", fmt.Errorf("--head %q is neither a commit this clone resolves nor a hash of at least 7 hex digits", h)
+		}
+		return strings.ToLower(h), nil
+	}
+	branch, err := s.branchFor(it)
+	if err != nil {
+		return "", nil
+	}
+	if on, err := s.currentBranch(); err != nil || on != branch {
+		return "", nil
+	}
+	head, _ := revParse(s.cfg.Root, "HEAD")
+	return head, nil
+}
+
+func isHexSHA(h string) bool {
+	if len(h) < 7 || len(h) > 64 {
+		return false
+	}
+	for _, c := range strings.ToLower(h) {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // levelWriter is the party running this command: the session drover launched it
@@ -168,5 +218,7 @@ func init() {
 		"who wrote the code: agent (a session drover launched), a person's name, or a comma list (required)")
 	auditCmd.Flags().StringVar(&auditReviewer, "reviewer", "",
 		"who looked, as the operator attributes it: a person or a runner. Omitted records nobody, never a default")
+	auditCmd.Flags().StringVar(&auditHead, "head", "",
+		"the commit the audit read; defaults to the branch head when standing on the item's branch")
 	root.AddCommand(auditCmd)
 }

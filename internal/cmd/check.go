@@ -161,6 +161,13 @@ wording, so never match on it.
   NO DISPOSITION      a merged item's closes key names an issue nobody judged, so
                       finish wrote nothing to the tracker and whoever filed it got
                       silence
+  UNREVIEWED MERGE    a merged item whose completion row lists commits after the
+                      head its latest passing review read, a hand fix merged
+                      through the forge with no review of it. Merges from the
+                      trunk and review: commits are not listed. drover review
+                      <id> on the merged head, then an audit at reviewed or
+                      verified naming it with --head, clears it. Items finished
+                      before finish recorded heads are silent
   SHELF CLASH         one id holds a body in both the backlog and the shelf
   MISSING DEP         an item depends on an id with no body, one that will not parse,
                       or one that is shelved
@@ -725,6 +732,28 @@ func (s *session) checkReport() CheckReport {
 				ID:   id,
 			})
 		}
+	}
+
+	// A merged item whose completion row lists commits no review read: a hand
+	// fix after the last passing review that went out through the forge. The
+	// merge has happened, so the only remedy is reading what shipped, and the
+	// audit that names the merged head is what says somebody did. Read from the
+	// ledger alone, so an item merged before finish recorded heads is silent.
+	for _, it := range s.backlog.Items {
+		id := it.ID.Bare()
+		head, commits := s.ledger.UnreviewedMerge(id)
+		if len(commits) == 0 {
+			continue
+		}
+		add(Finding{
+			Kind: "UNREVIEWED MERGE",
+			Message: fmt.Sprintf("%s merged at %s holding %d %s no review read: %s", id, shortSHA(head),
+				len(commits), plural(len(commits), "commit", "commits"), strings.Join(commits, "; ")),
+			Detail: fmt.Sprintf("drover review %s on %s, then drover audit %s reviewed --head %s --code-by <who> [--reviewer <name>] \"<what you read>\"",
+				id, shortSHA(head), id, head),
+			Path: rel(s.cfg.Root, it.Path),
+			ID:   id,
+		})
 	}
 
 	// An accepted item with no numbered list. `report --save` turns every

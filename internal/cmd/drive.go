@@ -2214,7 +2214,11 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 		// parks the item rather than merging on a result nothing can read
 		// again, which is the same fail-closed reading passResult's own order
 		// is built on.
-		if err := s.record(ledger.Row{ID: d.ID, Pass: v, Date: ledger.Today()}); err != nil {
+		// The head is read after the session exits, so a review: commit the
+		// reviewer made is inside what it covers. One that cannot be read
+		// records none, which covers no particular head rather than a wrong one.
+		read, _ := revParse(s.workDir(), "HEAD")
+		if err := s.record(ledger.Row{ID: d.ID, Pass: v, Head: read, Date: ledger.Today()}); err != nil {
 			return park("ledger_unwritable", "the review read "+v+" and the ledger refused the row: "+err.Error())
 		}
 		// rerun_lost_review. A pass that never reached a result about the work

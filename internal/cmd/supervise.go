@@ -195,7 +195,7 @@ var catalog = []supervised{
 // merge_drive_pr = "supervisor". finish checks the two ledger conditions itself;
 // the forge's two are the session's to read, because finish cannot see a check
 // that is still running.
-const mergeDrivePR = "Merge a pull request drive opened for {id} with the project's [git] merge_method, then run `drover finish {id}`, only when all of these hold: the ledger names the pull request on a row drive wrote; the item's latest review pass is `passed` and came from a session drover launched; every check on the head is green; and the forge reports it mergeable. Report each merge."
+const mergeDrivePR = "Merge a pull request drive opened for {id} with the project's [git] merge_method, then run `drover finish {id}`, only when all of these hold: the ledger names the pull request on a row drive wrote; the item's latest review pass is `passed` and came from a session drover launched; the pull request's head holds no commit after the head that review read, other than trunk merges and `review:` commits (finish refuses one); every check on the head is green; and the forge reports it mergeable. Report each merge."
 
 // parkActions names the catalog action each park drive already makes belongs
 // to, so the event stream and [notify] can say who owns it before the

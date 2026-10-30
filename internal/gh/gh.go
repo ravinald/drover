@@ -673,27 +673,36 @@ func runWithin(dir string, args []string, limit time.Duration) ([]byte, error) {
 // ancestry also depends on having fetched, which makes it wrong twice over on a
 // tree nobody has pulled.
 func MergedPR(labels Labels, branch string) (int, bool, error) {
+	n, _, merged, err := MergedPRHead(labels, branch)
+	return n, merged, err
+}
+
+// MergedPRHead is MergedPR with the commit the pull request's head pointed at
+// when it merged, which is what a review is compared against. Empty when the
+// forge did not say.
+func MergedPRHead(labels Labels, branch string) (number int, head string, merged bool, err error) {
 	if !Available() {
-		return 0, false, fmt.Errorf("gh unavailable")
+		return 0, "", false, fmt.Errorf("gh unavailable")
 	}
 	out, err := run(labels.Dir, labels.scope([]string{
 		"pr", "list", "--head", branch, "--state", "merged",
-		"--limit", "1", "--json", "number,mergedAt",
+		"--limit", "1", "--json", "number,mergedAt,headRefOid",
 	}))
 	if err != nil {
-		return 0, false, err
+		return 0, "", false, err
 	}
 	var prs []struct {
-		Number   int    `json:"number"`
-		MergedAt string `json:"mergedAt"`
+		Number     int    `json:"number"`
+		MergedAt   string `json:"mergedAt"`
+		HeadRefOid string `json:"headRefOid"`
 	}
 	if err := json.Unmarshal(out, &prs); err != nil {
-		return 0, false, err
+		return 0, "", false, err
 	}
 	if len(prs) == 0 || prs[0].MergedAt == "" {
-		return 0, false, nil
+		return 0, "", false, nil
 	}
-	return prs[0].Number, true, nil
+	return prs[0].Number, prs[0].HeadRefOid, true, nil
 }
 
 // RequiredChecks reports whether the trunk has required status checks: whether
