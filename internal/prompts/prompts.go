@@ -176,6 +176,10 @@ type Resolution struct {
 	// again: re-judging a settled issue is where a correct answer gets
 	// overwritten and a later pass spends its turn putting it back.
 	Settled bool
+	// Amended is the date an amend replaced the requirements after this
+	// disposition was recorded. The answer rested on a contract that changed,
+	// so the brief asks for it again rather than handing it over.
+	Amended string
 }
 
 // Undisposed reports an issue no pass has judged yet. It is the reviewer's
@@ -834,7 +838,7 @@ func Sample() Data {
 		Closes: []Resolution{{
 			Number: 1, Title: "sample issue", Body: "sample report", State: "OPEN",
 			Disposition: "fixed", By: "agent", Note: "sample note",
-			Applied: "closed", Unavailable: "sample reason", Settled: true,
+			Applied: "closed", Unavailable: "sample reason", Settled: true, Amended: "2026-01-01",
 		}},
 		Runs: 1, Reviews: 1, Audits: 1,
 		Recent:           Recent{Commits: []Commit{{Abbrev: "abc1234", Lines: 1}}, Unavailable: "sample reason"},

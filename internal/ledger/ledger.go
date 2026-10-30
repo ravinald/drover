@@ -678,6 +678,11 @@ type Resolution struct {
 	// different people: a disposition row names no reviewer, so independence
 	// there is the --code-by list against the grading session alone.
 	Settled bool `json:"settled,omitempty"`
+	// Amended is the date of the item's latest amend when that amend came after
+	// the latest disposition row for the issue, empty otherwise. Such an answer
+	// was judged against requirements that no longer stand, so it is never
+	// Settled, however many passes agreed on it.
+	Amended string `json:"amended,omitempty"`
 	// Locked is when finish last took the issue, zero once released. It is not
 	// a write and never reads as one: Applied stays empty until the tracker took
 	// it, so everything that asks what is still pending still counts it.
@@ -704,8 +709,18 @@ func (l *Ledger) Resolutions(id string) []Resolution {
 	byIssue := map[int]*Resolution{}
 	said := map[int][]Row{}
 	var order []int
+	amended := map[int]string{}
 	for _, row := range l.Rows {
-		if row.ID != id || row.Issue == 0 {
+		if row.ID != id {
+			continue
+		}
+		if row.Amend != nil {
+			for n := range said {
+				amended[n] = row.Date
+			}
+			continue
+		}
+		if row.Issue == 0 {
 			continue
 		}
 		cur, seen := byIssue[row.Issue]
@@ -717,6 +732,7 @@ func (l *Ledger) Resolutions(id string) []Resolution {
 		if row.Disposition != "" {
 			cur.Disposition, cur.CodeBy, cur.Independent, cur.Note, cur.Date = row.Disposition, row.CodeBy, row.Independent, row.Note, row.Date
 			said[row.Issue] = append(said[row.Issue], row)
+			delete(amended, row.Issue)
 		}
 		if row.Applied != "" {
 			cur.Applied = row.Applied
@@ -731,7 +747,8 @@ func (l *Ledger) Resolutions(id string) []Resolution {
 	sort.Ints(order)
 	out := make([]Resolution, 0, len(order))
 	for _, n := range order {
-		byIssue[n].Settled = settled(said[n])
+		byIssue[n].Amended = amended[n]
+		byIssue[n].Settled = settled(said[n]) && amended[n] == ""
 		out = append(out, *byIssue[n])
 	}
 	return out

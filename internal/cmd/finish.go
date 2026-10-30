@@ -272,6 +272,25 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 	},
 }
 
+// warnAmendedDispositions names each partial disposition an amend has since
+// outdated. It warns and never refuses: the merge already happened, and the
+// answer may still be right under the new requirements, but a partial leaves
+// the issue open, and one judged against a requirement that no longer stands is
+// the likeliest to be wrong in that direction.
+func (s *session) warnAmendedDispositions(it backlog.Item) {
+	id := it.ID.Bare()
+	for _, number := range backlog.Ints(it.Get(closesKey)) {
+		res, recorded := s.ledger.Resolution(id, number)
+		if !recorded || res.Applied != "" || res.Amended == "" || res.Disposition != ledger.DispositionPartial {
+			continue
+		}
+		fmt.Printf("  ! %s: partial was recorded before the amend on %s, against requirements that have since changed\n",
+			s.registerRefTo(os.Stdout, number), res.Amended)
+		fmt.Printf("      drover resolve %s %d <%s> --code-by <who> \"<what shipped>\"\n",
+			id, number, strings.Join(ledger.Dispositions(), "|"))
+	}
+}
+
 // reportDispositions names what applyDispositions would have written without
 // writing it. Closing an issue is visible to whoever filed it, so it belongs to
 // a command an operator typed for that purpose rather than to a step some
@@ -281,6 +300,7 @@ func (s *session) reportDispositions(it backlog.Item) {
 	if len(claimed) == 0 {
 		return
 	}
+	s.warnAmendedDispositions(it)
 	var pending []int
 	for _, number := range claimed {
 		if res, recorded := s.ledger.Resolution(it.ID.Bare(), number); recorded && res.Applied == "" {
@@ -315,6 +335,7 @@ func (s *session) applyDispositions(it backlog.Item, how string) (closed []int) 
 	if len(claimed) == 0 {
 		return nil
 	}
+	s.warnAmendedDispositions(it)
 	if s.cfg.RegisterBackend() != config.BackendGitHub {
 		fmt.Printf("  · %s names %s, but %s — nothing to write to\n",
 			id, renderInts(claimed), s.cfg.RegisterDeclaration())
