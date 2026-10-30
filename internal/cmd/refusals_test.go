@@ -329,6 +329,14 @@ var refusalCases = map[string][]refusalCase{
 			newProject(t)
 			return refuse(t, "new", "epic", "a title the project has no kind for")
 		},
+	}, {
+		why: "--found-in names an item not recorded merged",
+		run: func(t *testing.T) error {
+			dir := newProject(t)
+			write(t, filepath.Join(dir, "work", "B01-open.md"), "---\ntitle: open\ndeps:\n---\n\n1. Fix it.\n")
+			t.Cleanup(func() { newFoundIn = "" })
+			return refuse(t, "new", "bug", "a finding", "--found-in", "B1")
+		},
 	}},
 	"intake": {{
 		why: "the register backend is not github",
@@ -351,6 +359,14 @@ var refusalCases = map[string][]refusalCase{
 		run: func(t *testing.T) error {
 			newProject(t)
 			return refuse(t, "follow-up", "open", "a title")
+		},
+	}, {
+		why: "--owner names an item not recorded merged",
+		run: func(t *testing.T) error {
+			dir := fileRegisterProject(t, "")
+			write(t, filepath.Join(dir, "work", "B02-open.md"), body("an open bug", "[]"))
+			t.Cleanup(func() { followUpOwners = nil })
+			return refuse(t, "follow-up", "open", "a title", "--owner", "B2")
 		},
 	}},
 	"supervise": {{

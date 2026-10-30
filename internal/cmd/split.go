@@ -18,10 +18,9 @@ import (
 )
 
 var (
-	splitInto   string
-	splitFile   string
-	splitAfter  bool
-	splitBefore bool
+	splitInto  string
+	splitFile  string
+	splitAfter bool
 )
 
 var splitCmd = &cobra.Command{
@@ -34,24 +33,19 @@ bug about an audit row becomes a storage rewrite reviewed one consequence at a
 time.
 
 split writes the second contract. It scaffolds the work as its own item with the
-proposal as its body, then writes the dependency between the two, in one of two
-directions:
+proposal as its body, then adds the new id to this item's deps line, so this
+item stays blocked and unmerged until the operator accepts the new item and it
+lands. There is no other direction: an item whose own work went out to another
+may not merge ahead of it, because that merges the item carrying the gap the
+split was written to close.
 
-  --after   the default. This item waits on the new one: its deps line gains
-            the new id, and it stays blocked and unmerged until the operator
-            accepts the new item and it lands. Right when the new item's work
-            stands on the trunk alone, which is the usual case: a shared
-            subsystem this item tripped over.
-  --before  the new item waits on this one: the scaffold's deps line names this
-            item, which gains no dep and may merge first. Right when the new
-            item's fix reaches code only this branch has written, because a run
-            of the new item starts from the trunk and cannot touch it.
-
-Get it wrong and the two deadlock: the new item cannot finish without code
-that only merges with this one, and this one cannot merge before it. So under
---after split reads every path the proposal cites with a line part, and every
-backticked name that looks like a function or type, against the trunk and
-against this item's branch, and warns about each one only the branch has.
+The new item runs from the trunk, so a proposal that needs code only this
+branch has written deadlocks the pair: the new item cannot finish without code
+that only merges with this one, and this one cannot merge before it. So split
+reads every path the proposal cites with a line part, and every backticked name
+that looks like a function or type, against the trunk and against this item's
+branch, and warns about each one only the branch has. Such work belongs on this
+item's own branch, through request-changes, rather than in a split.
 accept repeats the check on the new item and refuses until --yes, and check
 reports the same cycle for any dependency, split or not. The names are a
 heuristic: a whole-word git grep over the cited files on each ref.
@@ -73,11 +67,9 @@ again. It moves no blame either: a regression this branch introduced is still
 this branch's to answer for, and what moves is the implementation.
 
 The proposal is prose and should answer six things: the subsystem, draft
-requirements, the commits and files to move, which way the dependency points
-(and so which flag), what evidence to keep, and what condition resumes this item.`,
+requirements, the commits and files to move, why it stands on the trunk alone,
+what evidence to keep, and what condition resumes this item.`,
 	Example: `  drover split B58 --into bug "atomic local publication" -f proposal.md
-  drover split B58 --into bug "unique index on slugs" -f p.md --before
-                         # B59 needs B58's call sites, so B58 merges first
 
   Then a human decides, because a session cannot accept its own contract:
     $EDITOR .drover/backlog/B59-atomic-local-publication.md
@@ -88,8 +80,7 @@ requirements, the commits and files to move, which way the dependency points
   drover show B58 --json # its deps carry the new id
 
 Safety: local writes. Scaffolds one item under the backlog, appends an origin
-row for it to the ledger and, under --after, rewrites the deps line of another
-and appends a body digest row for it to the ledger. Reaches no tracker. Under [ids] allocator = "git" it first pushes refs/drover/ids to
+row for it to the ledger, rewrites the deps line of the item split and appends a body digest row for it to the ledger. Reaches no tracker. Under [ids] allocator = "git" it first pushes refs/drover/ids to
 [ids] remote.`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(_ *cobra.Command, args []string) error {
@@ -142,11 +133,7 @@ and appends a body digest row for it to the ledger. Reaches no tracker. Under [i
 		if slug == "" {
 			return Refusal{fmt.Errorf("the title yields no filename component: %q", title)}
 		}
-		var deps []string
-		if splitBefore {
-			deps = []string{it.ID.Bare()}
-		}
-		body, err := s.scaffoldWith(splitInto, title, proposal, splitRecord(it.ID.Bare(), splitBefore), deps)
+		body, err := s.scaffoldWith(splitInto, title, proposal, splitRecord(it.ID.Bare()), nil)
 		if err != nil {
 			return err
 		}
@@ -162,36 +149,23 @@ and appends a body digest row for it to the ledger. Reaches no tracker. Under [i
 		// and possibly a remote counter, and an id reused after a hand edit would
 		// otherwise write a dependency on itself.
 		id, path, err := s.mint(prefix, slug, body, ledger.Origin{Cmd: "split", SplitFrom: it.ID.Bare()}, func(id backlog.ID) error {
-			if splitBefore {
-				return s.acyclicIDs(id.Bare(), deps)
-			}
 			return s.acyclic(it, id.Bare())
 		})
 		if err != nil {
 			return err
 		}
 
-		fmt.Printf("\nsplit %s -> %s  (%s, %s)\n\n", it.ID.Bare(), id.Bare(), splitInto, splitDirection(splitBefore))
+		fmt.Printf("\nsplit %s -> %s  (%s)\n\n", it.ID.Bare(), id.Bare(), splitInto)
 		fmt.Printf("  %s  the work, with your proposal as its body\n", rel(s.cfg.Root, path))
-		if splitBefore {
-			// The original's own deps are untouched, so whatever blocked it
-			// before the split still does.
-			blockers := ""
-			if state, missing := s.workState(it, s.cfg.LogDir()); state == stateBlocked {
-				blockers = ", still blocked by " + strings.Join(missing, " ")
-			}
-			fmt.Printf("  %s  unchanged%s; %s waits on it\n\n", rel(s.cfg.Root, it.Path), blockers, id.Bare())
-		} else {
-			// After the scaffold, never before. A deps line naming an item that
-			// does not exist blocks the original on nothing anybody can run, and
-			// `check` reports it as a dep it could not read.
-			if err := s.blockOn(it, id.Bare()); err != nil {
-				return err
-			}
-			s.mirrorReloaded(it.ID.Bare(), false)
-			fmt.Printf("  %s  now blocked on %s\n\n", rel(s.cfg.Root, it.Path), id.Bare())
-			s.warnDeadlock(id.Bare())
+		// After the scaffold, never before. A deps line naming an item that
+		// does not exist blocks the original on nothing anybody can run, and
+		// `check` reports it as a dep it could not read.
+		if err := s.blockOn(it, id.Bare()); err != nil {
+			return err
 		}
+		s.mirrorReloaded(it.ID.Bare(), false)
+		fmt.Printf("  %s  now blocked on %s\n\n", rel(s.cfg.Root, it.Path), id.Bare())
+		s.warnDeadlock(id.Bare())
 		fmt.Printf("The commits stay where they are: %s names them and somebody moves them.\n\n", id.Bare())
 		fmt.Printf("NEXT — a human decides, because a session cannot accept its own contract:\n")
 		fmt.Printf("  $EDITOR %s\n", rel(s.cfg.Root, path))
@@ -232,23 +206,15 @@ func (s *session) scaffoldWith(kind, title, proposal, record string, deps []stri
 // came out of and which of the two waits. It is prose in the body rather than
 // a frontmatter key because the frontmatter is the project's closed schema,
 // and a project that never declared a key for it would refuse the scaffold.
+// It still reads --before, which bodies split before that direction was
+// removed carry.
 var splitLine = regexp.MustCompile(`(?m)^Split from (\S+) with --(after|before):`)
 
-func splitDirection(before bool) string {
-	if before {
-		return "--before"
-	}
-	return "--after"
-}
-
-func splitRecord(from string, before bool) string {
-	if before {
-		return fmt.Sprintf("Split from %s with --before: this item waits on %s, which may merge first.", from, from)
-	}
+func splitRecord(from string) string {
 	return fmt.Sprintf("Split from %s with --after: %s waits on this item.", from, from)
 }
 
-// warnDeadlock prints, after a split under --after, each citation in the new
+// warnDeadlock prints, after a split, each citation in the new
 // item that only the original's branch holds. A warning and not a refusal:
 // the scaffold is inert, its proposal is still being written, and accept
 // refuses the same finding at the point it would start to cost something.
@@ -461,10 +427,7 @@ func init() {
 	splitCmd.Flags().StringVarP(&splitFile, "file", "f", "",
 		"the extraction proposal, or - for stdin (required)")
 	splitCmd.Flags().BoolVar(&splitAfter, "after", false,
-		"the item split waits on the new one (the default): the new item's work stands on the trunk alone")
-	splitCmd.Flags().BoolVar(&splitBefore, "before", false,
-		"the new item waits on the item split, which gains no dep: the new work needs code only its branch has")
-	splitCmd.MarkFlagsMutuallyExclusive("after", "before")
+		"the item split waits on the new one, which is the only direction and the default")
 	localFlag(splitCmd)
 	root.AddCommand(splitCmd)
 }

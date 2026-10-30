@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/ravinald/drover/internal/backlog"
-	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/prompts"
 	"github.com/spf13/cobra"
@@ -26,6 +25,11 @@ var (
 	requestChangesYes       bool
 	requestChangesStillOpen []int
 	requestChangesOperator  []int
+	// requestChangesSource is what the changes row names as its writer. No flag
+	// sets it: a person or a review running the command is a review, and drive
+	// sets it around its own calls, which is why it is not on the command line
+	// for a session to claim.
+	requestChangesSource = ledger.ChangesReview
 )
 
 var requestChangesCmd = &cobra.Command{
@@ -155,17 +159,29 @@ change the numbered requirements, refuses evidence whose only findings are
 					// evidence. Without a row, a review that wanted to send work
 					// back and was turned away leaves an audit and no request for changes row,
 					// which is what a review that found nothing leaves; passResult
-					// would then have to guess, and would guess at_limit for every
+					// would then have to guess, and would read the cap into every
 					// later pass on the item. A failure to write the row does not
 					// swallow the refusal: the caller still gets told no, and the
 					// worst case is that ambiguity rather than a request that appears
 					// to have been recorded.
+					//
+					// The findings are kept in a file of their own, because the
+					// body is untouched and the operator deciding the item reads
+					// them there. A file that would not write still records the
+					// refusal, and the refusal says the findings went unkept.
+					kept := ""
+					if path, err := s.keepRefused(it, text); err != nil {
+						fmt.Fprintf(errOut, "warn: the refused findings went unkept: %v\n", err)
+					} else {
+						kept = rel(s.cfg.Root, path)
+					}
 					if err := s.record(ledger.Row{
-						ID: it.ID.Bare(), Refused: "max_review_rounds", Reqs: findingRequirements(it, text), Date: ledger.Today(),
+						ID: it.ID.Bare(), Refused: "max_review_rounds", Reqs: findingRequirements(it, text),
+						Findings: kept, Date: ledger.Today(),
 					}); err != nil {
 						fmt.Fprintf(errOut, "warn: the cap refusal went unrecorded: %v\n", err)
 					}
-					return Refusal{s.capRefusal(it.ID.Bare(), n, limit)}
+					return Refusal{capRefusal(it.ID.Bare(), n, limit, kept)}
 				}
 				if err := sealedFlag("request-changes", "over-limit",
 					"the cap bounds what a review may spend, and this session is the party it bounds"); err != nil {
@@ -220,8 +236,8 @@ change the numbered requirements, refuses evidence whose only findings are
 		// write failed is the one wrong direction; a body written whose row
 		// failed reports the error and leaves the body correct.
 		if err := s.record(ledger.Row{
-			ID: it.ID.Bare(), Changes: digest(text), Reqs: findingRequirements(it, text), StillOpen: stillOpen,
-			Operator: operator, Date: ledger.Today(),
+			ID: it.ID.Bare(), Changes: digest(text), ChangesSource: requestChangesSource,
+			Reqs: findingRequirements(it, text), StillOpen: stillOpen, Operator: operator, Date: ledger.Today(),
 		}); err != nil {
 			return err
 		}
@@ -855,30 +871,36 @@ func bodyMatches(want, sum, exact string) bool {
 	return want != "" && (want == sum || want == exact)
 }
 
-// capRefusal is read out of a log in the morning, so it names the count, the cap,
-// the key the number came from, what the reviewer does instead and what the
-// operator can do.
-//
-// Backend-aware, because `drover follow-up` refuses under [register] backend =
-// "github" and a refusal that sends a reviewer to a command that will refuse is
-// a dead end.
-func (s *session) capRefusal(id string, n, limit int) error {
-	file := fmt.Sprintf(
-		"    drover new <kind> \"<what you found>\" --found-in %s -f <file>", id)
-	if s.cfg.RegisterBackend() == config.BackendFile {
-		file = fmt.Sprintf("    drover follow-up open \"<what you found>\" --owner %s --sev <C|H|M|L>", id)
+// capRefusal is read out of a log in the morning, so it names the count, the
+// cap, where the findings went and what the operator can do. It names no
+// filing command: an unmerged item's findings are its own unfinished work, and
+// filed they would let it merge carrying them. The item parks for a decision.
+func capRefusal(id string, n, limit int, findings string) error {
+	kept := "The findings are kept in " + findings + "; the item body is untouched."
+	if findings == "" {
+		kept = "The findings file would not write, so they live in this session's output alone; the item body is untouched."
 	}
 	return fmt.Errorf(
 		"%s has been sent back %d times and [review] max_review_rounds is %d: this finding does not go\n"+
-			"back to the branch. The refusal is recorded; the item body is untouched.\n\n"+
-			"The branch is no longer the destination. File it and let the work finish:\n\n"+
-			"%s\n\n"+
-			"Then record the look, which the cap does not change:\n\n"+
+			"back to the branch, and nothing is filed. The refusal is recorded. %s\n\n"+
+			"Record the look, which the cap does not change:\n\n"+
 			"    drover audit %s <reviewed|verified> --code-by agent \"<what you traced>\"\n\n"+
-			"To send it back anyway, the operator raises [review] max_review_rounds or runs request-changes --over-limit.\n"+
-			"Both are the operator's: --over-limit refuses inside a session drover launched, and the\n"+
-			"config is not this session's to edit",
-		id, n, limit, file, id)
+			"drive parks %s %s, and the operator decides it, with one of:\n\n"+
+			"    drover amend %s -f {requirements} --reason {text}   # the contract changes\n"+
+			"    drover signoff %s {n} {what was checked}            # a person meets the requirement\n"+
+			"    drover shelve %s                                    # the item stops here\n"+
+			"    drover request-changes %s -f %s --over-limit        # it goes back to the branch anyway\n\n"+
+			"The choice is the operator's, not this session's",
+		id, n, limit, kept, id, id, passNeedsDecision, id, id, id, id, findingsArg(findings))
+}
+
+// findingsArg is the -f an over-limit send-back reads: the kept findings, or
+// a placeholder where none were kept.
+func findingsArg(findings string) string {
+	if findings == "" {
+		return "{file}"
+	}
+	return findings
 }
 
 func init() {

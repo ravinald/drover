@@ -796,3 +796,42 @@ func TestNextDriveWritesNothing(t *testing.T) {
 		}
 	}
 }
+
+// Only a review's changes rows are rounds under max_review_rounds. A row with
+// no source was written before the source existed, when only request-changes
+// wrote changes rows, so it still counts as one; drive's own send-backs are
+// counted apart by source and move none of the fields a review's rows answer.
+func TestCountsKeepReviewRoundsApartFromDriveSendBacks(t *testing.T) {
+	l := &Ledger{Rows: []Row{
+		{ID: "1", Changes: "old", Reqs: []int{2}},
+		{ID: "1", Changes: "gate-a", ChangesSource: ChangesVerify},
+		{ID: "1", Changes: "gate-a", ChangesSource: ChangesVerify},
+		{ID: "1", Changes: "review", ChangesSource: ChangesReview, Reqs: []int{3}, Date: "2026-10-29"},
+		{ID: "1", Changes: "trunk_conflict abc", ChangesSource: ChangesTrunkConflict},
+		{ID: "1", Changes: "seq", ChangesSource: ChangesNumberedFiles},
+		{ID: "2", Changes: "elsewhere"},
+	}}
+	c := l.Counts("1")
+	if c.ChangesRequested != 2 {
+		t.Errorf("ChangesRequested = %d, want 2: the sourceless row and the review's", c.ChangesRequested)
+	}
+	if c.VerifySendBacks != 2 || c.ConflictSendBacks != 1 || c.NumberedSendBacks != 1 {
+		t.Errorf("send-backs verify %d, conflict %d, numbered %d; want 2, 1 and 1",
+			c.VerifySendBacks, c.ConflictSendBacks, c.NumberedSendBacks)
+	}
+	// Two identical verify rows are a gate failing twice, not a review repeating.
+	if c.RepeatedChanges || !slices.Equal(c.Reqs, []int{3}) || c.LastChanges != "2026-10-29" {
+		t.Errorf("review fields read drive's rows: repeated %v, reqs %v, last %q", c.RepeatedChanges, c.Reqs, c.LastChanges)
+	}
+
+	// With max_review_rounds = 2, two verify send-backs and one review send-back
+	// leave the next review's request under the cap.
+	under := &Ledger{Rows: []Row{
+		{ID: "1", Changes: "v1", ChangesSource: ChangesVerify},
+		{ID: "1", Changes: "v2", ChangesSource: ChangesVerify},
+		{ID: "1", Changes: "r1", ChangesSource: ChangesReview},
+	}}
+	if n := under.Counts("1").ChangesRequested; n >= 2 {
+		t.Errorf("ChangesRequested = %d, want under a cap of 2", n)
+	}
+}

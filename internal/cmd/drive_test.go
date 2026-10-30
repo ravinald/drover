@@ -167,7 +167,7 @@ func TestPassResult(t *testing.T) {
 		// body is the shape of a clean pass and is not one.
 		{"a refused request for changes over an unchanged body",
 			pass{before: rowCounts(), after: rowCounts(reviewLaunch, reviewAudit), logged: true, res: ok,
-				body: launchBody, cap: 2, refused: true}, passCapped},
+				body: launchBody, cap: 2, refused: true}, passNeedsDecision},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if got := passResult(c.p); got != c.want {
@@ -188,8 +188,8 @@ func TestACappedReviewDoesNotLookLikeAPass(t *testing.T) {
 		after:  bodyCounts(2, 2), // an audit row, and no request for changes beside it
 		logged: true, res: ok, cap: 2, refused: true, body: launchBody,
 	}
-	if got := passResult(capped); got != passCapped {
-		t.Fatalf("a capped review read as %q, want %q", got, passCapped)
+	if got := passResult(capped); got != passNeedsDecision {
+		t.Fatalf("a capped review read as %q, want %q", got, passNeedsDecision)
 	}
 	// The case a count cannot express. Identical rows, identical cap, and
 	// the cap turned nothing away: this review found nothing, and reading it as
@@ -248,7 +248,7 @@ func naivePassResult(p pass) string {
 	case audits == 0 && changes == 0:
 		return passSilent
 	case p.cap > 0 && p.after.ChangesRequested >= p.cap:
-		return passCapped
+		return passNeedsDecision
 	case changes >= 1 && p.after.RepeatedChanges:
 		return passRepeating
 	case changes >= 1:
@@ -2493,7 +2493,7 @@ func passResultBeforeFaults(p pass) string {
 	case audits == 0 && changes == 0:
 		return passSilent
 	case p.cap > 0 && p.after.ChangesRequested >= p.cap:
-		return passCapped
+		return passNeedsDecision
 	case changes >= 1 && p.after.RepeatedChanges:
 		return passRepeating
 	case changes >= 1:
@@ -2820,7 +2820,7 @@ func TestOnlyADeadOrSilentPassNamesTheDenial(t *testing.T) {
 		{passChangesRequested, pass{logged: true, res: denied}, false},
 		{passUnreadable, pass{events: 40, res: denied}, false},
 		{passChangesUnrecorded, pass{logged: true, res: denied}, false},
-		{passCapped, pass{logged: true, res: denied, cap: 2}, false},
+		{passNeedsDecision, pass{logged: true, res: denied, cap: 2, refused: true}, false},
 		{passRepeating, pass{logged: true, res: denied}, false},
 	} {
 		t.Run(c.token, func(t *testing.T) {
@@ -2846,7 +2846,7 @@ func TestOnlyADeadOrSilentPassNamesTheDenial(t *testing.T) {
 // front of somebody at nine in the morning.
 func TestEveryPassTokenIsWorded(t *testing.T) {
 	for _, token := range []string{
-		passDied, passUnreadable, passSilent, passCapped,
+		passDied, passUnreadable, passSilent, passNeedsDecision,
 		passRepeating, passChangesRequested, passChangesUnrecorded, passPassed,
 		passFaulted,
 	} {
@@ -7811,8 +7811,8 @@ func TestAConflictAtDispatchKeepsTheFailedMergeAsEvidence(t *testing.T) {
 	conflictParkRow(t, dir, "shared.txt")
 }
 
-// A conflict round counts against max_review_rounds, so an item already at the cap
-// parks rather than starting one.
+// An item already at max_review_rounds waits on the operator, so a conflict
+// parks it rather than starting a session to resolve it.
 func TestAConflictAtTheReviewRoundLimitParks(t *testing.T) {
 	isolate(t)
 	ghLog := mergeProject(t)
@@ -7838,8 +7838,9 @@ func TestAConflictAtTheReviewRoundLimitParks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := s.ledger.Counts("1").ChangesRequested; n != 1 {
-		t.Errorf("item 1 has %d changes rows, want the fixture's 1: no round started", n)
+	if c := s.ledger.Counts("1"); c.ChangesRequested != 1 || c.ConflictSendBacks != 0 {
+		t.Errorf("item 1 has %d review rounds and %d conflict send-backs, want the fixture's 1 and none: no round started",
+			c.ChangesRequested, c.ConflictSendBacks)
 	}
 }
 
@@ -8111,9 +8112,9 @@ func TestADriveReviewLoopParksOnlyOnWhatTheReviewerSaidRepeated(t *testing.T) {
 		name:   "equal reqs, new findings",
 		cap:    2,
 		rows:   []string{changes("a1", "[2]", ""), changes("a2", "[2]", ""), refused("[2]")},
-		passes: []string{passChangesRequested, passChangesRequested, passCapped},
-		park:   passCapped,
-		detail: "max_review_rounds 2 reached; the refused request named R2",
+		passes: []string{passChangesRequested, passChangesRequested, passNeedsDecision},
+		park:   passNeedsDecision,
+		detail: "max_review_rounds 2 reached; the refused request named R2, and no file kept its findings",
 		reason: "max_review_rounds (2)",
 	}, {
 		name:   "the same finding still open twice",
@@ -8135,9 +8136,9 @@ func TestADriveReviewLoopParksOnlyOnWhatTheReviewerSaidRepeated(t *testing.T) {
 		rows: []string{changes("f1", "[1,3,5,6]", ""), changes("f2", "[3]", ""), changes("f3", "[3,5]", ""),
 			changes("f4", "[3]", ""), changes("f5", "[3]", ""), refused("[3]")},
 		passes: []string{passChangesRequested, passChangesRequested, passChangesRequested,
-			passChangesRequested, passChangesRequested, passCapped},
-		park:   passCapped,
-		detail: "max_review_rounds 5 reached; the refused request named R3",
+			passChangesRequested, passChangesRequested, passNeedsDecision},
+		park:   passNeedsDecision,
+		detail: "max_review_rounds 5 reached; the refused request named R3, and no file kept its findings",
 		reason: "max_review_rounds (5)",
 	}} {
 		t.Run(c.name, func(t *testing.T) {
@@ -8677,5 +8678,145 @@ echo '[]'
 				}
 			}
 		})
+	}
+}
+
+// drive's own send-backs are not review rounds. With max_review_rounds = 2,
+// the fixture's sourceless row (a round, as every row written before the source
+// existed is) and two verify send-backs leave the next review's request-changes
+// accepted; the review after that is the one the cap refuses. That refusal
+// parks the item needs_decision with the kept findings file as its detail, and
+// no pull request opens for it. Each review is the real request-changes, run as
+// drover in a process of its own, so the rows drive reads are the ones the
+// command writes.
+func TestDriveSendBacksSpendNoReviewRoundsAndTheCapParksForADecision(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	isolate(t)
+	ghLog := mergeProject(t)
+	dir, _ := forge(t, ghLog)
+	appendConfig(t, dir, "\n[review]\nmax_review_rounds = 2\n")
+	for _, out := range []string{"gate red once", "gate red twice"} {
+		if err := ledger.Append(filepath.Join(dir, "ledger.jsonl"), ledger.Row{
+			ID: "1", Changes: digest(out), ChangesSource: ledger.ChangesVerify, Date: ledger.Today(),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rev, err := exec.LookPath("rev")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviews := t.TempDir()
+	t.Setenv("DROVER_TEST_REVIEWS", reviews)
+	t.Setenv("DROVER_TEST_SELF", self)
+	write(t, filepath.Join(reviews, "ev-1"), "### R1 answers 200 on a refused object\n\n`curl -i /refused` printed 200.\n")
+	write(t, filepath.Join(reviews, "ev-2"), "### R1 still answers 200\n\nThe second probe printed 200 as well.\n")
+	stub(t, rev, `#!/bin/sh
+echo '{"type":"result","subtype":"success","is_error":false}'
+n=$(cat "$DROVER_TEST_REVIEWS/1" 2>/dev/null || echo 0); n=$((n + 1)); echo $n > "$DROVER_TEST_REVIEWS/1"
+cd "$DROVER_ROOT" && DROVER_TEST_AS_DROVER=1 "$DROVER_TEST_SELF" request-changes 1 -f "$DROVER_TEST_REVIEWS/ev-$n" >> "$DROVER_TEST_REVIEWS/out" 2>&1
+printf '%s\n' '{"id":"1","level":"reviewed","code_by":"agent","independent":true,"date":"2026-10-29"}' >> "$DROVER_ROOT/ledger.jsonl"
+`)
+
+	got, evs := gateDrive(t)
+	out, _ := os.ReadFile(filepath.Join(reviews, "out"))
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := reviewCount(t, reviews, "1"); n != 2 {
+		var rows []string
+		for _, r := range l.Rows {
+			if r.ID == "1" {
+				b, _ := json.Marshal(r)
+				rows = append(rows, string(b))
+			}
+		}
+		t.Fatalf("%d reviews ran, want 2\nrequest-changes:\n%s\nrows:\n%s", n, out, strings.Join(rows, "\n"))
+	}
+	var passes []string
+	for _, r := range l.Rows {
+		if r.ID == "1" && r.Pass != "" {
+			passes = append(passes, r.Pass)
+		}
+	}
+	if want := []string{passChangesRequested, passNeedsDecision}; !slices.Equal(passes, want) {
+		t.Errorf("passes = %v, want %v: the first review's request-changes has to be accepted\nrequest-changes:\n%s", passes, want, out)
+	}
+	if c := l.Counts("1"); c.ChangesRequested != 2 || c.VerifySendBacks != 2 || c.Refusals != 1 {
+		t.Errorf("counts = %d review rounds, %d verify send-backs, %d refusals; want 2, 2 and 1", c.ChangesRequested, c.VerifySendBacks, c.Refusals)
+	}
+	const kept = "reports/01-first.refused-1.md"
+	if _, err := os.Stat(filepath.Join(dir, kept)); err != nil {
+		t.Errorf("the refused findings were not kept: %v", err)
+	}
+	pk, ok := l.Parked("1")
+	if !ok || pk.Park != passNeedsDecision || !strings.Contains(pk.Detail, kept) {
+		t.Fatalf("park row = %+v, want %s naming %s\nrequest-changes:\n%s", pk, passNeedsDecision, kept, out)
+	}
+	if got.Park != passNeedsDecision {
+		t.Errorf("item 1 parked %q (%s), want %s", got.Park, got.Reason, passNeedsDecision)
+	}
+	if prs := prCreates(t, ghLog); len(prs) != 0 {
+		t.Errorf("a pull request opened for an item the cap parked: %v", prs)
+	}
+	i := slices.IndexFunc(evs, func(e DriveEvent) bool { return e.Event == evNeedsOperator && e.ID == "1" })
+	if i < 0 {
+		t.Fatalf("no needs_operator for item 1 in %+v", evs)
+	}
+	if e := evs[i]; e.Action != "decide_requirement" || !strings.Contains(e.Run, kept) || strings.Contains(e.Run, "drover split") {
+		t.Errorf("needs_operator is action %q run %q, want decide_requirement naming %s and no split", e.Action, e.Run, kept)
+	}
+	show := capture(t, func() {
+		if err := execute(t, "show", "1", "--no-tracker"); err != nil {
+			t.Errorf("show: %v", err)
+		}
+	})
+	for _, want := range []string{"sent back      2 of 2", "drive sent back 2 verify  (not review rounds)"} {
+		if !strings.Contains(show, want) {
+			t.Errorf("show lacks %q:\n%s", want, show)
+		}
+	}
+}
+
+// A request for changes the cap refused is the item's own unfinished work, so
+// open-pr refuses the branch, --force included, and names the file the findings
+// were kept in. An amend answers the refusal; the pull request still waits for a
+// review that passed after it.
+func TestOpenPRRefusesAnItemTheCapParked(t *testing.T) {
+	t.Cleanup(func() { openPRForce = false })
+	const kept = "reports/01-first.refused-1.md"
+	capped := []ledger.Row{
+		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-10-28"},
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: bodyAtLaunch, Date: "2026-10-28"},
+		{ID: "1", Refused: "max_review_rounds", Reqs: []int{1}, Findings: kept, Date: "2026-10-28"},
+		{ID: "1", Level: ledger.LevelReviewed, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-28"},
+		{ID: "1", Pass: passNeedsDecision, Date: "2026-10-28"},
+	}
+	for _, force := range []bool{false, true} {
+		openPRForce = force
+		_, err := reviewPassedOver(t, "", capped)
+		if Code(err) != ExitRefused || !strings.Contains(fmt.Sprint(err), kept) {
+			t.Errorf("--force %v: open-pr on a capped item = %v, want exit 3 naming %s", force, err, kept)
+		}
+	}
+	openPRForce = false
+
+	amended := append(slices.Clone(capped), ledger.Row{ID: "1", Amend: &ledger.Amendment{From: 1, To: 1}, Date: "2026-10-29"})
+	_, err := reviewPassedOver(t, "", amended)
+	if Code(err) != ExitRefused || strings.Contains(fmt.Sprint(err), kept) {
+		t.Errorf("after an amend alone = %v, want the pass row's refusal, not the cap's", err)
+	}
+
+	passed := append(slices.Clone(amended),
+		ledger.Row{ID: "1", Stage: ledger.StageReview, Runner: "rev", Cmd: "review", Actor: "agent", Body: bodyAtLaunch, Date: "2026-10-29"},
+		ledger.Row{ID: "1", Level: ledger.LevelReviewed, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-29"},
+		ledger.Row{ID: "1", Pass: passPassed, Date: "2026-10-29"},
+	)
+	if _, err := reviewPassedOver(t, "", passed); err != nil {
+		t.Errorf("after an amend and a passing review = %v, want it to pass", err)
 	}
 }

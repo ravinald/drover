@@ -269,7 +269,7 @@ func (s *session) reverify(ctx context.Context, it backlog.Item, d *DriveItem,
 	// request-changes points the process's stdout elsewhere while it writes, which two
 	// slots must not do at once; the trunk stage does it under this lock too.
 	release := s.holdTrunk()
-	err = s.requestChangesFromVerify(it, "The item's verify command changed while the drive was paused, and the new one refused this branch. Its output:", gout)
+	err = s.requestChangesFromVerify(it, ledger.ChangesVerify, "The item's verify command changed while the drive was paused, and the new one refused this branch. Its output:", gout)
 	release()
 	if err != nil {
 		return park(parkGateRefused, "the new verify command refused this branch after a resume, and the finding could not be written back: "+err.Error()), false, true

@@ -87,9 +87,8 @@ const (
 	passFaulted           = "faulted"           // the service or the account failed, not the work
 	passUnreadable        = "unreadable"        // it left a stream drover has no schema for
 	passSilent            = "no_record"         // it recorded nothing at all
-	passCapped            = "at_limit"          // request for changes refused, and it wanted to send work back
 	passRepeating         = "repeating"         // the same evidence twice
-	passNeedsDecision     = "needs_decision"    // a requirement no run can meet as written, handed to the operator
+	passNeedsDecision     = "needs_decision"    // a requirement no run can meet as written, or a request the cap refused, handed to the operator
 	passChangesRequested  = "changes_requested" // work went back to the branch
 	passStanding          = "findings_open"     // an audit, no request for changes, and an earlier round's block still open in the body
 	passChangesUnrecorded = "no_digest"         // an audit, no request for changes, and no body digest to read it against
@@ -101,7 +100,7 @@ const (
 //
 // drive merges what it drives, so this is one half of the go/no-go and the gate
 // is the other. Only passPassed reaches driveFinish: passSilent, passDied,
-// passFaulted, passUnreadable, passCapped, passRepeating, passStanding,
+// passFaulted, passUnreadable, passNeedsDecision, passRepeating, passStanding,
 // passChangesUnrecorded and passEdited each park the item, and a parked item is never
 // merged. Merging by default is not merging unconditionally, and every token
 // below is one of the conditions.
@@ -185,9 +184,10 @@ func rowResult(p pass) string {
 	// would be capped whatever the reviewer did, so drive could never merge it and
 	// open-pr would refuse it. A refusal row is written when the cap actually
 	// turns a request-changes away, which is the evidence the count would stand
-	// in for.
+	// in for. The findings it turned away are the unmerged item's own, so they
+	// go to the operator to decide rather than to anybody's backlog.
 	case p.cap > 0 && p.refused:
-		return passCapped
+		return passNeedsDecision
 	// Ahead of repeating and changes_requested, because both relaunch or park
 	// on a loop the implementer could close, and a requirement the reviewer
 	// judged unmeetable as written is one no implementing session can: every
@@ -635,8 +635,9 @@ that sent work back means another run; one that recorded nothing parks the item,
 because drover cannot tell a pass that found nothing from a pass that found
 something and did not write it down, and guessing toward "finished" is the guess
 that ships a defect. [review] max_review_rounds bounds the loop; at the cap the item
-parks rather than passing, since an at-limit review is one that wanted to send work
-back and was refused.
+parks needs_decision rather than passing, since a review the cap refused is one
+that wanted to send work back, and its findings wait in a refused-N file for the
+operator.
 
 A runner that fails on the service rather than on the work is answered before
 the ledger is asked anything. A transport failure is retried twice, 45 seconds
@@ -2247,12 +2248,12 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 		case passStanding:
 			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath)+
 				". "+standingNext(d.ID, s.ledger.State(d.ID).Note))
-		case passRepeating, passCapped:
-			d.setDetail(s.loopDetail(it, v, rp))
+		case passRepeating:
+			d.setDetail(s.loopDetail(it, rp))
 			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath))
 		case passNeedsDecision:
 			d.setDetail(decisionDetail(rp))
-			d.decision = decisionNext(d.ID, rp.after.Operator)
+			d.decision = passDecision(d.ID, rp)
 			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath))
 		default:
 			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath))
@@ -2461,8 +2462,6 @@ func passSentence(v, stage string, p pass, subject, runnerName, logPath string) 
 		return subject + " recorded an audit and no request for changes, and the block an earlier round sent back still stands " +
 			"under " + prompts.ChangesHeading + ": drover request-changes <id> if its findings are still open, " +
 			"drover close-changes <id> if they are closed"
-	case passCapped:
-		return fmt.Sprintf("%s wanted to send work back, and the item is at [review] max_review_rounds (%d)", subject, p.cap)
 	case passRepeating:
 		if !p.after.RepeatedChanges && p.after.StillOpen {
 			return subject + " marked the finding under " + requirementList(p.after.StillOpenReqs) +
@@ -2470,6 +2469,10 @@ func passSentence(v, stage string, p pass, subject, runnerName, logPath string) 
 		}
 		return subject + " sent back evidence identical to the previous round's request for changes"
 	case passNeedsDecision:
+		if p.refused {
+			return fmt.Sprintf("%s wanted to send work back, and the item is at [review] max_review_rounds (%d), "+
+				"so the findings went to the operator rather than the branch: %s", subject, p.cap, keptFindings(p.after.RefusedFindings))
+		}
 		return subject + " found " + requirementList(p.after.Operator) +
 			" cannot be met as written, so no implementing session can discharge it: " +
 			strings.Join(operatorReasons(prompts.Data{Body: p.text}.Changes(), p.after.Operator), " ")
@@ -2956,6 +2959,34 @@ func requirementList(nums []int) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
+// passDecision is what resolves the needs_decision park one pass ended on: the
+// cap's options for a request the cap refused, decisionNext's for requirements
+// the review handed over.
+func passDecision(id string, p pass) string {
+	if p.refused {
+		return capDecisionNext(id, p.after.RefusedFindings)
+	}
+	return decisionNext(id, p.after.Operator)
+}
+
+// capDecisionNext is what resolves a needs_decision park the cap caused. The
+// findings are the unmerged item's own, so every option keeps them with the
+// item: change the contract, meet a requirement by hand, retire the item, or
+// send them back past the cap.
+func capDecisionNext(id, findings string) string {
+	return "read " + keptFindings(findings) + " and decide: drover amend " + id + " -f <file> --reason \"<why>\" to change the contract, " +
+		"drover signoff " + id + " <n> \"<what was checked>\" for an [operator] requirement a person met, drover shelve " + id +
+		", or drover request-changes " + id + " -f " + findingsArg(findings) + " --over-limit to send them back anyway; then drover drive " + id
+}
+
+// keptFindings names where a refused request's findings are, for a sentence.
+func keptFindings(findings string) string {
+	if findings == "" {
+		return "the refused findings, which no file kept"
+	}
+	return findings
+}
+
 // decisionNext is what resolves a needs_decision park: amend the contract the
 // review found unmeetable, or, where a person can meet the requirement, amend it
 // to an [operator] one and sign it off, since signoff refuses any other. Then
@@ -2994,12 +3025,7 @@ func passFollowUp(token string, p pass, id, item, runnerName, logPath, again str
 	case passRepeating:
 		return followUp{outcome, repeatingNext(id, body, p.sentBack)}
 	case passNeedsDecision:
-		return followUp{outcome, decisionNext(id, p.after.Operator)}
-	case passCapped:
-		return followUp{
-			outcome,
-			"decide by hand: drover split " + id + " for what is left, or raise [review] max_review_rounds and drover run " + id,
-		}
+		return followUp{outcome, passDecision(id, p)}
 	case passChangesUnrecorded:
 		return followUp{
 			outcome,
@@ -3137,7 +3163,7 @@ func driveFollowUp(d DriveItem, item string, drafted bool, maxReviewRounds int, 
 	}
 
 	switch d.Park {
-	case passChangesRequested, passRepeating, passNeedsDecision, passCapped, passStanding, passChangesUnrecorded, passEdited, passSilent, passDied, passUnreadable:
+	case passChangesRequested, passRepeating, passNeedsDecision, passStanding, passChangesUnrecorded, passEdited, passSilent, passDied, passUnreadable:
 		// The park's reason is passSentence already, worded with the runner, the
 		// log and any denial in hand; the summary has none of those to word it
 		// again.
@@ -4187,9 +4213,10 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 		return *d
 	case code == gateDiff:
 		// The gate blamed the diff, which makes it a finding like any other and
-		// sends it back the way a reviewer's would. It counts against
-		// max_review_rounds, because a round spent on a red check is still a round.
-		if err := s.requestChangesFromVerify(it, noneFirst(checks.none, "The merge gate refused this branch. Its output:"), out, checks.code...); err != nil {
+		// sends it back the way a reviewer's would. It is recorded as verify's
+		// and not a review round, so a red check does not spend the rounds the
+		// item's reviews are owed.
+		if err := s.requestChangesFromVerify(it, ledger.ChangesVerify, noneFirst(checks.none, "The merge gate refused this branch. Its output:"), out, checks.code...); err != nil {
 			return park("gate_refused", noneFirst(checks.none, "the merge gate blamed this diff and the finding could not be written back: "+err.Error()))
 		}
 		d.Rounds++
@@ -4781,14 +4808,17 @@ func (s *session) dispatchCatchUp(d *DriveItem, park func(cause, why string) Dri
 		return hold(p, conflict+"; the merge was aborted, and [supervise] "+key+" is "+string(p)+
 			", so no session was started to resolve it")
 	case limit > 0 && s.ledger.Counts(d.ID).ChangesRequested >= limit:
-		return hold(polOperator, fmt.Sprintf("%s; the merge was aborted, because a conflict round counts against "+
-			"[review] max_review_rounds and %s has used all %d", conflict, d.ID, limit))
+		return hold(polOperator, fmt.Sprintf("%s; the merge was aborted, because %s has used all %d of "+
+			"[review] max_review_rounds and its findings wait on the operator, not on another session", conflict, d.ID, limit))
 	case s.slot != nil && !s.slot.sched.spendConflict(d.ID):
 		return hold(polOperator, conflict+" a second time in this drive; the merge was aborted, and a person resolves this one")
 	}
-	// A round like a request-changes round, and counted as one: without the row a trunk
-	// that keeps moving buys an item a new round in every drive.
-	if err := s.record(ledger.Row{ID: d.ID, Changes: parkTrunkConflict + " " + shortSHA(to), Date: ledger.Today()}); err != nil {
+	// A send-back of drive's own, recorded so the conflict is on the item's
+	// history; it is not a review round, so a trunk that keeps moving does not
+	// spend the rounds the item's reviews are owed. spendConflict bounds it to
+	// one per drive.
+	if err := s.record(ledger.Row{ID: d.ID, Changes: parkTrunkConflict + " " + shortSHA(to),
+		ChangesSource: ledger.ChangesTrunkConflict, Date: ledger.Today()}); err != nil {
 		_ = gitAt(dir, "merge", "--abort")
 		return park("ledger_unwritable", conflict+"; the merge was aborted, because the ledger would not count the round: "+err.Error()), true
 	}
@@ -5152,11 +5182,10 @@ func (s *session) routeCatchUp(it backlog.Item, d *DriveItem, park func(cause, w
 }
 
 // requestChangesCatchUp sends a caught-up branch back with the gate's output, headed by
-// what the trunk brought in. It counts against max_review_rounds the way a gate's exit
-// 1 does: a round spent on a tree the branch and the trunk made together is
-// still a round.
+// what the trunk brought in. Like a gate's exit 1, it is recorded as verify's
+// send-back rather than a review round.
 func (s *session) requestChangesCatchUp(it backlog.Item, d *DriveItem, park func(cause, why string) DriveItem, c caughtUp, trunk string) DriveItem {
-	if err := s.requestChangesFromVerify(it, s.catchUpHeader(trunk, c.row), c.out); err != nil {
+	if err := s.requestChangesFromVerify(it, ledger.ChangesVerify, s.catchUpHeader(trunk, c.row), c.out); err != nil {
 		return park(parkGateRefused, "the verify command failed on "+d.Branch+" merged with "+trunk+
 			", which passes it alone, and the finding could not be written back: "+err.Error())
 	}
@@ -5307,10 +5336,12 @@ func (s *session) checkRuns(ctx context.Context, sha string) ([]forgeCheck, erro
 
 // requestChangesFromVerify writes the gate's own output back to the branch, through request-changes,
 // which stays the only writer of that section and the only place the cap is
-// enforced. Each failed check follows the output with its run and what its log
+// enforced. source is what the changes row names as its writer, one of drive's
+// own: a verify or gate failure, or a [numbered_files] clash. Each failed check
+// follows the output with its run and what its log
 // says failed, because a gate's output names a check and a commit, and the
 // session that gets the item back would otherwise start by finding the log.
-func (s *session) requestChangesFromVerify(it backlog.Item, header, out string, failed ...judged) error {
+func (s *session) requestChangesFromVerify(it backlog.Item, source, header, out string, failed ...judged) error {
 	f, err := os.CreateTemp("", "drover-verify-*.md")
 	if err != nil {
 		return err
@@ -5337,8 +5368,8 @@ func (s *session) requestChangesFromVerify(it backlog.Item, header, out string, 
 	if err := f.Close(); err != nil {
 		return err
 	}
-	requestChangesFile, requestChangesStillOpen, requestChangesOperator = f.Name(), nil, nil
-	defer func() { requestChangesFile = "" }()
+	requestChangesFile, requestChangesStillOpen, requestChangesOperator, requestChangesSource = f.Name(), nil, nil, source
+	defer func() { requestChangesFile, requestChangesSource = "", ledger.ChangesReview }()
 	// request-changes reports on stdout, and stdout under --json carries one object per
 	// line and nothing else.
 	stdout := os.Stdout
@@ -5682,13 +5713,13 @@ func (s *session) catchUpPR(ctx context.Context, o openPR, trunk string) error {
 		report(catchUpLevel, "")
 	case c.row.Verify == catchUpFailed:
 		why := "the verify command failed on the merged tree, which " + trunk + " passes alone; pushed and sent back"
-		if err := w.requestChangesFromVerify(o.it, w.catchUpHeader(trunk, c.row), c.out); err != nil {
+		if err := w.requestChangesFromVerify(o.it, ledger.ChangesVerify, w.catchUpHeader(trunk, c.row), c.out); err != nil {
 			why = "the verify command failed on the merged tree, which " + trunk + " passes alone; pushed, and the finding could not be written back: " + err.Error()
 		}
 		report(catchUpFailed, why)
 	case c.row.Verify == catchUpSequence:
 		why := "numbered files clash with or sort below " + trunk + "; the merge was undone and the item sent back"
-		if err := w.requestChangesFromVerify(o.it, sequenceHeader(trunk, c.row.To), c.out); err != nil {
+		if err := w.requestChangesFromVerify(o.it, ledger.ChangesNumberedFiles, sequenceHeader(trunk, c.row.To), c.out); err != nil {
 			why = "numbered files clash with or sort below " + trunk + "; the merge was undone, and the finding could not be written back: " + err.Error()
 		}
 		report(catchUpSequence, why)

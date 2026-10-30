@@ -256,10 +256,17 @@ Omit the id to open one for the item whose branch you are standing on.
 
 With no pass row, or a pass row a later review has outdated, the ledger answers
 instead, and the output says which authority did and which drive pass it set
-aside: the most recent audit is reviewed or verified and independent, at least
-one request-changes row has ever been recorded, and the item is under [review] max_review_rounds.
-That reading cannot see a review session that died, because a human ran it and
-the question does not arise. It can see the cap, and it does.
+aside: the latest review sent nothing back, its audit is reviewed or verified
+and independent, no block an earlier round sent back stands in the body, and the
+body matches the digest drover last recorded. That reading cannot see a review
+session that died, because a human ran it and the question does not arise.
+
+Before either, a request for changes the cap refused holds the branch, with or
+without --force, until a drover amend, a drover signoff or a review that passed
+is recorded after it, or a request-changes --over-limit sends the findings
+back. The refused findings are the item's own unfinished work, kept in the
+refused-N file the refusal names, and a pull request would merge the item
+carrying them.
 
 A review_result row reading "findings_open" is a review that recorded its audit beside a
 sent-back block an earlier round wrote, and said neither that the block was closed
@@ -366,6 +373,13 @@ history of one contract across two places.`,
 // reviewed the branch since, so there is no later review to read.
 func (s *session) reviewPassed(it backlog.Item) error {
 	id := it.ID.Bare()
+	if findings, ok := s.capRefusalStands(id); ok {
+		return Refusal{fmt.Errorf(
+			"the latest review of %s wanted to send work back at [review] max_review_rounds, and the cap refused it: "+
+				"the findings in %s are this item's own and nothing has answered them.\n"+
+				"Decide them first: %s",
+			id, keptFindings(findings), capDecisionNext(id, findings))}
+	}
 	if openPRForce {
 		fmt.Fprintln(errOut, "--force: opening on your judgement, with neither the review_result row nor the merge gate consulted")
 		return nil
@@ -465,14 +479,8 @@ func (s *session) reviewPassed(it backlog.Item) error {
 			"%s, and the latest review's audit row was recorded by whoever wrote the code (--code-by %q).\n"+
 				"Whoever wrote the code cannot certify that it may merge. Have somebody else audit it, or --force",
 			lead, blank(st.CodeBy))
-	// No cap case here, deliberately. request-changes' own refusal at the cap
-	// tells the reviewer to file the finding and "let the work finish", so a second
-	// verify refusing the pull request on the same count would contradict the
-	// instruction the reviewer was given: findings filed exactly as asked, and
-	// their items still unable to merge. The cap bounds how many rounds a review
-	// may spend, not whether a human may open a pull request about what shipped.
-	// drive's own passCapped still holds the unattended merge, and it reads a
-	// recorded refusal rather than the item's history.
+	// No count of rounds here: reaching the cap is not a finding. A refusal is,
+	// and capRefusalStands has already answered for it.
 	// drive's rows 8 to 11, read against the body as it stands now: an edit
 	// after the review is as much a write drover did not make as one during it.
 	case s.blockStands(it):
@@ -500,6 +508,26 @@ func (s *session) reviewPassed(it backlog.Item) error {
 			"That reading cannot see a review session that died, only what it wrote down.\n",
 		aside, lead, st.Level, st.CodeBy, c.ChangesRequested)
 	return nil
+}
+
+// capRefusalStands reports a request for changes the cap refused that nothing
+// has answered since, with the findings file its row names. An amend, a
+// signoff or a passing review answers it, and so does a review's send-back
+// past the cap, which put the findings in the body after all.
+func (s *session) capRefusalStands(id string) (findings string, ok bool) {
+	for _, r := range s.ledger.Rows {
+		if r.ID != id {
+			continue
+		}
+		switch {
+		case r.Refused != "":
+			findings, ok = r.Findings, true
+		case r.Amend != nil, r.Signoff > 0, r.Pass == passPassed,
+			r.Changes != "" && (r.ChangesSource == "" || r.ChangesSource == ledger.ChangesReview):
+			findings, ok = "", false
+		}
+	}
+	return findings, ok
 }
 
 // blockStands reports whether the item file carries a sent-back block nobody

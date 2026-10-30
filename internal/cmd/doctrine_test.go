@@ -217,21 +217,10 @@ func TestEveryFileNewCopyPassesTheDescription(t *testing.T) {
 	lifecycle := section(t, lifecycleDoc, "| `NEW-ITEM` |", regexp.MustCompile(`^\| `))
 	guide := section(t, guideDoc, "- `NEW-ITEM`:", regexp.MustCompile(`^\s*- `))
 
-	// The tracker-free project is the one whose cap refusal sends a reviewer to
-	// `new`; under the file register it names `follow-up open` instead. It changes
-	// directory, which is why the documents are read above.
-	newProject(t)
-	s, err := open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	refusal := s.capRefusal("1", 3, 3).Error()
-
 	for _, c := range []struct{ name, text string }{
 		{"prompt.Destinations() NEW-ITEM", do},
 		{lifecycleDoc, lifecycle},
 		{guideDoc, guide},
-		{"request for changes cap refusal", refusal},
 	} {
 		if !strings.Contains(c.text, "drover new <kind>") || !strings.Contains(c.text, "-f <file>") {
 			t.Errorf("%s files a finding without -f <file>:\n%s", c.name, c.text)

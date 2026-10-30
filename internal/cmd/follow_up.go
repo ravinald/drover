@@ -73,8 +73,12 @@ var followUpOpenCmd = &cobra.Command{
 		// not resolve, which is the same answer `follow-up close` gives a number
 		// the file does not hold. A rule the project declared is what exits 3.
 		for _, owner := range followUpOwners {
-			if _, err := s.item(owner); err != nil {
+			it, err := s.item(owner)
+			if err != nil {
 				return fmt.Errorf("--owner %s: %w", owner, err)
+			}
+			if err := s.refuseUnmerged("follow-up open --owner", it.ID.Bare()); err != nil {
+				return err
 			}
 		}
 		path := s.cfg.Abs(s.cfg.Paths.Register)
@@ -198,7 +202,7 @@ func severityNames() []string {
 
 func init() {
 	followUpOpenCmd.Flags().StringArrayVar(&followUpOwners, "owner", nil,
-		"bare id that owns this follow-up, must name an item, repeatable (default: unowned, which reaches no run)")
+		"bare id that owns this follow-up, must name a merged item, repeatable (default: unowned, which reaches no run)")
 	followUpOpenCmd.Flags().StringVar(&followUpSev, "sev", "",
 		"severity rank, one value: C, H, M or L, or critical, high, medium or low, no none (default: unranked, which is what omitting the flag files and still counts as open)")
 	followUpCmd.AddCommand(followUpOpenCmd, followUpCloseCmd)

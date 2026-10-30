@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -143,6 +145,7 @@ func TestFileRegisterMalformedLineIsUnreadableNotEmpty(t *testing.T) {
 
 func TestFollowUpWritesAndClosesRows(t *testing.T) {
 	dir := fileRegisterProject(t, "")
+	markMerged(t, dir, "B1")
 	path := filepath.Join(dir, ".drover", "register.jsonl")
 	t.Cleanup(func() { followUpOwners, followUpSev = nil, "" })
 
@@ -262,6 +265,7 @@ func TestFollowUpRefusesAnUngradedSeverity(t *testing.T) {
 // Refused at the same point a typo'd severity is, and for the same reason.
 func TestFollowUpRefusesAnOwnerNoBodyAnswersTo(t *testing.T) {
 	dir := fileRegisterProject(t, "")
+	markMerged(t, dir, "B1")
 	t.Cleanup(func() { followUpOwners, followUpSev = nil, "" })
 
 	for _, c := range []struct{ name, owner, want string }{
@@ -310,6 +314,40 @@ func TestFollowUpRefusesAnOwnerNoBodyAnswersTo(t *testing.T) {
 		}
 	})
 	if !strings.Contains(out, "filed #1: [-] owned (B1)") {
+		t.Errorf("follow-up open wrote:\n%s", out)
+	}
+}
+
+// An owner that has not merged owns nothing filed: its gaps are its own
+// unfinished work and go back to its branch. follow-up open refuses it, writes
+// neither the register nor the ledger, and files once the owner has merged.
+func TestFollowUpOpenRefusesAnUnmergedOwner(t *testing.T) {
+	dir := fileRegisterProject(t, "")
+	write(t, filepath.Join(dir, "work", "B02-open.md"), body("an open bug", "[]"))
+	t.Cleanup(func() { followUpOwners, followUpSev = nil, "" })
+	before := snapshot(t, dir)
+
+	var err error
+	capture(t, func() { err = execute(t, "follow-up", "open", "gh output shape is unpinned", "--owner", "B2") })
+	if Code(err) != ExitRefused {
+		t.Fatalf("follow-up open --owner an unmerged item: exit %d (%v), want %d", Code(err), err, ExitRefused)
+	}
+	for _, want := range []string{"B2 has not merged", "drover request-changes B2 -f {file}", "drover new {kind} {title} -f {file}"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q:\n%s", want, err)
+		}
+	}
+	if got := snapshot(t, dir); !maps.Equal(got, before) {
+		t.Errorf("the refusal wrote to the tree:\nbefore %v\nafter  %v", slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(got)))
+	}
+
+	markMerged(t, dir, "B2")
+	followUpOwners = nil
+	out := capture(t, func() { err = execute(t, "follow-up", "open", "gh output shape is unpinned", "--owner", "B2") })
+	if err != nil {
+		t.Fatalf("follow-up open --owner a merged item: %v", err)
+	}
+	if !strings.Contains(out, "filed #1:") {
 		t.Errorf("follow-up open wrote:\n%s", out)
 	}
 }

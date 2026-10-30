@@ -464,7 +464,6 @@ func (s *session) finishRegister(it backlog.Item, closed []int) {
 		return slices.Contains(closed, is.Number)
 	})
 	s.finishUnlinked(it, scoped.Issues)
-	s.finishCapped(id, len(scoped.Issues))
 	n := s.registerCounts(scoped).Orphaned
 	// A page that stopped early makes the count a floor, and a floor of zero is
 	// the one zero that may not print nothing: silence there reads as "this
@@ -489,33 +488,6 @@ func (s *session) finishRegister(it backlog.Item, closed []int) {
 		return
 	}
 	fmt.Printf("  · "+floor+"\n", s.cfg.GitHub.PageLimit)
-}
-
-// finishCapped says an item merged with its review still sending work back.
-//
-// This is the last moment anybody looks before the record becomes history, and
-// it is where the cap's own failure would otherwise be silent: the cap stops a
-// loop, and a loop still finding things when it stops leaves findings that go
-// nowhere unless somebody files them. drover cannot tell a reviewer that had
-// nothing left to file from one that forgot, so it names the condition and lets
-// the operator decide.
-func (s *session) finishCapped(id string, filed int) {
-	limit := s.cfg.Review.MaxReviewRounds
-	if limit == 0 {
-		return
-	}
-	n := s.ledger.Counts(id).ChangesRequested
-	if n < limit {
-		return
-	}
-	if filed > 0 {
-		fmt.Printf("  · %s finished at [review] max_review_rounds (%d of %d); %d %s open against it\n",
-			id, n, limit, filed, plural(filed, "follow-up is", "follow-ups are"))
-		return
-	}
-	fmt.Printf("  ! %s finished at [review] max_review_rounds (%d of %d) with no follow-up filed against it.\n"+
-		"    The cap stopped a review that was still sending work back, and nothing records what it found.\n"+
-		"    drover follow-up open \"<what>\" --owner %s\n", id, n, limit, id)
 }
 
 // worstOrphaned names the highest severity among the orphaned follow-ups, in the

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -343,9 +344,54 @@ func TestRequestChangesRefusesPastTheLimitAndWritesNothing(t *testing.T) {
 	if n := refusalRows(t, dir); n != 1 {
 		t.Errorf("%d cap refusal rows, want 1: the refusal has to be readable", n)
 	}
-	for _, want := range []string{"sent back 2 times", "max_review_rounds is 2", "drover audit", "--over-limit", "drover new"} {
+	for _, want := range []string{"sent back 2 times", "max_review_rounds is 2", "drover audit", "--over-limit", "drover amend"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not say %q:\n%s", want, err)
+		}
+	}
+}
+
+// The cap turns the send-back away, not the findings. They are the unmerged
+// item's own unfinished work, so they are kept in a file the refusal row names
+// for the operator to decide, and the refusal offers the operator's options and
+// no command that would file them somewhere the item could merge without them.
+func TestACappedRequestKeepsItsFindingsForTheOperator(t *testing.T) {
+	t.Cleanup(func() { requestChangesFile, requestChangesOverLimit = "", false })
+	dir, evidence := capProject(t, 1)
+	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
+		t.Fatalf("under the cap: %v", err)
+	}
+	const finding = "### R1 answers 200 on a refused object\n\n`curl -i /refused` printed 200.\n"
+	write(t, evidence, finding)
+
+	requestChangesFile = ""
+	err := execute(t, "request-changes", "1", "-f", evidence)
+	if Code(err) != ExitRefused {
+		t.Fatalf("past the cap: exit %d (%v), want %d", Code(err), err, ExitRefused)
+	}
+	const kept = "reports/01-first.refused-1.md"
+	got, rerr := os.ReadFile(filepath.Join(dir, kept)) // #nosec G304 -- written by the command under test
+	if rerr != nil {
+		t.Fatalf("the refused findings were not kept at %s: %v", kept, rerr)
+	}
+	if !strings.Contains(string(got), strings.TrimSpace(finding)) {
+		t.Errorf("%s does not carry the full finding:\n%s", kept, got)
+	}
+	l, lerr := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if c := l.Counts("1"); c.Refusals != 1 || c.RefusedFindings != kept {
+		t.Errorf("refusal rows %d naming %q, want 1 naming %q", c.Refusals, c.RefusedFindings, kept)
+	}
+	for _, want := range []string{kept, "drover amend 1", "drover signoff 1", "drover shelve 1", "drover request-changes 1 -f " + kept + " --over-limit"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q:\n%s", want, err)
+		}
+	}
+	for _, unwanted := range []string{"drover new", "drover follow-up", "--found-in", "File it"} {
+		if strings.Contains(err.Error(), unwanted) {
+			t.Errorf("the refusal names a filing command %q:\n%s", unwanted, err)
 		}
 	}
 }
@@ -689,5 +735,46 @@ func TestOperatorReasonsReadTheWholeSectionOfTheFinding(t *testing.T) {
 				t.Errorf("operatorReasons = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// A changes row names what wrote it, so a review round can be told from
+// drive's own send-backs. request-changes run by a review or a person writes
+// review, and drover schema --ledger lists the key for a tool writing rows by
+// hand.
+func TestTheChangesRowNamesItsSource(t *testing.T) {
+	t.Cleanup(func() { requestChangesFile, requestChangesOverLimit = "", false })
+	dir, evidence := capProject(t, 0)
+	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sources []string
+	for _, r := range l.Rows {
+		if r.Changes != "" {
+			sources = append(sources, r.ChangesSource)
+		}
+	}
+	if !slices.Equal(sources, []string{ledger.ChangesReview}) {
+		t.Errorf("changes rows carry sources %q, want one %q", sources, ledger.ChangesReview)
+	}
+
+	t.Cleanup(func() { schemaLedger = false })
+	out := capture(t, func() {
+		if err := execute(t, "schema", "--ledger"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var keys map[string]string
+	if err := json.Unmarshal([]byte(out), &keys); err != nil {
+		t.Fatalf("schema --ledger: %v\n%s", err, out)
+	}
+	for _, key := range []string{"changes", "changes_source", "refused", "findings"} {
+		if keys[key] != "string" {
+			t.Errorf("schema --ledger reports %q as %q, want string", key, keys[key])
+		}
 	}
 }
