@@ -748,6 +748,9 @@ func TestAcceptRefusesALiveRequirement(t *testing.T) {
 		{"git staging", "1. Preserve the git staging state across a rebase.", false},
 		{"ssh parser", "1. Unit-test the SSH config parser in internal/ssh/config.go.", false},
 		{"wrapped live line", "1. Verify the installer:\n   run it on the test guest and record the output.", true},
+		{"indented paragraph", "1. Verify the installer.\n\n   Run it on the test guest and record the output.", true},
+		{"prose after the list", "1. `make harness` exits 0.\n\nAfter the merge, drover's post-finish check runs the line below.\n\nLive check: hosts-ci.env 67-", false},
+		{"operator step after the list", "1. `make harness` exits 0.\n\nOperator step after the merge, not a requirement: run suite 85 alone on the guest.", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
