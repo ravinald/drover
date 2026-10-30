@@ -174,7 +174,7 @@ func TestRowsWrittenBeforeHeadsReportNothing(t *testing.T) {
 		{ID: "1", Pass: passPassed, Date: "2026-01-01"},
 		{ID: "1", Merged: new(true), Date: "2026-01-02"},
 	}}
-	if head, ok := reviewedHead(l, "1"); !ok || head != "" {
+	if head, ok := reviewedHead(l, "1", nil); !ok || head != "" {
 		t.Errorf("reviewedHead = %q, %v; want a passing review covering no particular head", head, ok)
 	}
 	if head, commits := l.UnreviewedMerge("1"); head != "" || commits != nil {
@@ -478,5 +478,85 @@ func TestASupervisorFinishMergesAReviewedHeadBoundToIt(t *testing.T) {
 	}
 	if !openIn(t, dir).ledger.State("B1").Merged {
 		t.Errorf("finish recorded no completion:\n%s", out)
+	}
+}
+
+// The finding and its remedy are documented where an operator meets them: the
+// check help that names the finding, and the lifecycle section that explains
+// it. A kind list that merely names UNREVIEWED MERGE would pass with neither.
+func TestUnreviewedMergeIsDocumented(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "..", "docs", "lifecycle.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, section, ok := strings.Cut(string(doc), "### Commits merged after the last review")
+	if !ok {
+		t.Fatal("docs/lifecycle.md has no section on commits merged after the last review")
+	}
+	section, _, _ = strings.Cut(section, "\n### ")
+	var entry []string
+	for _, line := range strings.Split(checkCmd.Long, "\n") {
+		if strings.HasPrefix(line, "  UNREVIEWED MERGE") || len(entry) > 0 && strings.HasPrefix(line, "    ") {
+			entry = append(entry, line)
+		} else if len(entry) > 0 {
+			break
+		}
+	}
+	help := strings.Join(strings.Fields(strings.Join(entry, " ")), " ")
+	for surface, text := range map[string]string{"docs/lifecycle.md": section, "drover check --help": help} {
+		for _, want := range []string{"UNREVIEWED MERGE", "drover review", "--head", "review:"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s does not describe UNREVIEWED MERGE with %q", surface, want)
+			}
+		}
+	}
+}
+
+func TestB113ManualOpenFindingsDoNotAdvanceReview(t *testing.T) {
+	dir, reviewed, merged := reviewedThenMoved(t, fileProject, handFix(t))
+	path := filepath.Join(dir, "ledger.jsonl")
+	write(t, filepath.Join(dir, "work", "B01-merged.md"), body("Merged owner", "")+"\n\n## What the review sent back\n\nR1 remains broken.\n")
+	for _, row := range []ledger.Row{
+		{ID: "B1", Changes: "R1 remains broken", Date: ledger.Today()},
+		{ID: "B1", Stage: ledger.StageReview, Date: ledger.Today()},
+		{ID: "B1", Level: ledger.LevelVerified, Head: merged, Independent: true, Date: ledger.Today()},
+	} {
+		if err := ledger.Append(path, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := openIn(t, dir)
+	it, err := s.item("B1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.blockStands(it) {
+		t.Fatal("fixture has no standing findings")
+	}
+	if err := s.reviewPassed(it); err == nil {
+		t.Fatal("manual review unexpectedly passed")
+	}
+	finishB1(t, dir)
+	row := completionRow(t, dir)
+	if row.ReviewedHead != reviewed || len(row.Unreviewed) != 1 {
+		t.Fatalf("non-passing manual review erased gap: reviewed=%s want=%s unreviewed=%v", row.ReviewedHead, reviewed, row.Unreviewed)
+	}
+}
+
+func TestB113NonTrunkMergeOwnChangesAreReported(t *testing.T) {
+	var merge string
+	dir, _, _ := reviewedThenMoved(t, fileProject, func(dir, branch string) {
+		git(t, dir, "switch", "-q", "-c", "side-review")
+		git(t, dir, "commit", "-q", "--allow-empty", "-m", "review: side typo")
+		git(t, dir, "switch", "-q", branch)
+		git(t, dir, "merge", "-q", "--no-ff", "--no-commit", "side-review")
+		write(t, filepath.Join(dir, "unreviewed.txt"), "new behavior introduced during the merge\n")
+		git(t, dir, "add", "unreviewed.txt")
+		git(t, dir, "commit", "-q", "-m", "unreviewed merge fix")
+		merge = git(t, dir, "rev-parse", "--short", "HEAD")
+	})
+	out := finishB1(t, dir)
+	if !strings.Contains(out, merge+" unreviewed merge fix") || len(unreviewedFindings(t, dir)) != 1 {
+		t.Fatalf("non-trunk merge's own change disappeared: findings=%v output=%s", unreviewedFindings(t, dir), out)
 	}
 }

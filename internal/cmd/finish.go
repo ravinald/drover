@@ -726,64 +726,115 @@ func (s *session) recordHead(id, branch string) error {
 }
 
 // reviewedHead is the head the item's latest passing review read, and ok false
-// when no review has passed. A review passes one of two ways: a pass row drive
-// wrote reading passed, or, in the manual lifecycle, a review window (a review
-// stage row and what follows it up to the next stage or pass row) holding no
-// request for changes and closing on an independent audit at reviewed or
-// verified that names a head. A review that sent work back leaves the last
-// passing head where it was, because what it read is what nobody accepted, and
-// an audit level records how hard somebody looked rather than a verdict.
+// when no review has passed. It holds to one rule: a head becomes the baseline
+// only on a verdict open-pr would accept as passing, so nothing finish or check
+// reads can call a review passed that open-pr refused.
+//
+// Drive's verdicts are its pass rows: passed, or standing with a close-changes
+// row after it before anything else ran or was audited, which open-pr reads as
+// passed. A manual review is a review stage row and what follows it up to the
+// next stage or pass row, and passes with no request for changes inside it, an
+// independent audit at reviewed or verified naming a head, and no sent-back
+// block standing. For the latest review that last condition is the item file as
+// it stands, judged by bodyAccepts the way open-pr's manual path judges it.
+// For an earlier one the file then is gone, so the ledger answers: a request
+// for changes or a refusal stands until a close-changes row or a passed pass
+// row. A block removed by hand edit reads as standing there, which compares
+// from an older head and lists more rather than less.
 //
 // A passed pass row without a head was written before pass rows carried one and
 // covers no particular head, so it answers ok with no head and a caller compares
 // nothing. A passing manual window whose audit names no head is skipped instead:
 // it says nothing about what the review read, and comparing from the earlier
 // head over-reports where answering nothing would go silent.
-func reviewedHead(l *ledger.Ledger, id string) (head string, ok bool) {
-	open, sentBack := false, false
+func reviewedHead(l *ledger.Ledger, id string, bodyAccepts func() bool) (head string, ok bool) {
+	lastReview := -1
+	for i, r := range l.Rows {
+		if r.ID == id && r.Stage == ledger.StageReview {
+			lastReview = i
+		}
+	}
+	open, sentBack, standing := false, false, false
+	at := -1
 	var audit ledger.Row
+	pending, pendingOK := "", false
 	closeWindow := func() {
 		if open && !sentBack && audit.Head != "" && audit.Independent &&
 			(audit.Level == ledger.LevelReviewed || audit.Level == ledger.LevelVerified) {
-			head, ok = audit.Head, true
+			accepted := !standing
+			if at == lastReview {
+				accepted = bodyAccepts != nil && bodyAccepts()
+			}
+			if accepted {
+				head, ok = audit.Head, true
+			}
 		}
 		open, sentBack, audit = false, false, ledger.Row{}
 	}
-	for _, r := range l.Rows {
+	for i, r := range l.Rows {
+		if r.ID != id {
+			continue
+		}
+		if r.Changes != "" || r.Refused != "" {
+			standing = true
+		}
 		switch {
-		case r.ID != id:
 		case r.Pass != "":
 			// The pass row is drive's reading of its own window, audit included.
 			open, sentBack, audit = false, false, ledger.Row{}
-			if r.Pass == passPassed {
-				head, ok = r.Head, true
+			pending, pendingOK = "", false
+			switch r.Pass {
+			case passPassed:
+				head, ok, standing = r.Head, true, false
+			case passStanding:
+				pending, pendingOK = r.Head, true
+			}
+		case r.Cleared:
+			standing = false
+			if pendingOK {
+				head, ok = pending, true
+				pending, pendingOK = "", false
 			}
 		case r.Stage != "":
 			closeWindow()
-			open = r.Stage == ledger.StageReview
-		case !open:
+			pending, pendingOK = "", false
+			open, at = r.Stage == ledger.StageReview, i
 		case r.Changes != "" || r.Refused != "":
-			sentBack = true
+			pending, pendingOK = "", false
+			if open {
+				sentBack = true
+			}
 		case r.Level != "":
-			audit = r
+			pending, pendingOK = "", false
+			if open {
+				audit = r
+			}
 		}
 	}
 	closeWindow()
 	return head, ok
 }
 
+// bodyAccepts is open-pr's manual-path reading of the item file: no sent-back
+// block standing, a body digest drover recorded, and the file still matching it.
+func (s *session) bodyAccepts(it backlog.Item) bool {
+	c := s.ledger.Counts(it.ID.Bare())
+	return !s.blockStands(it) && c.LastBody != "" && !s.bodyEdited(it, c.LastBody)
+}
+
 // unreviewedCommits is each commit on head after from, as "<short hash>
 // <subject>", oldest first, leaving out what a review owes nothing for: the
-// trunk brought in by a merge, and a commit whose subject opens with review:,
-// which the reviewer wrote. Merge commits themselves carry no change of their
-// own to list.
+// trunk's own commits and the merge that brought them in, and a commit whose
+// subject opens with review:, which the reviewer wrote. Any other merge stays
+// listed, since a merge can carry a change of its own (a conflict resolution,
+// or anything committed with --no-commit) and only the trunk's are excused.
 //
-// A merge is the trunk's when a parent past the first is a commit the trunk's
-// first-parent history holds, here or at origin: every tip a branch update
-// merges in is one. Ancestry alone cannot say it once the pull request has
-// merged, since every branch commit is then on the trunk too, and a side branch
-// merged into the item is reachable only through a second parent, so its
-// commits stay listed.
+// A merge is the trunk's when every parent past the first is a commit the
+// trunk's first-parent history holds, here or at origin: every tip a branch
+// update merges in is one. Ancestry alone cannot say it once the pull request
+// has merged, since every branch commit is then on the trunk too, and a side
+// branch merged into the item is reachable only through a second parent, so
+// its commits stay listed.
 //
 // A commit missing from this clone, a squash-merged branch's head being the
 // usual one, is fetched from origin by hash first.
@@ -793,11 +844,14 @@ func unreviewedCommits(root, trunk, from, head string) ([]string, error) {
 			_ = gitcmd.Command(root, "fetch", "--quiet", "origin", c).Run()
 		}
 	}
-	exclude, err := trunkMergedIn(root, trunk, from, head)
+	onTrunk, err := trunkMergedIn(root, trunk, from, head)
 	if err != nil {
 		return nil, err
 	}
-	args := append([]string{"log", "--no-merges", "--reverse", "--format=%h %s", from + ".." + head}, exclude...)
+	args := []string{"log", "--reverse", "--format=%h%x00%P%x00%s", from + ".." + head}
+	for p := range onTrunk {
+		args = append(args, "^"+p)
+	}
 	args = append(args, "--")
 	out, err := gitcmd.Command(root, args...).Output()
 	if err != nil {
@@ -805,21 +859,31 @@ func unreviewedCommits(root, trunk, from, head string) ([]string, error) {
 	}
 	var commits []string
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
+		f := strings.SplitN(line, "\x00", 3)
+		if len(f) != 3 || strings.HasPrefix(f[2], "review:") {
 			continue
 		}
-		if _, subject, _ := strings.Cut(line, " "); strings.HasPrefix(subject, "review:") {
+		if parents := strings.Fields(f[1]); len(parents) > 1 && allOn(onTrunk, parents[1:]) {
 			continue
 		}
-		commits = append(commits, line)
+		commits = append(commits, f[0]+" "+f[2])
 	}
 	return commits, nil
 }
 
-// trunkMergedIn is "^<parent>" for each merge parent past the first, among the
-// merges in from..head, that lies on the trunk's first-parent history, which is
-// what a log of from..head leaves out to drop the trunk's own commits.
-func trunkMergedIn(root, trunk, from, head string) ([]string, error) {
+func allOn(set map[string]bool, commits []string) bool {
+	for _, c := range commits {
+		if !set[c] {
+			return false
+		}
+	}
+	return true
+}
+
+// trunkMergedIn is each merge parent past the first, among the merges in
+// from..head, that lies on the trunk's first-parent history: the tips branch
+// updates brought in, whose history a log of from..head leaves out.
+func trunkMergedIn(root, trunk, from, head string) (map[string]bool, error) {
 	out, err := gitcmd.Command(root, "rev-list", "--merges", "--parents", from+".."+head).Output()
 	if err != nil {
 		return nil, fmt.Errorf("git rev-list %s..%s: %w", shortSHA(from), shortSHA(head), err)
@@ -846,24 +910,27 @@ func trunkMergedIn(root, trunk, from, head string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("git rev-list --first-parent %s: %w", trunk, err)
 	}
-	onTrunk := map[string]bool{}
+	trunkHistory := map[string]bool{}
 	for c := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
-		onTrunk[c] = true
+		trunkHistory[c] = true
 	}
-	var exclude []string
+	onTrunk := map[string]bool{}
 	for _, p := range parents {
-		if onTrunk[p] {
-			exclude = append(exclude, "^"+p)
+		if trunkHistory[p] {
+			onTrunk[p] = true
 		}
 	}
-	return exclude, nil
+	return onTrunk, nil
 }
 
 // unreviewedSince is unreviewedCommits from the item's latest passing review
 // to head, with that review's head. No passing review, or one that covers no
 // particular head, compares nothing.
 func (s *session) unreviewedSince(id, head string) (reviewed string, commits []string, err error) {
-	reviewed, ok := reviewedHead(s.ledger, id)
+	reviewed, ok := reviewedHead(s.ledger, id, func() bool {
+		it, err := s.item(id)
+		return err == nil && s.bodyAccepts(it)
+	})
 	if !ok || reviewed == "" || head == "" || ledger.SameCommit(reviewed, head) {
 		return reviewed, nil, nil
 	}

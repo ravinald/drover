@@ -164,7 +164,8 @@ wording, so never match on it.
   UNREVIEWED MERGE    a merged item whose completion row lists commits after the
                       head its latest passing review read, a hand fix merged
                       through the forge with no review of it. Merges from the
-                      trunk and review: commits are not listed. drover review
+                      trunk and review: commits are not listed; any other merge
+                      is. drover review
                       <id> on the merged head, then an audit at reviewed or
                       verified naming it with --head, clears it. Items finished
                       before finish recorded heads are silent
