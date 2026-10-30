@@ -248,6 +248,7 @@ var topRequirement = regexp.MustCompile(`^(\d+)\. `)
 func requirementBlocks(lines []string) map[int]string {
 	out := map[int]string{}
 	cur := 0
+	gap := false
 	var f fence
 	for _, l := range lines {
 		if f.skip(l) {
@@ -256,12 +257,24 @@ func requirementBlocks(lines []string) map[int]string {
 		if m := topRequirement.FindStringSubmatch(l); m != nil {
 			cur, _ = strconv.Atoi(m[1])
 			out[cur] = l
+			gap = false
 			continue
 		}
 		if headingDepth(l) > 0 {
 			cur = 0
 			continue
 		}
+		if strings.TrimSpace(l) == "" {
+			gap = true
+			continue
+		}
+		// Past a blank line only an indented line still belongs to the list
+		// item; a paragraph at the margin is prose after the list, which is
+		// where bodies put operator steps and the post-finish Live check line.
+		if gap && !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
+			cur = 0
+		}
+		gap = false
 		if cur > 0 {
 			out[cur] += "\n" + l
 		}
