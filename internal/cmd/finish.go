@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -91,7 +92,7 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
     · 7 follow-ups owned by 11 are now orphaned (worst H): nothing carries them
       until an item declares deps: 11 (drover follow-ups 11)`,
 	Args: optionalID("finish [id]"),
-	RunE: func(_ *cobra.Command, args []string) error {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		runner := finishRunner
 		if finishForce && supervising() {
 			return Refusal{fmt.Errorf(
@@ -139,11 +140,26 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 			return err
 		}
 		if supervising() {
-			if err := s.supervisorMayFinish(id, branch); err != nil {
+			open, err := s.supervisorEligible(id, branch)
+			if err != nil {
 				return err
 			}
 			if err := s.supervisorMayFinishDenied(id); err != nil {
 				return err
+			}
+			// The merge is finish's under a supervisor, so the comparison above
+			// refuses before anything merges, and --match-head-commit binds the
+			// merge to the head it compared. Drive's reconciliation records what
+			// the forge merged and never issues one.
+			if open != "" && !finishInDrive {
+				ctx := cmd.Context()
+				if ctx == nil {
+					ctx = context.Background()
+				}
+				if err := s.mergeBranchAt(ctx, branch, open, false); err != nil {
+					return fmt.Errorf("merge the pull request for %s at %s: %w", branch, shortSHA(open), err)
+				}
+				fmt.Printf("  ✓ merged the pull request for %s at %s\n", branch, shortSHA(open))
 			}
 		}
 		trunk := s.trunk()
@@ -216,6 +232,13 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 		}
 		if !wrote {
 			fmt.Printf("  · ledger: already done, left alone\n")
+			evidence := ledger.Row{ID: id, MergedHead: merged, ReviewedHead: reviewed, Unreviewed: unreviewed, Date: ledger.Today()}
+			switch added, err := s.recordMergeEvidence(evidence); {
+			case err != nil:
+				return err
+			case added:
+				fmt.Printf("  ✓ ledger: merged at %s, compared with the last passing review\n", shortSHA(merged))
+			}
 		}
 
 		// Dispositions first: closing an issue changes what the register holds,
@@ -702,44 +725,81 @@ func (s *session) recordHead(id, branch string) error {
 	}
 }
 
-// reviewedHead is the head the item's latest passing review read: a passed
-// pass row, or an audit at reviewed or verified naming a head. ok is false when
-// neither exists. A passed pass row without a head was written before pass rows
-// carried one and covers no particular head, so it answers ok with no head, and
-// a caller compares nothing.
+// reviewedHead is the head the item's latest passing review read, and ok false
+// when no review has passed. A review passes one of two ways: a pass row drive
+// wrote reading passed, or, in the manual lifecycle, a review window (a review
+// stage row and what follows it up to the next stage or pass row) holding no
+// request for changes and closing on an independent audit at reviewed or
+// verified that names a head. A review that sent work back leaves the last
+// passing head where it was, because what it read is what nobody accepted, and
+// an audit level records how hard somebody looked rather than a verdict.
 //
-// A headless audit is skipped rather than read as covering no head, because a
-// review session writes one before drive writes the pass row that names the
-// head it read, and a hand audit typed on the trunk names nothing either.
+// A passed pass row without a head was written before pass rows carried one and
+// covers no particular head, so it answers ok with no head and a caller compares
+// nothing. A passing manual window whose audit names no head is skipped instead:
+// it says nothing about what the review read, and comparing from the earlier
+// head over-reports where answering nothing would go silent.
 func reviewedHead(l *ledger.Ledger, id string) (head string, ok bool) {
+	open, sentBack := false, false
+	var audit ledger.Row
+	closeWindow := func() {
+		if open && !sentBack && audit.Head != "" && audit.Independent &&
+			(audit.Level == ledger.LevelReviewed || audit.Level == ledger.LevelVerified) {
+			head, ok = audit.Head, true
+		}
+		open, sentBack, audit = false, false, ledger.Row{}
+	}
 	for _, r := range l.Rows {
 		switch {
 		case r.ID != id:
-		case r.Pass == passPassed:
-			head, ok = r.Head, true
-		case r.Head != "" && (r.Level == ledger.LevelReviewed || r.Level == ledger.LevelVerified):
-			head, ok = r.Head, true
+		case r.Pass != "":
+			// The pass row is drive's reading of its own window, audit included.
+			open, sentBack, audit = false, false, ledger.Row{}
+			if r.Pass == passPassed {
+				head, ok = r.Head, true
+			}
+		case r.Stage != "":
+			closeWindow()
+			open = r.Stage == ledger.StageReview
+		case !open:
+		case r.Changes != "" || r.Refused != "":
+			sentBack = true
+		case r.Level != "":
+			audit = r
 		}
 	}
+	closeWindow()
 	return head, ok
 }
 
 // unreviewedCommits is each commit on head after from, as "<short hash>
-// <subject>", oldest first, leaving out what a review owes nothing for: a merge
-// commit, which is the trunk brought in, and a commit whose subject opens with
-// review:, which the reviewer wrote. --first-parent keeps the trunk's own
-// commits, reachable only through such a merge, off the list.
+// <subject>", oldest first, leaving out what a review owes nothing for: the
+// trunk brought in by a merge, and a commit whose subject opens with review:,
+// which the reviewer wrote. Merge commits themselves carry no change of their
+// own to list.
+//
+// A merge is the trunk's when a parent past the first is a commit the trunk's
+// first-parent history holds, here or at origin: every tip a branch update
+// merges in is one. Ancestry alone cannot say it once the pull request has
+// merged, since every branch commit is then on the trunk too, and a side branch
+// merged into the item is reachable only through a second parent, so its
+// commits stay listed.
 //
 // A commit missing from this clone, a squash-merged branch's head being the
 // usual one, is fetched from origin by hash first.
-func unreviewedCommits(root, from, head string) ([]string, error) {
+func unreviewedCommits(root, trunk, from, head string) ([]string, error) {
 	for _, c := range []string{from, head} {
 		if gitcmd.Command(root, "cat-file", "-e", c+"^{commit}").Run() != nil {
 			_ = gitcmd.Command(root, "fetch", "--quiet", "origin", c).Run()
 		}
 	}
-	out, err := gitcmd.Command(root, "log", "--first-parent", "--no-merges", "--reverse",
-		"--format=%h %s", from+".."+head).Output()
+	exclude, err := trunkMergedIn(root, trunk, from, head)
+	if err != nil {
+		return nil, err
+	}
+	args := append([]string{"log", "--no-merges", "--reverse", "--format=%h %s", from + ".." + head}, exclude...)
+	args = append(args, "--")
+	out, err := gitcmd.Command(root, args...).Output()
 	if err != nil {
 		return nil, fmt.Errorf("git log %s..%s: %w", shortSHA(from), shortSHA(head), err)
 	}
@@ -756,6 +816,49 @@ func unreviewedCommits(root, from, head string) ([]string, error) {
 	return commits, nil
 }
 
+// trunkMergedIn is "^<parent>" for each merge parent past the first, among the
+// merges in from..head, that lies on the trunk's first-parent history, which is
+// what a log of from..head leaves out to drop the trunk's own commits.
+func trunkMergedIn(root, trunk, from, head string) ([]string, error) {
+	out, err := gitcmd.Command(root, "rev-list", "--merges", "--parents", from+".."+head).Output()
+	if err != nil {
+		return nil, fmt.Errorf("git rev-list %s..%s: %w", shortSHA(from), shortSHA(head), err)
+	}
+	var parents []string
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		if f := strings.Fields(line); len(f) > 2 {
+			parents = append(parents, f[2:]...)
+		}
+	}
+	if len(parents) == 0 {
+		return nil, nil
+	}
+	var refs []string
+	for _, ref := range []string{"refs/heads/" + trunk, "refs/remotes/origin/" + trunk} {
+		if gitcmd.Command(root, "rev-parse", "--verify", "--quiet", ref).Run() == nil {
+			refs = append(refs, ref)
+		}
+	}
+	if len(refs) == 0 {
+		return nil, fmt.Errorf("neither %s nor origin/%s resolves here, so a merge from the trunk cannot be told from any other", trunk, trunk)
+	}
+	out, err = gitcmd.Command(root, append([]string{"rev-list", "--first-parent"}, refs...)...).Output()
+	if err != nil {
+		return nil, fmt.Errorf("git rev-list --first-parent %s: %w", trunk, err)
+	}
+	onTrunk := map[string]bool{}
+	for c := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		onTrunk[c] = true
+	}
+	var exclude []string
+	for _, p := range parents {
+		if onTrunk[p] {
+			exclude = append(exclude, "^"+p)
+		}
+	}
+	return exclude, nil
+}
+
 // unreviewedSince is unreviewedCommits from the item's latest passing review
 // to head, with that review's head. No passing review, or one that covers no
 // particular head, compares nothing.
@@ -764,7 +867,7 @@ func (s *session) unreviewedSince(id, head string) (reviewed string, commits []s
 	if !ok || reviewed == "" || head == "" || ledger.SameCommit(reviewed, head) {
 		return reviewed, nil, nil
 	}
-	commits, err = unreviewedCommits(s.cfg.Root, reviewed, head)
+	commits, err = unreviewedCommits(s.cfg.Root, s.trunk(), reviewed, head)
 	return reviewed, commits, err
 }
 
@@ -782,6 +885,27 @@ func (s *session) mergedHead(branch string) string {
 		}
 	}
 	return ""
+}
+
+// recordMergeEvidence appends the heads finish compared to a completion that
+// carries none, a mark-merged row being the usual one, and reports whether it
+// wrote. A completion that already carries them, or no standing completion, is
+// left alone, so a second finish adds nothing and the completion row keeps the
+// attribution and report path it was written with.
+func (s *session) recordMergeEvidence(row ledger.Row) (bool, error) {
+	if row.MergedHead == "" {
+		return false, nil
+	}
+	row = ledger.Stamp(driveStamp(row))
+	wrote, err := ledger.AppendUnless(s.cfg.Abs(s.cfg.Paths.Ledger), row, func(l *ledger.Ledger) bool {
+		return !l.State(row.ID).Merged || l.MergeEvidence(row.ID)
+	})
+	if err != nil || !wrote {
+		return false, err
+	}
+	s.ledger.Rows = append(s.ledger.Rows, row)
+	appended()
+	return true, nil
 }
 
 // commitList is commits one per line under indent, for a message a person reads.
@@ -1096,20 +1220,51 @@ func (s *session) followUpLabel() gh.Label {
 // variable shadows the package.
 func supervising() bool { return runnerpkg.Supervising() }
 
-// supervisorMayFinish holds a supervisor's finish to the ledger half of
-// merge_drive_pr: the gate already checked the policy, and this checks that the
-// branch is one the policy covers. The forge half, green checks and a mergeable
-// pull request, is the supervisor's to read before it merges; by the time finish
-// runs the merge has happened and only the record of it is left to refuse.
+// supervisorMayFinish holds a supervisor's finish to merge_drive_pr: the gate
+// already checked the policy, and this checks that the branch is one the policy
+// covers. The ledger half is a pull request drive opened and a passing review
+// drive recorded; the head half is that the pull request holds no commit after
+// the head that review read, by unreviewedCommits' exclusions. The forge half,
+// green checks and a mergeable pull request, is the supervisor's to read before
+// it runs finish, and the merge refuses a pull request the forge will not merge.
 func (s *session) supervisorMayFinish(id, branch string) error {
-	why := driveMergeGap(s.ledger, id, branch)
-	if why == "" {
-		return nil
-	}
+	_, err := s.supervisorEligible(id, branch)
+	return err
+}
+
+// supervisorEligible is supervisorMayFinish with the head of the pull request
+// the forge still holds open for branch, which is what finish merges, or empty
+// when none is open: merged already, or a forge drover could not ask.
+func (s *session) supervisorEligible(id, branch string) (open string, err error) {
 	p, _ := s.cfg.Policy("merge_drive_pr")
-	return Refusal{fmt.Errorf(
-		"finish under a supervisor is the merge_drive_pr action, at policy %q in this project, and %s finishes only when %s.\n"+
-			"Report the item's state and let the operator merge and finish it", p, id, why)}
+	if why := driveMergeGap(s.ledger, id, branch); why != "" {
+		return "", Refusal{fmt.Errorf(
+			"finish under a supervisor is the merge_drive_pr action, at policy %q in this project, and %s finishes only when %s.\n"+
+				"Report the item's state and let the operator merge and finish it", p, id, why)}
+	}
+	head := ""
+	if !s.offline {
+		if _, h, ok, err := gh.OpenPRHead(s.labels(), branch); err == nil && ok {
+			head, open = h, h
+		}
+	}
+	if head == "" {
+		head = s.mergedHead(branch)
+	}
+	reviewed, commits, err := s.unreviewedSince(id, head)
+	switch {
+	case err != nil:
+		return "", Refusal{fmt.Errorf(
+			"finish under a supervisor is the merge_drive_pr action, which covers what drive's review read, and drover could not list what %s holds after %s, the head %s's last passing review read: %w.\n"+
+				"Report it and let the operator merge and finish %s", branch, shortSHA(reviewed), id, err, id)}
+	case len(commits) > 0:
+		return "", Refusal{fmt.Errorf(
+			"%s's pull request head %s holds %d %s after %s, the head its last passing review read, and no review read %s:\n%s\n"+
+				"merge_drive_pr covers what drive's review read. Report it: drover review %s reads the head, and the operator merges and finishes it",
+			id, shortSHA(head), len(commits), plural(len(commits), "commit", "commits"), shortSHA(reviewed),
+			plural(len(commits), "it", "them"), commitList(commits, "  "), id)}
+	}
+	return open, nil
 }
 
 // supervisorMayFinishDenied holds a supervisor's finish to merge_protected_paths. A

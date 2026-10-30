@@ -3546,6 +3546,11 @@ func (s *session) mergeBranch(ctx context.Context, branch string, auto bool) err
 	if err != nil {
 		return err
 	}
+	return s.mergeBranchAt(ctx, branch, head, auto)
+}
+
+// mergeBranchAt is mergeBranch bound to a head the caller already read.
+func (s *session) mergeBranchAt(ctx context.Context, branch, head string, auto bool) error {
 	method := s.cfg.Git.MergeMethod
 	if method == "" {
 		method = config.MergeMethods()[0]

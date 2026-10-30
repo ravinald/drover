@@ -41,6 +41,11 @@ type Row struct {
 	// review read, as "<short hash> <subject>". A completion row written before
 	// finish recorded them carries none, which reads as nothing known rather
 	// than nothing unreviewed.
+	//
+	// The three alone, with Merged unset, are a merge evidence row: finish
+	// adding them to a completion mark-merged wrote without them. It is not a
+	// second completion row, which would move the finish time and blank the
+	// report path State folds from the latest one.
 	MergedHead   string   `json:"merged_head,omitempty"`
 	ReviewedHead string   `json:"reviewed_head,omitempty"`
 	Unreviewed   []string `json:"unreviewed,omitempty"`
@@ -1289,19 +1294,24 @@ func (l *Ledger) Heads(branch string) []string {
 }
 
 // UnreviewedMerge is the merged head and the commits on it no review read,
-// from the item's standing completion row, or empty when there are none. An
-// audit at reviewed or verified appended after that row and naming the merged
-// head clears it: somebody read the code that shipped. A claimed level does
-// not, because it is the author's word and not a review.
+// from the item's standing completion row or the merge evidence row after it,
+// or empty when there are none. An audit at reviewed or verified appended after
+// that and naming the merged head clears it: somebody read the code that
+// shipped. A claimed level does not, because it is the author's word and not a
+// review.
 func (l *Ledger) UnreviewedMerge(id string) (head string, commits []string) {
+	merged := false
 	for _, r := range l.Rows {
 		switch {
 		case r.ID != id:
 		case r.Merged != nil:
+			merged = *r.Merged
 			head, commits = r.MergedHead, r.Unreviewed
-			if !*r.Merged {
+			if !merged {
 				head, commits = "", nil
 			}
+		case r.MergedHead != "" && merged:
+			head, commits = r.MergedHead, r.Unreviewed
 		case (r.Level == LevelReviewed || r.Level == LevelVerified) && SameCommit(r.Head, head):
 			commits = nil
 		}
@@ -1310,6 +1320,24 @@ func (l *Ledger) UnreviewedMerge(id string) (head string, commits []string) {
 		return "", nil
 	}
 	return head, commits
+}
+
+// MergeEvidence reports whether the item's standing completion carries the
+// heads finish compares, on the completion row itself or on a merge evidence
+// row after it. A completion mark-merged wrote carries none until a finish adds
+// them, which is the one case this answers false for a merged item.
+func (l *Ledger) MergeEvidence(id string) bool {
+	found := false
+	for _, r := range l.Rows {
+		switch {
+		case r.ID != id:
+		case r.Merged != nil:
+			found = *r.Merged && r.MergedHead != ""
+		case r.MergedHead != "":
+			found = true
+		}
+	}
+	return found
 }
 
 // SameCommit reports whether a and b name one commit, either abbreviated. Seven

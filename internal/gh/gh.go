@@ -745,26 +745,35 @@ func RequiredChecks(labels Labels, trunk string) (bool, error) {
 // same one on purpose: two pull requests split the review history of one
 // contract across two places.
 func OpenPR(labels Labels, branch string) (int, bool, error) {
+	n, _, ok, err := OpenPRHead(labels, branch)
+	return n, ok, err
+}
+
+// OpenPRHead is OpenPR with the commit the pull request's head points at on the
+// forge, which is what a merge of it carries whatever this clone holds. Empty
+// when the forge did not say.
+func OpenPRHead(labels Labels, branch string) (number int, head string, ok bool, err error) {
 	if !Available() {
-		return 0, false, fmt.Errorf("gh unavailable")
+		return 0, "", false, fmt.Errorf("gh unavailable")
 	}
 	out, err := run(labels.Dir, labels.scope([]string{
 		"pr", "list", "--head", branch, "--state", "open",
-		"--limit", "1", "--json", "number",
+		"--limit", "1", "--json", "number,headRefOid",
 	}))
 	if err != nil {
-		return 0, false, err
+		return 0, "", false, err
 	}
 	var prs []struct {
-		Number int `json:"number"`
+		Number     int    `json:"number"`
+		HeadRefOid string `json:"headRefOid"`
 	}
 	if err := json.Unmarshal(out, &prs); err != nil {
-		return 0, false, err
+		return 0, "", false, err
 	}
 	if len(prs) == 0 || prs[0].Number == 0 {
-		return 0, false, nil
+		return 0, "", false, nil
 	}
-	return prs[0].Number, true, nil
+	return prs[0].Number, prs[0].HeadRefOid, true, nil
 }
 
 // CreatePR opens a pull request from head into base, or reports the one already

@@ -299,3 +299,184 @@ func TestASupervisorFinishRefusesAnUnreviewedMerge(t *testing.T) {
 		t.Error("a refusal wrote the completion row")
 	}
 }
+
+func TestB113ReviewSideBranchMerge(t *testing.T) {
+	var side string
+	dir, _, _ := reviewedThenMoved(t, fileProject, func(dir, branch string) {
+		git(t, dir, "switch", "-q", "-c", "side-fix")
+		git(t, dir, "commit", "-q", "--allow-empty", "-m", "unreviewed side fix")
+		side = git(t, dir, "rev-parse", "--short", "HEAD")
+		git(t, dir, "switch", "-q", branch)
+		git(t, dir, "merge", "-q", "--no-ff", "-m", "merge side fix", "side-fix")
+	})
+	out := finishB1(t, dir)
+	if !strings.Contains(out, side+" unreviewed side fix") || len(unreviewedFindings(t, dir)) != 1 {
+		t.Fatalf("non-trunk merge disappeared: findings=%v output=%s", unreviewedFindings(t, dir), out)
+	}
+}
+
+func TestB113ReviewRejectedAuditIsNotPass(t *testing.T) {
+	dir, reviewed, merged := reviewedThenMoved(t, fileProject, handFix(t))
+	path := filepath.Join(dir, "ledger.jsonl")
+	for _, row := range []ledger.Row{
+		{ID: "B1", Stage: ledger.StageReview, Date: ledger.Today()},
+		{ID: "B1", Changes: "still broken", Date: ledger.Today()},
+		{ID: "B1", Level: ledger.LevelVerified, Head: merged, Independent: true, Date: ledger.Today()},
+		{ID: "B1", Pass: passChangesRequested, Head: merged, Date: ledger.Today()},
+	} {
+		if err := ledger.Append(path, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finishB1(t, dir)
+	row := completionRow(t, dir)
+	if row.ReviewedHead != reviewed || len(row.Unreviewed) != 1 {
+		t.Fatalf("rejected review became passing baseline: reviewed=%s want=%s unreviewed=%v", row.ReviewedHead, reviewed, row.Unreviewed)
+	}
+}
+
+func TestB113ReviewFinishAfterMarkMerged(t *testing.T) {
+	dir, reviewed, merged := reviewedThenMoved(t, fileProject, handFix(t))
+	if err := ledger.Append(filepath.Join(dir, "ledger.jsonl"), ledger.Row{ID: "B1", Merged: new(true), Date: ledger.Today()}); err != nil {
+		t.Fatal(err)
+	}
+	finishB1(t, dir)
+	l := openIn(t, dir).ledger
+	var found bool
+	for _, row := range l.Rows {
+		if row.ID == "B1" && row.MergedHead == merged && row.ReviewedHead == reviewed {
+			found = true
+		}
+	}
+	if !found || len(unreviewedFindings(t, dir)) != 1 {
+		t.Fatalf("finish left prior completion without evidence: heads recorded=%v findings=%v", found, unreviewedFindings(t, dir))
+	}
+}
+
+func TestB113ReviewSupervisorPreflight(t *testing.T) {
+	dir, reviewed, _ := reviewedThenMoved(t, noProject+permissiveTable, handFix(t))
+	s := openIn(t, dir)
+	it, err := s.item("B1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch, err := s.branchFor(it)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Restore the pre-merge trunk; the branch still holds the hand fix.
+	git(t, dir, "reset", "--hard", "HEAD^")
+	for _, row := range []ledger.Row{
+		{ID: "B1", Branch: branch, PR: 7, Drive: "D1", Date: ledger.Today()},
+		{ID: "B1", Pass: passPassed, Head: reviewed, Drive: "D1", Date: ledger.Today()},
+	} {
+		if err := ledger.Append(filepath.Join(dir, "ledger.jsonl"), row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s = openIn(t, dir)
+	err = s.supervisorMayFinish("B1", branch)
+	if err == nil || !strings.Contains(err.Error(), "fix the retry bound by hand") || !strings.Contains(err.Error(), "drover review B1") {
+		t.Fatalf("supervisor eligibility before merge = %v; want refusal naming hand fix and drover review B1", err)
+	}
+}
+
+// supervisorBeforeMerge is B1 reviewed at its first commit, after moved the
+// branch, and the trunk put back to before the pull request merged, with the
+// ledger rows drive writes for a pull request it opened and a pass it read.
+// gh answers for pull request 7 from the branch head, merges it with git when
+// asked, and logs every call to the file it returns.
+func supervisorBeforeMerge(t *testing.T, after func(dir, branch string)) (dir, reviewed, log string) {
+	t.Helper()
+	dir, reviewed, head := reviewedThenMoved(t, noProject+permissiveTable, after)
+	git(t, dir, "reset", "-q", "--hard", "HEAD^")
+	branch := ""
+	for _, r := range openIn(t, dir).ledger.Rows {
+		if r.Branch != "" {
+			branch = r.Branch
+		}
+	}
+	for _, r := range []ledger.Row{
+		{ID: "B1", Branch: branch, PR: 7, Drive: "D1", Date: ledger.Today()},
+		{ID: "B1", Pass: passPassed, Head: reviewed, Drive: "D1", Date: ledger.Today()},
+	} {
+		if err := ledger.Append(filepath.Join(dir, "ledger.jsonl"), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bin := stubPATH(t)
+	log = filepath.Join(t.TempDir(), "gh.log")
+	t.Setenv("DROVER_TEST_GH_LOG", log)
+	t.Setenv("DROVER_TEST_GH_HEAD", head)
+	t.Setenv("DROVER_TEST_GH_MERGED", filepath.Join(t.TempDir(), "merged"))
+	stub(t, filepath.Join(bin, "gh"), `#!/bin/sh
+echo "$*" >> "$DROVER_TEST_GH_LOG"
+case "$1 $2" in
+'auth status') exit 0 ;;
+'pr list')
+	case "$*" in
+	*open*) [ -f "$DROVER_TEST_GH_MERGED" ] && printf '[]' || printf '[{"number":7,"headRefOid":"%s"}]' "$DROVER_TEST_GH_HEAD" ;;
+	*) [ -f "$DROVER_TEST_GH_MERGED" ] && printf '[{"number":7,"mergedAt":"2026-10-30T00:00:00Z","headRefOid":"%s"}]' "$DROVER_TEST_GH_HEAD" || printf '[]' ;;
+	esac ;;
+'pr merge') for a; do last=$a; done; git merge -q --no-ff -m "merge $last" "$last" && : > "$DROVER_TEST_GH_MERGED" ;;
+*) echo "stub gh: unexpected $*" >&2; exit 1 ;;
+esac
+`)
+	t.Chdir(dir)
+	t.Setenv(runner.EnvActor, runner.ActorSupervisor)
+	return dir, reviewed, log
+}
+
+func ghMerges(t *testing.T, log string) []string {
+	t.Helper()
+	data, err := os.ReadFile(log)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	var merges []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if strings.HasPrefix(line, "pr merge") {
+			merges = append(merges, line)
+		}
+	}
+	return merges
+}
+
+// A supervisor's finish is what merges under merge_drive_pr, so a pull request
+// holding a hand fix past the reviewed head is refused before gh is asked to
+// merge it, and one holding only what the review read is merged bound to that
+// head and recorded.
+func TestASupervisorFinishRefusesAnUnreviewedHeadBeforeMerging(t *testing.T) {
+	dir, _, log := supervisorBeforeMerge(t, handFix(t))
+	err := refuse(t, "finish", "B1")
+	if Code(err) != ExitRefused {
+		t.Fatalf("finish exited %d (%v), want %d", Code(err), err, ExitRefused)
+	}
+	for _, want := range []string{"fix the retry bound by hand", "drover review B1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %q: %v", want, err)
+		}
+	}
+	if m := ghMerges(t, log); len(m) != 0 {
+		t.Errorf("a refused head was merged: %q", m)
+	}
+	if openIn(t, dir).ledger.State("B1").Merged {
+		t.Error("a refusal wrote the completion row")
+	}
+}
+
+func TestASupervisorFinishMergesAReviewedHeadBoundToIt(t *testing.T) {
+	dir, reviewed, log := supervisorBeforeMerge(t, func(string, string) {})
+	var err error
+	out := capture(t, func() { err = execute(t, "finish", "B1") })
+	if err != nil {
+		t.Fatalf("finish: %v\n%s", err, out)
+	}
+	m := ghMerges(t, log)
+	if len(m) != 1 || !strings.Contains(m[0], "--match-head-commit "+reviewed) {
+		t.Errorf("gh merges %q, want one bound to %s", m, reviewed)
+	}
+	if !openIn(t, dir).ledger.State("B1").Merged {
+		t.Errorf("finish recorded no completion:\n%s", out)
+	}
+}
