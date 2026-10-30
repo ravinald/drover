@@ -134,7 +134,8 @@ For a person:
 - [Getting started](docs/getting-started.md): install to a first run, in a repository of your own. **Start here.**
 - [Example project](examples/): `herdsay`, a runnable demo with one merged item and three for an agent to build.
 - [Lifecycle](docs/lifecycle.md): one item start to finish, and what each step refuses to do for you.
-- [Playbook](docs/playbook.md): sizing an item so a run can finish it, choosing interactive or `--headless`, and what a review is worth when one runner did both stages. The three judgement calls drover leaves to you.
+- [Design](docs/design.md): from an idea to a design, from the design to the first items, and back to the design as they ship.
+- [Playbook](docs/playbook.md): sizing an item so a run can finish it, choosing interactive or `--headless`, and what a review is worth when one runner did both stages. The four judgment calls drover leaves to you.
 - [Operating modes](docs/operating.md): the five ways to run the lifecycle, from an interactive run to a detached drive, who handles each event a drive meets, and the setup to settle into.
 - [Cost](docs/cost.md): where tokens go, what drover bounds, and the patterns outside it that multiply spend: long-lived sessions, polling from a session, parallel drives.
 - [Concepts](docs/concepts.md): the data model, item ids, the audit levels, how a follow-up finds its owner, and why each store is where it is.

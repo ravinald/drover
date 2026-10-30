@@ -29,7 +29,7 @@ Count the cost before you queue a batch. Six items are at least twelve sessions 
 
 The ids go on one line separated by spaces, `deps: F1 F2`. A YAML list or a comma-separated value is malformed, and `drover check` reports it. Take each id from what `drover new`, `split` or `intake` printed rather than guessing the next one. A dependent runs only once everything it names has merged, and its prompt carries each dependency plus one hop of the follow-ups they own, so a dependency nobody needed costs context as well as waiting.
 
-Never write downstream work against an interface nobody has settled. Finish the prerequisite, or agree its contract, and then write the dependent against that evidence. Queue a prerequisite ahead of its dependent in the same drive and the dependent runs after it merges.
+Never write downstream work against an interface nobody has settled. Finish the prerequisite, or agree its contract, and then write the dependent against that evidence. That is also why a chain is written a few items at a time rather than all at once: the first items to ship change the design the later ones would have been written against. [Design](design.md) covers getting from an idea to the first items. Queue a prerequisite ahead of its dependent in the same drive and the dependent runs after it merges.
 
 ### Evidence
 
