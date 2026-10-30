@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -365,11 +366,18 @@ history of one contract across two places.`,
 // reading of that later review. Any other stale pass still refuses: nothing has
 // reviewed the branch since, so there is no later review to read.
 func (s *session) reviewPassed(it backlog.Item) error {
-	id := it.ID.Bare()
 	if openPRForce {
 		fmt.Fprintln(errOut, "--force: opening on your judgement, with neither the review_result row nor the merge gate consulted")
 		return nil
 	}
+	return s.reviewPassedTo(errOut, it)
+}
+
+// reviewPassedTo is reviewPassed with no --force, printing whatever the
+// reading has to say to w. drive asks it of a parked item with w discarding,
+// because there it decides where the item resumes rather than refusing.
+func (s *session) reviewPassedTo(w io.Writer, it backlog.Item) error {
+	id := it.ID.Bare()
 	// lead names the authority in the fallback's own sentences. aside is empty
 	// unless a drive did speak, and then it opens everything the fallback prints,
 	// so no answer reached past a pass row reads as one drive computed.
@@ -382,7 +390,7 @@ func (s *session) reviewPassed(it backlog.Item) error {
 	// as anything short of passed refuses the branch close-changes just told
 	// the operator open-pr would open.
 	if ok && !stale && token == passStanding && s.ledger.ClearedSincePass(id) {
-		fmt.Fprintf(errOut, "%s: the drive pass read %q on %s, and drover close-changes has discharged the block since; reading it as %q\n",
+		fmt.Fprintf(w, "%s: the drive pass read %q on %s, and drover close-changes has discharged the block since; reading it as %q\n",
 			id, token, date, passPassed)
 		token = passPassed
 	}
@@ -399,7 +407,7 @@ func (s *session) reviewPassed(it backlog.Item) error {
 	case ok:
 		defer func() {
 			if !stale && token == passPassed {
-				fmt.Fprintf(errOut, "%s: a recorded drive pass answered: %s on %s\n", id, token, date)
+				fmt.Fprintf(w, "%s: a recorded drive pass answered: %s on %s\n", id, token, date)
 			}
 		}()
 		switch {
@@ -495,7 +503,7 @@ func (s *session) reviewPassed(it backlog.Item) error {
 				"Send them back with `drover request-changes %s -f <file>`, or --force if the change was not a finding",
 			lead, c.LastBody, passEdited, id)
 	}
-	fmt.Fprintf(errOut,
+	fmt.Fprintf(w,
 		"%s%s; the ledger answered: audit %s --code-by %s, %d changes requested.\n"+
 			"That reading cannot see a review session that died, only what it wrote down.\n",
 		aside, lead, st.Level, st.CodeBy, c.ChangesRequested)
