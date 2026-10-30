@@ -151,6 +151,9 @@ wording, so never match on it.
                       braces, {provider-dir}, is never one
   HOLD MARKER         an accepted, unmerged item whose body carries a line matching
                       [intake] hold_markers outside a fenced block
+  LIVE REQUIREMENT    an accepted, unmerged item whose numbered requirement names a
+                      live host, ssh, a deploy or a dev run without opening with
+                      [operator], which no headless session can meet
   BROAD CITATION      a scaffold whose body cites a directory at the top of the
                       repository, so under drive --jobs it waits for any item
                       citing a path below it. A paragraph opened with

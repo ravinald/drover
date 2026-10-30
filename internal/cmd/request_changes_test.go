@@ -602,7 +602,7 @@ func TestEveryBodyWriterRecordsWhatItWrote(t *testing.T) {
 	first := filepath.Join(dir, "work", "01-first.md")
 	scaffold := filepath.Join(dir, "work", "B01-empty-feed.md")
 	notes := filepath.Join(dir, "notes.md")
-	write(t, notes, "- The mode dropped to 0644.\n")
+	write(t, notes, "- R1: The mode dropped to 0644.\n")
 
 	for _, c := range []struct {
 		args     []string
