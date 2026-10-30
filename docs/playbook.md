@@ -1,6 +1,6 @@
 # Playbook
 
-[Lifecycle](lifecycle.md) is the order the commands go in. This is the four judgement calls drover leaves to you inside that order, each of which is wrong in a way that costs a run:
+[Lifecycle](lifecycle.md) is the order the commands go in. This is the four judgment calls drover leaves to you inside that order, each of which is wrong in a way that costs a run:
 
 1. How much work one item carries.
 2. Whether the run is interactive or `--headless`.
@@ -11,102 +11,139 @@ drover enforces the sequence and refuses the steps that would let one actor both
 
 ## 1. Size the item
 
-**One item is one session's worth of work.** That bound is not a style preference. An agent handed eight requirements across four subsystems runs out of context somewhere around the fourth, completes the first three, and self-reports success, because a self-report is what the session believes rather than what the tree holds. The review then has to disprove an assertion instead of confirming one.
+One item is one implementing session's worth of work, with an outcome an independent reviewer can prove. The body reaches that session verbatim, its top-level numbered lines become the review contract, its `deps:` line decides when it may run, and its file citations decide what it may run beside. So writing an item is also choosing how drover spends sessions and schedules them. A short body helps only while it still carries what the session needs to finish; every fact it leaves out is a search the session pays for, or a round the review sends back.
 
-### The tests for too big
+### One outcome
 
-Any of these is a split:
+Aim for one coherent change and three to five falsifiable requirements. Five is a writing limit rather than a parser limit: it is about where a reviewer stops holding the whole contract in their head while reading the diff. Count decisions and the ways to verify them, not lines. One requirement carrying six unrelated changes is six requirements.
 
-- **More than five numbered requirements.** Five is not magic; the number is wherever you stop being able to hold the whole contract in your head while reading the diff. Five is where that usually falls.
-- **You cannot name the files.** A requirement that cites `internal/cmd/resolve.go:88` is one a reviewer can check. One saying "improve the merge handling" produces a run that improves something.
-- **Two requirements could merge on separate days.** Then they are two items, and one declares `deps:` on the other.
-- **The body needs a paragraph of background before the list makes sense.** Context is fine. Two pages of it means the thing being described is a project, not an item.
+Split when the parts have different acceptance criteria, need different expertise, or could merge on separate days. Keep a fix together with the regression test that proves it, and a stored-format change together with its migration and a test against representative old data.
 
-### Splitting into a chain
+A mechanical sweep can touch a hundred files and still be one item. A rename, a file move or a dependency bump is one scripted transformation, the build fixes it causes, and one review. Split it across several items and each one repeats the discovery and the review, and no decision gets easier. Keep new behavior out of the sweep, so the review checks that nothing was missed rather than arguing design.
 
-`deps:` is the whole mechanism. An item names the ids (see [Item ids](concepts.md#item-ids)) that must merge before it runs, `drover status` marks it `[ ]` blocked until they do, and the prompt carries each dependency plus one hop of the follow-ups they own.
+Count the cost before you queue a batch. Six items are at least twelve sessions before a single correction round.
 
-Boiling the ocean:
+### Chains
+
+`deps:` is for real prerequisites. A login handler that needs the session store depends on the store item; two changes that could each ship alone need no dependency because you happened to write them in that order.
+
+The ids go on one line separated by spaces, `deps: F1 F2`. A YAML list or a comma-separated value is malformed, and `drover check` reports it. Take each id from what `drover new`, `split` or `intake` printed rather than guessing the next one. A dependent runs only once everything it names has merged, and its prompt carries each dependency plus one hop of the follow-ups they own, so a dependency nobody needed costs context as well as waiting.
+
+Never write downstream work against an interface nobody has settled. Finish the prerequisite, or agree its contract, and then write the dependent against that evidence. Queue a prerequisite ahead of its dependent in the same drive and the dependent runs after it merges.
+
+### Evidence
+
+Read the code and its tests before writing. Give the session enough to skip a search or a decision, and no more:
+
+- **Problem:** the input or action, what happens, and what should.
+- **Reproduction:** a command or a small fixture, with its actual output for a bug. Label a hypothesis you have not tested as a hypothesis.
+- **Code:** repository-relative paths, the symbols involved, and line citations you checked against the trunk. Spelling and case matter, and so does anything that exists only on a dependency's branch.
+- **Constraints:** compatibility, ownership, failure behavior, and the behavior around the change that has to survive it.
+- **Scope:** what belongs in this change, and what belongs somewhere else.
+
+Leave the investigation history, long logs and abandoned approaches out unless one of them explains a constraint. Point at the spec section or fixture rather than pasting it. `skills` and `spec` frontmatter are only for a project that declares those keys, and only for material this item needs.
+
+Shared rules about commits, review and reporting live in the project's templates and agent instructions. Repeat them in every body and each item gets longer, and the rules get one more copy to drift.
+
+### Provable requirements
+
+Write each requirement as a result someone can observe: under this condition, this behavior holds, and this evidence shows it. Name a technique only when it is a real constraint, and otherwise let the session find the smallest change that meets the contract.
+
+| Weak requirement          | Checkable requirement                                                                                                |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Improve retries.          | After two transient failures, the third successful attempt returns its result; a fake transport records three calls. |
+| Handle errors gracefully. | A permission error returns at once with the original cause and makes no second request.                              |
+| Improve performance.      | On the named fixture, one lookup makes at most one backend request; a counting fake asserts the bound.               |
+| Add tests.                | A regression test reproduces the reported input and fails against the old implementation.                            |
+
+Use distinct top-level `1. `, `2. `, `3. ` lines. drover reads them anywhere in the body, not only under a "Requirements" heading, so write background steps as bullets or they become requirements too. Keep the whole claim on the first line: the audit checklist carries that line, and the lines under it stay in the body only.
+
+Mandatory behavior goes in the numbered list. A compatibility promise under "Notes" has no number, so no review traces it and no audit confirms it. When an operator's words prompted the item, the requirement carries their wording and placement, not only the title.
+
+Choose tests for the risk: the reported failure, the boundary next to it, and any state or compatibility property the change could break. "Test every edge case", a coverage target and a test that restates the implementation each cost a session time and prove nothing. Name a focused command the session can iterate with; the project's verify command is still the bar it finishes against, and drover picks one verify command per item rather than composing several.
+
+### Operator work
+
+A headless session has to be able to finish every ordinary requirement with the files, tools and credentials it has. Settle design questions before you accept the item. "Choose a storage model with the team" is a decision nobody has made yet, not a requirement.
+
+A requirement that needs a deploy, a live host, ssh, a dev run or a person's judgment opens with `[operator]`:
+
+```markdown
+4. [operator] On the staging deployment, confirm that an existing session remains valid after the upgrade and record the result.
+```
+
+The run is told not to attempt it, the review cannot send the item back over it, and the merge waits for `drover signoff`. The tag assigns the work to a person; it does not waive it. Left untagged, the same line costs review rounds no session can win, so `accept` refuses a requirement naming live work without the tag, and `drover check` reports one already accepted as `LIVE REQUIREMENT`. Prose after the numbered list, such as a post-merge note or a `Live check:` line, is not a requirement and is not checked. Where you can, prove the code with a local fixture and keep the live check for the operator.
+
+### Narrow citations
+
+Under `drive --jobs`, two items whose cited paths overlap never run at once, and a directory overlaps every file below it. Cite the files the change touches rather than the tree they sit in. Do cite a shared file the change edits: hiding it makes the two items collide at the merge instead of at dispatch.
+
+Mark a paragraph that cites files only as background:
+
+```markdown
+<!-- drover: context -->
+Read `internal/session/store.go` for the existing ownership convention. This item does not change that store.
+
+Changes belong in `internal/auth/login.go` and its tests.
+```
+
+The marker covers the paragraph it opens, up to the next blank line, and the paths in it do not hold the item apart from anything. A numbered requirement line inside that paragraph still counts. The marker only changes scheduling; the session still reads the file and the review still checks the citation.
+
+### A body that runs well
+
+The following example is a fictional resolver bug. Swap in your own paths, symbols, reproduction and commands, and leave the project's stop marker where it is until the operator accepts the item.
 
 ```markdown
 ---
-title: add authentication
-deps:
----
-
-Requirements:
-
-1. Add session storage.
-2. Add a login handler.
-3. Add middleware that rejects unauthenticated requests.
-4. Add password reset.
-5. Add rate limiting on the login path.
-6. Migrate the existing user table.
-```
-
-Taking a bite, three times:
-
-```bash
-drover new feature "sessions are stored server-side and expire"     # F1
-drover new feature "the login handler issues a session"             # F2, deps: F1
-drover new feature "middleware rejects an unauthenticated request"  # F3, deps: F2
-```
-
-Password reset, rate limiting and the migration are three more items, written when the first three have shipped and you know what the session record looks like. Writing them now means writing them against a design that does not exist yet, which is the other way a backlog fills with prose nobody can act on.
-
-The chain has one cost: three runs re-read the same code three times, so a split pays in context and charges in tokens. That trade is almost always right, because a run that half-finishes charges for the tokens and delivers nothing you can merge.
-
-### What a body that runs well looks like
-
-```markdown
----
-title: the resolver drops a trailing dot
+title: share cache entries for names with a trailing dot
 deps:
 kind: bug
-severity: M
 ---
 
-Act as a Senior Engineer.
+STOP: requirements not yet written
 
-`Resolve` strips a trailing dot from a fully qualified name before comparing, so `example.com.` and `example.com` hash to different cache keys and every lookup misses. The cache is otherwise correct; the normalization is the bug.
+Resolve builds its cache key from the raw name, so resolving `example.com` and `example.com.` makes two backend requests where one entry should serve both. Cache expiry and eviction already work and are outside this fix.
 
-Requirements:
+Evidence: `internal/resolver/resolver.go` builds the key in `Resolve` before normalizing the name. The counting backend fixture in `internal/resolver/resolver_test.go` reproduces the duplicate request.
 
-1. `resolver.go:88` normalizes the trailing dot before the cache key is built.
-2. A test drives both forms through `Resolve` and asserts one cache entry.
-3. `go test ./internal/resolver` passes.
+1. In `internal/resolver/resolver.go`, `Resolve` treats a name with one terminal dot and the same name without it as the same cache key, in either lookup order.
+2. An empty name returns the existing validation error without calling the backend.
+3. Tests in `internal/resolver/resolver_test.go` assert one backend call for each lookup order and none for the empty name; `go test ./internal/resolver` passes.
 
-Out of scope: the cache eviction policy, and the `Resolve` signature.
+Out of scope: cache expiry, eviction, and the `Resolve` signature.
 ```
 
-Four things in that body are doing work.
+The outcome is small, the evidence says where to start, and the reviewer can trace every claim. The scope line stops an unrelated redesign. It does not excuse a regression the branch introduces or a defect that blocks a requirement: both go back to the branch.
 
-**The role line sets the stance** the session takes. It is the one place the item can ask for a different bar than the project's `[agents] principles` default.
+### Accepting it
 
-**The paragraph is what a cold reader needs**, and the reader is cold: the session has never seen this repository. What is broken, what is not, and what you already ruled out.
-
-**Each numbered requirement is falsifiable.** Read one and ask what would prove it. If the answer is a file, a line or a command, it is a requirement. If the answer is "read it and judge", it is a wish, and `drover report --save` will render it as a checkbox nobody can tick. `drover check` reports `NO REQUIREMENTS` on an accepted item carrying no numbered list at all, which catches the body written entirely as prose but not the single requirement written that way.
-
-**"Out of scope" is what sorts the review's findings.** A defect the reviewer finds outside the diff and outside the contract is filed against the item that owns it rather than absorbed here, and the out-of-scope line is how the reviewer tells the difference between a gap this run left and a gap it was told to walk past. The destination table is in [Lifecycle](lifecycle.md#where-a-finding-goes).
-
-### Let an agent draft it, then accept it yourself
-
-Writing a list that cites files and lines means reading the code first, which is work an agent does well:
+Create the scaffold with `drover new` or `drover intake`, let `drover draft` propose the body, then read it before you accept it. The following assumes the scaffold is `B1` and the project declares a `claude` runner:
 
 ```bash
-drover draft B1 --runner claude --headless   # draft the requirements
-drover accept B1                             # you read the list and accept it
+drover draft B1 --runner claude --headless
 ```
 
-`draft` leaves the stop marker in place and no flag on it removes the marker, so an unsupervised agent cannot produce an item that executes. Accepting is a command you type. Read the drafted list against the four points above before you type it: the draft is the cheapest place in the whole loop to fix a badly sized item, and the branch is the most expensive.
+Before accepting, check that:
 
-Then confirm what the run will carry:
+- It has one outcome, with no unrelated cleanup and no open design decision.
+- Every mandatory behavior has its own numbered requirement and a way to prove it.
+- File citations match the trunk, and new files are named as new.
+- Each dependency is needed, and no other item already owns this contract.
+- Every ordinary requirement can finish unattended, and operator work is tagged.
+- The reproduction and the focused verification command are concrete.
+- Migrations and compatibility obligations are in scope where the change needs them.
+- Background citations are marked, so they do not hold independent work apart.
+
+Then accept it and look at what the session will receive:
 
 ```bash
+drover accept B1
 drover run B1 --dry-run
 ```
 
-That prints the rendered prompt, the resolved argv, the selected verify command and the follow-ups the item inherits, and touches nothing. A dry run that exits 0 means the launch can start.
+`accept` removes the stop marker. The dry run prints the body, the dependency context, the runner and the verify command the session will get. A clean preview means the launch will start; it says nothing about whether the requirements are right.
+
+After acceptance, `drover check` reports structural findings that scaffolds are exempt from. A contract that has to change goes through `drover amend`, which keeps the old list and the reason. A run that misses the contract gets `drover request-changes` with the requirement number, the reproduction and the expected behavior. A property every later pass must keep goes in with `drover invariant`. A sent-back section a later pass settled is cleared with `drover close-changes`, so the next session does not redo finished work.
 
 ## 2. Interactive or headless
 
@@ -177,11 +214,12 @@ Headless, it ends by saying what the pass amounted to, in the tokens a `drive` p
 
 ### What drover enforces
 
-Four things, and they are the floor rather than the answer:
+Five things, and they are the floor rather than the answer:
 
 - **`review` never reads the item's `runner` frontmatter.** That key names who implements. Reviewing under it would let the agent that wrote the code audit it, which is the case the rest of this list exists for.
 - **`audit` cannot record `verified` from whoever wrote the code.** When the session or `--reviewer` recording it matches a `--code-by` entry, it refuses at the write path, names the entry and exits 3. Whoever wrote the code cannot certify every requirement against it.
 - **An independent audit warns** when the ledger records one runner for both stages, names both, records the row and exits 0. drover cannot tell two sessions of one runner from one session auditing itself. Only you can, so it says what it sees and lets you record what you know.
+- **`drover request-changes` refuses a finding outside the contract.** A review's send-back has to name, for each finding, the numbered requirement it fails or a `BRANCH-REGRESSION`: a defect the branch's own diff introduced that would break something in use. Anything else is a note for the audit, and a round spent on it is one the loop never gets back.
 - **`drover request-changes` refuses past `[review] max_review_rounds`**, once you set one. Off by default, because how many rounds a loop may spend is a question about your budget rather than about correctness.
 
 ### How many rounds
@@ -271,14 +309,16 @@ drover drive --for 8h --no-merge   # the same night, with every merge held
 drover drive B1 B4                 # these two, in this order
 ```
 
-**Running `drive` is you saying the code may merge.** An item that comes through green and reviewed goes to the forge, and nobody reads it first. That is the decision, and it is not softened by the fact that you will read the pull requests in the morning: by then they are commits on your trunk, and the next item in the queue was implemented against them.
+**Running `drive` is you saying the code may merge.** drover merges an item that comes through green and reviewed, and nobody reads it first. That is the decision, and it is not softened by the fact that you will read the pull requests in the morning: by then they are commits on your trunk, and the next item in the queue was implemented against them.
 
 What stands between a session and the trunk is `[drive] merge_gate` and the review. Both have to speak:
 
-- **The merge gate has to exit 0.** Exit 1 sends its own output back to the branch through `request-changes` and the item runs again; anything else stops the whole drive, because a trunk that did not receive this merge is the trunk every later item builds on. A project that declares no merge gate is refused before the first launch rather than per item, since there is nothing there that could say green.
+- **The merge gate has to exit 0.** Exit 1 sends its own output back to the branch through `request-changes` and the item runs again. Exit 4 says the head is only behind the trunk, so drive brings the branch level and asks once more. Anything else stops the whole drive, because a trunk that did not receive this merge is the trunk every later item builds on. A project that declares no merge gate is refused before the first launch rather than per item, since nothing there could say green; `--no-merge` is the exception.
 - **The review has to have recorded a conclusion.** A review that wrote neither an audit nor a `request-changes` parks the item, and so does one that died, one that left a log drover cannot read, one at `[review] max_review_rounds` and one whose last two rounds sent back the same evidence. A parked item is never merged. drover cannot tell a pass that found nothing from a pass that found something and did not write it down, and the guess that merges is the one it will not make.
 - **`[drive] protected_paths` is left for a human.** A branch that edits the merge gate, a workflow or `.drover.toml` changes what every later item that night is measured by, and that change would be reviewed by the loop it just altered.
 - **The pull request is drover's to open, not a session's.** It opens one only where the merge gate and the review have both spoken, so an open pull request in the morning means both did. Work that came back or parked leaves a pushed branch and nothing else, and reading the forge is enough to tell the two apart.
+
+The merge itself is `gh pr merge --match-head-commit` on the commit the merge gate passed, never the forge's `--auto`, so a push that lands after the merge gate read the head is refused rather than merged. drive then asks the forge whether the pull request merged and finishes the item in the same drive, so the items queued behind it run that night rather than the next. Branch protection still applies: the forge refuses a merge its rules do not allow, and the item parks `merge_failed`.
 
 None of that is an opinion about whether your merge gate is any good. drover reads an exit status; whether the command behind it runs the tests that would catch the defect this queue is about to write is yours, and it is the question to answer before the first unattended night rather than after it. The same goes for the reviewer: an independent audit warns when one runner implemented and reviewed, and the warning is all drover can offer, because two sessions of one runner and one session auditing itself look identical from outside.
 
@@ -291,13 +331,15 @@ That separation is what lets a night survive one bad item. Whatever a session le
 Two consequences to set up for before the first night:
 
 - **Sessions find the project through `DROVER_ROOT`.** `drive` sets it to your checkout's root, so an agent's `drover audit` or `drover request-changes` writes the ledger and backlog you read, not a copy inside the worktree. A session standing in a different repository's project, such as a scratch one it initialized to try a command, gets that project instead: a worktree shares your checkout's common git dir and a separate repository does not, which is how drover tells the two apart.
-- **A worktree holds only what git tracks.** Anything a session or your merge gate reads from outside version control has to be linked in with [`[drive] worktree_links`](configuration.md#drive), and dependencies a fresh checkout lacks (`node_modules`, say) come from `[drive] worktree_setup`. A branch you have checked out yourself cannot be checked out a second time, so its item parks as `worktree_failed` and the rest of the queue runs.
+- **A worktree holds only what git tracks.** Anything a session or your merge gate reads from outside version control has to be linked in with [`[drive] worktree_links`](configuration.md#drive). drive links only a path git would ignore, and a `.gitignore` entry with a trailing slash (`docs-internal/`) never matches the symlink, so write it without the slash. Dependencies a fresh checkout lacks (`node_modules`, say) come from `[drive] worktree_setup`. A branch you have checked out yourself cannot be checked out a second time, so its item parks as `worktree_failed` and the rest of the queue runs.
 
 Your checkout matters to a drive in one place: reconciliation, which finishes what merged since the last drive by writing the ledger and saved reports there. A checkout holding uncommitted work skips reconciliation for that night, says so, and the queue runs anyway.
 
 ### When to hold the merge
 
-`--no-merge` drives the whole queue and merges none of it, leaving each item green-and-reviewed on its branch. An item whose merge gate exited 0 has a pull request, because the flag holds the merge and nothing else, so most of what you read in the morning is a queue of branches somebody has already checked. Three cases break the pattern and are worth knowing before you read the list as one: an item whose review sent work back or parked has no pull request, a project declaring no merge gate produces none at all under this flag, and an item parked on `protected_paths` or `blocked_on_deps` has one it is waiting for you to merge. It is the exception rather than the norm, and there are three cases worth it:
+`--no-merge` drives the whole queue and merges none of it, leaving each item green-and-reviewed on its branch. An item whose merge gate exited 0 has a pull request, because the flag holds the merge and nothing else, so most of what you read in the morning is a queue of branches somebody has already checked. Not every item reads that way: one whose review sent work back or parked has no pull request, a project declaring no merge gate gets none at all under this flag, and one parked on `protected_paths` or `blocked_on_deps` has a pull request waiting for you to merge.
+
+Hold the merge as the exception, in one of three cases:
 
 - The merge gate is new, and you want a night of its results before one of them decides a merge.
 - The queue's items touch something a reviewer cannot certify: a migration, a wire format, anything whose blast radius outruns its diff.
