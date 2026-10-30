@@ -198,6 +198,14 @@ change the numbered requirements, refuses evidence whose only findings are
 			}
 		}
 
+		// After the contradictions, which say the more specific thing about
+		// the same evidence.
+		if requestChangesSource == ledger.ChangesReview {
+			if loose := unscopedFindings(it, text); len(loose) > 0 {
+				return Refusal{unscopedRefusal(it.ID.Bare(), loose)}
+			}
+		}
+
 		raw, err := os.ReadFile(it.Path)
 		if err != nil {
 			return err
@@ -486,6 +494,52 @@ func operatorOnlyFindings(it backlog.Item, text string) (ops []backlog.Requireme
 		return nil, nil
 	}
 	return ops, structure
+}
+
+// regressionToken marks a finding as a defect the branch's own diff
+// introduced, which goes back without naming a requirement.
+const regressionToken = "BRANCH-REGRESSION"
+
+// branchToken opens every destination that sends a finding back to the
+// branch. A finding carrying one was routed there on purpose.
+const branchToken = "BRANCH-"
+
+// unscopedFindings is each finding in a review's evidence that names neither a
+// numbered requirement (R<n>) nor a BRANCH- destination, skipping the headings
+// structuralHeadings reads as organization.
+//
+// A round is the most expensive thing a review can spend, and every field
+// project's longest loops were rounds spent on findings no requirement asked
+// for: each pass found something new, because a reviewer with no scope always
+// does. A finding that is neither the contract nor a regression is a note, and
+// a note belongs in the audit, where it costs nothing.
+func unscopedFindings(it backlog.Item, text string) []string {
+	reqs := requirementsByNum(it)
+	findings, headed := findingTexts(text)
+	var loose []string
+	for _, f := range findings {
+		if strings.Contains(f, branchToken) || len(namedRequirements(f, reqs)) > 0 {
+			continue
+		}
+		if headed && structuralHeadings[leadingWord(f)] {
+			continue
+		}
+		loose = append(loose, f)
+	}
+	return loose
+}
+
+// unscopedRefusal says which findings cost no round and where they go instead.
+func unscopedRefusal(id string, loose []string) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "refusing to send %s back: %d finding(s) name no numbered requirement (R<n>) and no %s:\n", id, len(loose), regressionToken)
+	for _, f := range loose {
+		fmt.Fprintf(&b, "  - %s\n", strings.TrimSpace(firstLine(f)))
+	}
+	b.WriteString("A round is spent only on the contract or on a defect the diff introduced that would break something in use. " +
+		"Name the requirement a finding fails, mark a real regression " + regressionToken + " in its heading, " +
+		"or put the finding in the audit note (FIX-IN-REVIEW or REPORT-ONLY) and record the pass with drover audit " + id)
+	return fmt.Errorf("%s", b.String())
 }
 
 // findingTexts is each finding in evidence: a heading outside a code fence, or

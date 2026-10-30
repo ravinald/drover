@@ -781,6 +781,28 @@ func (s *session) checkReport() CheckReport {
 		}
 	}
 
+	// An accepted requirement no headless session can meet, accepted with --yes
+	// or edited in afterwards. A review sends it back every round until the
+	// item parks, so it is reported while the body can still change.
+	for _, it := range s.backlog.Items {
+		if s.isScaffold(it) || s.done(it.ID.Bare()) {
+			continue
+		}
+		lines, err := bodyLines(it.Path)
+		if err != nil {
+			continue
+		}
+		for _, r := range liveRequirements(lines) {
+			add(Finding{
+				Kind:    "LIVE REQUIREMENT",
+				Message: fmt.Sprintf("%s R%d names %q, which a headless session cannot reach", it.ID.Bare(), r.Num, r.what),
+				Detail:  "open it with " + backlog.OperatorTag + " so a person signs it off, or rewrite it so the session can meet it in the repository",
+				Path:    rel(s.cfg.Root, it.Path),
+				ID:      it.ID.Bare(),
+			})
+		}
+	}
+
 	// A scaffold citing a top-level directory. Under drive --jobs it would run
 	// beside nothing citing a path below that directory, which in most trees is
 	// most items. Reported while the body is still a scaffold, because the

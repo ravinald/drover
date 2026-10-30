@@ -132,7 +132,7 @@ func capProject(t *testing.T, limit int) (dir, evidence string) {
 	s := fixture(t, fmt.Sprintf("\n[review]\nmax_review_rounds = %d\n\n[register]\nbackend = \"none\"\n", limit))
 	dir = s.cfg.Root
 	evidence = filepath.Join(dir, "findings.md")
-	write(t, evidence, "The walk over-excludes on a nullable column.\n")
+	write(t, evidence, "BRANCH-REGRESSION: The walk over-excludes on a nullable column.\n")
 	t.Chdir(dir)
 	return dir, evidence
 }
@@ -193,7 +193,7 @@ func TestRequestChangesRowCarriesTheEvidenceDigest(t *testing.T) {
 		t.Error("two identical requests for changes did not read as a repeat")
 	}
 	// A rewrap is the same finding, and a different one is not.
-	write(t, evidence, "The walk over-excludes\non a nullable column.\n")
+	write(t, evidence, "BRANCH-REGRESSION: The walk over-excludes\non a nullable column.\n")
 	requestChangesFile = ""
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
@@ -202,7 +202,7 @@ func TestRequestChangesRowCarriesTheEvidenceDigest(t *testing.T) {
 	if !l.Counts("1").RepeatedChanges {
 		t.Error("a reflowed paragraph read as a new finding")
 	}
-	write(t, evidence, "Something else entirely.\n")
+	write(t, evidence, "BRANCH-REGRESSION: Something else entirely.\n")
 	requestChangesFile = ""
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
@@ -231,7 +231,7 @@ func TestRequestChangesRowRecordsTheRequirementsItsFindingsName(t *testing.T) {
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
 	}
-	write(t, evidence, "The walk over-excludes on a nullable column.\n")
+	write(t, evidence, "BRANCH-REGRESSION: The walk over-excludes on a nullable column.\n")
 	requestChangesFile = ""
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
@@ -320,7 +320,7 @@ func TestRequestChangesRefusesPastTheLimitAndWritesNothing(t *testing.T) {
 		}
 	}
 	before := read(t, body)
-	write(t, evidence, "A third finding nobody will read.\n")
+	write(t, evidence, "BRANCH-REGRESSION: A third finding nobody will read.\n")
 
 	requestChangesFile = ""
 	err := execute(t, "request-changes", "1", "-f", evidence)
@@ -420,7 +420,7 @@ func TestPastCapIsTheOperatorsAndSealedFromASession(t *testing.T) {
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
 	}
-	write(t, evidence, "A second finding.\n")
+	write(t, evidence, "BRANCH-REGRESSION: A second finding.\n")
 
 	t.Setenv(runner.EnvActor, "agent")
 	requestChangesFile, requestChangesOverLimit = "", false
@@ -452,7 +452,7 @@ func TestPastCapRecordsWhenTheOperatorRunsIt(t *testing.T) {
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
 	}
-	write(t, evidence, "A second finding.\n")
+	write(t, evidence, "BRANCH-REGRESSION: A second finding.\n")
 	requestChangesFile, requestChangesOverLimit = "", false
 	out := capture(t, func() {
 		if err := execute(t, "request-changes", "1", "-f", evidence, "--over-limit"); err != nil {
@@ -776,5 +776,54 @@ func TestTheChangesRowNamesItsSource(t *testing.T) {
 		if keys[key] != "string" {
 			t.Errorf("schema --ledger reports %q as %q, want string", key, keys[key])
 		}
+	}
+}
+
+// A review's send-back costs a round only for the contract or a finding routed
+// to the branch. Evidence holding a finding that names neither is refused and
+// writes nothing, and the refusal says where the finding goes instead.
+func TestRequestChangesRefusesFindingsOutsideTheContract(t *testing.T) {
+	cases := []struct {
+		name, evidence string
+		refused        bool
+	}{
+		{"requirement named", "### R4 is unmet\n\nNo link is written.\n", false},
+		{"regression marked", "### BRANCH-REGRESSION: list drops the last row\n\nOff by one.\n", false},
+		{"structural heading beside a finding", "### Settled, do not reopen\n\nNothing.\n\n### R2 is unmet\n\nStill wrong.\n", false},
+		{"unscoped heading", "### R4 is unmet\n\nNo link.\n\n### The helper name reads oddly\n\nRename it.\n", true},
+		{"unscoped prose", "The error message could be friendlier.\n", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Cleanup(func() { requestChangesFile = "" })
+			dir, evidence := capProject(t, 0)
+			write(t, filepath.Join(dir, "work", "01-first.md"), sevenRequirements)
+			write(t, evidence, c.evidence)
+			requestChangesFile = ""
+			var err error
+			capture(t, func() { err = execute(t, "request-changes", "1", "-f", evidence) })
+			l, lerr := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+			if lerr != nil {
+				t.Fatal(lerr)
+			}
+			rows := 0
+			for _, r := range l.Rows {
+				if r.ID == "1" && r.Changes != "" {
+					rows++
+				}
+			}
+			if !c.refused {
+				if err != nil || rows != 1 {
+					t.Fatalf("request-changes = %v with %d changes rows, want it recorded", err, rows)
+				}
+				return
+			}
+			if err == nil || Code(err) != ExitRefused || rows != 0 {
+				t.Fatalf("request-changes = %v with %d changes rows, want a refusal and no row", err, rows)
+			}
+			if !strings.Contains(err.Error(), "drover audit 1") || !strings.Contains(err.Error(), regressionToken) {
+				t.Errorf("the refusal does not say where the finding goes:\n%v", err)
+			}
+		})
 	}
 }

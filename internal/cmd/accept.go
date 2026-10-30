@@ -165,6 +165,16 @@ func (s *session) acceptOne(bare string) error {
 			"or accept anyway: drover accept %s --yes\n"+
 			"A variable part is written in braces, {name}, which is never read as a placeholder", strings.Join(msgs, "\n"), it.ID.Bare())}
 	}
+	if live := liveRequirements(kept); len(live) > 0 && !acceptYes {
+		msgs := make([]string, len(live))
+		for i, r := range live {
+			msgs[i] = fmt.Sprintf("R%d names %q", r.Num, r.what)
+		}
+		return Refusal{fmt.Errorf("%s\nNothing was accepted. A headless session cannot reach a live host, a deploy or a dev run, "+
+			"and a review sends such a requirement back every round until the item parks.\n"+
+			"Open each with %s so a person signs it off, rewrite it so the session can meet it in the repository, "+
+			"or accept anyway: drover accept %s --yes", strings.Join(msgs, "\n"), backlog.OperatorTag, it.ID.Bare())}
+	}
 	if err := s.writeBody(it, "accept", kept); err != nil {
 		return err
 	}
@@ -185,6 +195,35 @@ func (s *session) acceptOne(bare string) error {
 		return err
 	}
 	return s.publish(it)
+}
+
+// liveWork is wording that puts a requirement outside what a headless session
+// in a worktree can do: reach a host, deploy, or run against a live system.
+// Every field project's longest review loops were requirements like these,
+// sent back round after round because no implementing session could meet them.
+var liveWork = regexp.MustCompile(`(?i)\b(ssh|scp|systemctl|tailscale|live (?:host|server|system|run|check)|` +
+	`(?:test |dev |staging )?guests?|staging|production (?:host|server|run)|deploy(?:s|ed|ing)? (?:to|on)|` +
+	`dev (?:run|server|host|box|environment)|real (?:host|device|guest))\b`)
+
+// liveHit is one requirement liveWork matched, and the words it matched.
+type liveHit struct {
+	Num  int
+	what string
+}
+
+// liveRequirements is each numbered requirement of the body that liveWork
+// matches and that does not already open with [operator].
+func liveRequirements(lines []string) []liveHit {
+	var out []liveHit
+	for _, r := range (backlog.Item{Body: strings.Join(lines[bodyStart(lines):], "\n")}).Requirements() {
+		if r.Operator {
+			continue
+		}
+		if m := liveWork.FindString(r.Text); m != "" {
+			out = append(out, liveHit{r.Num, m})
+		}
+	}
+	return out
 }
 
 // prefixedHint adds, to the refusal for a planned id in a project whose items

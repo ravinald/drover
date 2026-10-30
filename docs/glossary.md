@@ -284,6 +284,7 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `NO REQUIREMENTS`     | An accepted item has no numbered requirements.                                        |
 | `PLACEHOLDER`         | An accepted item's body still carries a `<placeholder>`.                              |
 | `HOLD MARKER`         | An accepted item's body still carries an `[intake] hold_markers` line.                |
+| `LIVE REQUIREMENT`    | An accepted requirement names a live host or deploy without `[operator]`.           |
 | `BROAD CITATION`      | A scaffold cites a top-level directory, which serializes it under `--jobs`.           |
 | `HAND EDITED`         | An accepted item's body changed outside drover since its last digest.                 |
 | `UNREADABLE`          | A backlog file did not parse.                                                         |
