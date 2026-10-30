@@ -227,6 +227,12 @@ Definition of done:
 - Every numbered requirement above is discharged{{ if .OperatorRequirements }}, apart from the operator
   requirements{{ end }}, or your report says which is not and why. Do not decide that for yourself quietly: the review audits against
   this list, and a gap you name is a gap it can act on.
+- Each numbered requirement{{ if .OperatorRequirements }}, apart from the operator requirements,{{ end }} has a test that fails without the change and passes
+  with it. Your report carries one line per requirement mapping its number to
+  that test's name (`3: TestRefusesPastCap`); a requirement with no test is
+  reported unmet, whatever the code does. The review reads that map first.
+- A test carried in a sent-back section of this item is committed unchanged and
+  passes. Rewriting it to pass is not fixing what it found.
 - Smallest diff that does it. Touch no file the requirements do not name or imply.
   If the work genuinely needs a wider blast radius, say so in your report rather
   than widening silently.

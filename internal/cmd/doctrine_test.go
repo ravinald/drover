@@ -349,3 +349,96 @@ func TestEveryUsageAndT3KeyIsInTheConfigurationReference(t *testing.T) {
 		}
 	}
 }
+
+// An unmerged item has no bugs: a defect in its own work is unfinished
+// implementation and goes back to its branch, and only a gap in merged code is
+// filed. The prompts once routed a harmless diff defect to NEW-ITEM, told a
+// capped reviewer to file against the item under review, and offered filing
+// for a marginal finding on a late pass, and the backlog filled with items
+// found while their source was still open. Each phrase below is one of those
+// routes; the render is checked capped and uncapped because the cap block is
+// where the filing route lived.
+func TestNoReviewPromptFilesAnUnmergedItemsOwnWork(t *testing.T) {
+	rows := map[string]prompts.Destination{}
+	for _, d := range prompts.Destinations() {
+		rows[d.Token] = d
+	}
+	regression, item := rows["BRANCH-REGRESSION"], rows["NEW-ITEM"]
+
+	if !strings.HasPrefix(regression.Found, "Any defect this branch's own diff introduced") {
+		t.Errorf("BRANCH-REGRESSION no longer takes every defect the diff introduced:\n%s", regression.Found)
+	}
+	for _, gone := range []string{"that would break something in use", "`NEW-ITEM`"} {
+		if strings.Contains(regression.Found, gone) || strings.Contains(regression.Do, gone) {
+			t.Errorf("BRANCH-REGRESSION still conditions or reroutes a diff defect (%q)", gone)
+		}
+	}
+	if !strings.HasPrefix(item.Found, "A gap in merged code that no existing item owns") {
+		t.Errorf("NEW-ITEM takes more than a gap in merged code:\n%s", item.Found)
+	}
+	if !strings.Contains(item.Do, "without `--found-in`") || strings.Contains(item.Do, "--found-in <id>") {
+		t.Errorf("NEW-ITEM files with --found-in, naming an unmerged item as the source:\n%s", item.Do)
+	}
+	if !strings.Contains(rows["FOLLOW-UP-TO-OWNER"].Found, "an item that has merged owns") {
+		t.Error("FOLLOW-UP-TO-OWNER no longer names an owner that has merged")
+	}
+
+	banned := []string{"let the branch merge", "file it against this item", "becomes `NEW-ITEM`", "row that ends a review loop"}
+	base := prompts.Data{
+		Project: "example", ID: "1", Title: "First", Body: "1. Do it.", VerifyCommand: "make test",
+		Path: "docs-internal/backlog/01-first.md",
+	}
+	capped := base
+	capped.Rounds, capped.MaxReviewRounds, capped.Capped = 3, 3, true
+	capped.Runs = 4
+
+	words := func(s string) string { return strings.Join(strings.Fields(s), " ") }
+	for name, data := range map[string]prompts.Data{"uncapped": base, "capped": capped} {
+		brief, err := prompts.Render("review", prompts.ReviewTemplate(), data)
+		if err != nil {
+			t.Fatalf("review.tmpl %s: %v", name, err)
+		}
+		flat := words(brief)
+		for _, phrase := range banned {
+			if strings.Contains(flat, phrase) {
+				t.Errorf("the %s review prompt still says %q", name, phrase)
+			}
+		}
+		for _, want := range []string{
+			"drover request-changes 1 -f <file>",
+			"carries a test that fails on the branch as it stands",
+			"check the run's requirement-to-test map",
+		} {
+			if !strings.Contains(flat, want) {
+				t.Errorf("the %s review prompt does not say %q", name, want)
+			}
+		}
+		if data.Capped && !strings.Contains(flat, "refuse the send-back, keep the findings and park the item") {
+			t.Error("the capped review prompt does not say drover parks the item with the findings kept")
+		}
+	}
+
+	instructions, err := fixture(t, "").renderAgents()
+	if err != nil {
+		t.Fatalf("agents.tmpl: %v", err)
+	}
+	for _, phrase := range banned {
+		if strings.Contains(words(instructions), phrase) {
+			t.Errorf("internal/cmd/agents.tmpl still says %q", phrase)
+		}
+	}
+
+	implement, err := prompts.Render("implement", prompts.DefaultTemplate(), base)
+	if err != nil {
+		t.Fatalf("Default.tmpl: %v", err)
+	}
+	for _, want := range []string{
+		"has a test that fails without the change",
+		"a requirement with no test is reported unmet",
+		"committed unchanged and passes",
+	} {
+		if !strings.Contains(words(implement), want) {
+			t.Errorf("the implement prompt does not say %q", want)
+		}
+	}
+}
