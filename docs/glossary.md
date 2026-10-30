@@ -202,8 +202,8 @@ What one item came to, on drive's end row and in `drive --json` `outcome`.
 | Term                 | Meaning                                                                         |
 | -------------------- | ------------------------------------------------------------------------------- |
 | `ready_to_merge`     | Green and reviewed; nothing merged it.                                          |
-| `merged_by_drover`   | drover merged it on the merge gate's word because the forge refused auto-merge. |
-| `merged_immediately` | The forge's auto-merge merged it on the spot.                                   |
+| `merged_by_drover`   | drover merged it on the merge gate's word and the forge reported it merged.     |
+| `merged_immediately` | Older drovers only: the forge's auto-merge merged it on the spot.               |
 | `parked`             | Stopped; the park cause says why.                                               |
 | `skipped`            | Not attempted: merged, scaffolded, blocked or broken.                           |
 | `held`               | Kept back by a usage hold until the drive's deadline; nothing parked.           |
@@ -234,7 +234,7 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `needs_operator`   | Event: an action stopped at operator policy and waits on a person.                                                     |
 | `needs_supervisor` | Event: an action waits on the supervising session.                                                                     |
 | `merged`           | Event: an item's pull request merged.                                                                                  |
-| `merge_queued`     | Event: the forge accepted an item's auto-merge and has not merged it yet.                                              |
+| `merge_queued`     | Event, older drovers only: the forge accepted an item's auto-merge and had not merged it.                              |
 | `paused`           | Event: the drive paused.                                                                                               |
 | `resumed`          | Event: the drive resumed, naming what changed.                                                                         |
 | `config_changed`   | Event: the `.drover.toml` on disk differs from the one the running drive uses, which it does not apply until a resume. |

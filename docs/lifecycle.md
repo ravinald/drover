@@ -285,7 +285,7 @@ The reading is the one `drive` makes of a pass, from the log and the rows. The n
 | The runner's service or account failed (`faulted`)                                                      | Review again once the service recovers                                                                                                                                                                                            |
 | A stream no schema reads (`unreadable`)                                                                 | `drover show <id>` lists what the review recorded                                                                                                                                                                                 |
 
-`drive` ends the same way, once per item after its count line, and adds its own causes: a merge queued at the forge, a pull request held by `--no-merge`, `protected_paths` or a dependency a review split out, a merge gate that refused the diff or would not run, and every skip. The follow-up is on stderr in both commands, so `drive --json` keeps stdout to the document.
+`drive` ends the same way, once per item after its count line, and adds its own causes: a merge a required merge queue holds, a pull request held by `--no-merge`, `protected_paths` or a dependency a review split out, a merge gate that refused the diff or would not run, and every skip. The follow-up is on stderr in both commands, so `drive --json` keeps stdout to the document.
 
 ### Where a finding goes
 
@@ -441,7 +441,7 @@ The most recent row wins, not the strongest. Correcting downward is the point, a
 
 Then merge it however your project merges pull requests: by hand, with `gh pr merge`, or a button in a browser. drover has no opinion about how a merge happens, and `finish` records one it did not perform.
 
-The one place drover executes a merge is `drover drive`, which merges what it drives, and even there it asks rather than decides: `[drive] merge_gate` is a command the project declares, drover reads its exit status, and the merge itself goes through the forge's own `--auto` where the trunk has required checks, so branch protection and those checks are the authority. What drover decides is _when_, never _how_, and `--no-merge` is how an operator drives the queue and keeps the _when_ for themselves.
+The one place drover executes a merge is `drover drive`, which merges what it drives, and even there it asks rather than decides: `[drive] merge_gate` is a command the project declares, drover reads its exit status, and the merge itself is a plain `gh pr merge` pinned to the commit the merge gate read, so the forge's branch protection still refuses anything its rules do not allow. What drover decides is _when_, never _how_, and `--no-merge` is how an operator drives the queue and keeps the _when_ for themselves.
 
 Before each merge gate run reads a pushed head, drive waits for its checks and classifies every red one, because a merge gate that sees a red check sends it back to the item whoever caused it. A failure the forge's infrastructure caused (a rate limit, a runner out of disk, a job that ran no step, a canceled run) is rerun with `gh run rerun --failed`, up to `[forge] reruns` times per head; one the trunk fails too parks the item `trunk_red` without sending anything back and stops the drive; anything else goes to the merge gate as before. A head no workflow reported on is named as such rather than read as red. See [`[forge]`](configuration.md#forge).
 
@@ -473,21 +473,21 @@ drover signoff F5 6 "ssh dev-guest-1 'systemctl is-active webapp' printed active
 
 Neither undoes the merge or changes finish's exit: the trunk already carries the commit, and a failed check is work somebody owes on it rather than a reason to pretend the item was never finished. Under `[register] backend = "none"`, or `--no-tracker` with the tracker backend, nothing is filed and the line says so. Outside a drive, `needs_operator` reaches each [`[notify]`](configuration.md#notify) destination routing it, and nothing else. See [`[finish]`](configuration.md#finish).
 
-### When the forge has no auto-merge
+### The merge
 
-Some forges have nothing to wait on. A private GitHub repository on the free plan cannot protect a branch, and a trunk with no required status checks has nothing an auto-merge would wait for. There the merge gate is what authorizes the merge: nothing at the forge will wait for the checks or apply branch protection, so `[drive] merge_gate` is the only authority left, and drive merges only on its exit 0.
+drive merges synchronously and never asks the forge for `--auto`. A merge the forge completes after drive has moved on is one nothing records: its dependents are skipped, and a push that lands before the forge acts merges a head no review read. Branch protection still applies, because the forge refuses a synchronous merge its rules do not allow, and that refusal parks the item `merge_failed`.
 
-drive does not wait for the forge to refuse `--auto` to find this out. GitHub refuses it (`enablePullRequestAutoMerge`) only while the head's checks are still running; once they have finished, the same request with nothing to wait on merges on the spot and `gh` reports success. Which path an item took then depended on whether its CI finished before its review did, and an item whose CI finished first merged without the merge gate reading its head. So where `[drive] merge_gate` is declared, drive reads the trunk's required status checks through `gh api` once per drive, and when there are none (GitHub answers 404, or 403 where the plan cannot protect the branch) or the read fails, it never asks for `--auto` and says so on stderr. Where there are some, it asks for `--auto` as before, and still falls back here if the forge refuses it, matching that refusal by its wording and never on any other error from the merge.
+The merge gate already read the head once, after its checks finished and before the pull request opened. When the branch still points at that commit and origin's trunk has not moved past it, drive merges at once: `gh pr merge --<method> --match-head-commit <sha>`, where `<method>` is [`[git] merge_method`](configuration.md#git-merge_method). When either moved (an earlier item in the same drive merged, or something pushed to the branch), that answer is stale, and drive takes the path below.
 
-An `--auto` request that succeeds is checked rather than trusted: drive asks the forge whether the pull request merged. A merge the forge queued reads `ready_to_merge` and the next drive finishes it. One the forge made on the spot reads `merged_immediately` and is finished in this drive, so items that depend on it run behind it; where a merge gate is declared, it reads the merged head first with `DROVER_GATE_MERGED=1` set, so a merge gate does not call that head behind the trunk (see [`[drive]`](configuration.md#drive)), and a refusal leaves the item unfinished and stops the drive, since the trunk now carries a head the merge gate refused and nothing can unmerge it.
+After `gh pr merge` returns, drive asks the forge whether the pull request merged rather than trusting the exit status, because `gh pr merge` also exits 0 when a required merge queue accepted the request and merged nothing yet. A pull request the forge reports merged is finished in the same drive, as `finish` does: the ledger row, the saved report and the tracker closes. The item reports `merged_by_drover`, and the items that depend on it run behind it in the same drive. One the forge does not report merged, or whose state drive cannot read, reads `ready_to_merge` with the reason, and the next drive's reconciliation records it once it lands.
 
 On the path below, drive:
 
 1. Brings the branch level with the trunk, as below.
 2. Waits for every check run on the head commit to finish, reading them through `gh api`, and classifies each red one as [`[forge]`](configuration.md#forge) describes: an infrastructure failure is rerun and waited on again, and one the trunk fails too parks `trunk_red`. Nothing else is decided there: a head with no checks after `[forge] checks_wait`, checks still running after an hour or at `--for`/`--until`, and a forge it cannot read all go to the merge gate as they stand.
-3. Runs the merge gate against that head. It already passed once, before the pull request opened, and that pass is not reused, because the checks it read may still have been running.
-4. On exit 0, runs `gh pr merge --<method> --match-head-commit <sha>` without `--auto`, where `<method>` is [`[git] merge_method`](configuration.md#git-merge_method), so a push arriving after the merge gate read the head refuses rather than merges.
-5. Finishes the item in the same drive, as `finish` does: the ledger row, the saved report and the tracker closes. The item reports `merged_by_drover`.
+3. Runs the merge gate against that head. The pass before the pull request opened read a different head or a different trunk, so it is not reused.
+4. On exit 0, runs `gh pr merge --<method> --match-head-commit <sha>`, so a push arriving after the merge gate read the head refuses rather than merges.
+5. Asks the forge whether the pull request merged, and finishes it as above.
 
 A merge gate that refuses there parks the item `gate_refused` with the pull request open and the merge gate's last lines in the reason; an exit 2 also stops the drive, as it does before the pull request opens. Any other refusal from the forge (a conflict, a branch policy, a review requirement) parks `merge_failed` as before, because the forge saying no to this pull request is not the merge gate's to overrule. A finish the operator's checkout cannot take cleanly is left to the next drive's reconciliation, and the reason says so.
 
@@ -504,7 +504,7 @@ The merge makes a tree no session tested, and a forge whose CI runs only on pull
   - **The trunk's worktree will not set up:** the item parks `gate_unrunnable`, and the merge is undone and not pushed.
 - **No verify command applies:** drive says so on stderr and carries on as if it had passed. A project with no `[verify]` has chosen no verify command.
 
-An interrupt during either run parks the item `interrupted`, undoes the merge and keeps the item's worktree as the verify command left it. A branch already level with the trunk runs none of this: its own sessions ran its verify command. Where the forge has no auto-merge, the branch update before the merge does the same, with the pull request already open: a failure parks `gate_refused` with the pull request left open and unmerged, so `--match-head-commit` never sees a head the verify command failed. The row's `update_branch` field records what happened; see [`drover drive --json`](automation.md).
+An interrupt during either run parks the item `interrupted`, undoes the merge and keeps the item's worktree as the verify command left it. A branch already level with the trunk runs none of this: its own sessions ran its verify command. When the merge goes through the path above, the branch update before it does the same, with the pull request already open: a failure parks `gate_refused` with the pull request left open and unmerged, so `--match-head-commit` never sees a head the verify command failed. The row's `update_branch` field records what happened; see [`drover drive --json`](automation.md).
 
 origin's trunk is the reference rather than the local one, because the local trunk can carry the operator's unpushed commits and merging them into an item's branch would publish them under that item. A project with no `[drive] merge_gate` gets no branch update, since nothing would read the result. One with a merge gate gets it under `--no-merge` as well, the `[verify]` rerun included, since the merge gate still reads the branch and an item left on its branch should be green on the tree it was left with.
 
@@ -525,7 +525,7 @@ Each dispatch branch update emits an `update_branch` stage event with a `result`
 
 ### Updating the other open pull requests
 
-A merge moves the trunk under every pull request drive left open as well: one waiting at the forge for its checks or its queued merge, and one held for the operator by `protected_paths`. Those items are past their turn at the trunk stage, so nothing above reaches them again. After each merge drive makes or finishes, reconciliation's included, and while `[supervise] update_open_prs` is `auto`, drive walks every item whose ledger records a pull request on the branch the item renders today, that is not merged, and that the forge still reports open. One at a time, inside the trunk stage the merge already holds, it merges origin's trunk into each one's branch in the item's worktree, runs the item's verify command on the merged tree and pushes, never forced: the same steps as the item's own branch update, without the wait for checks. The item stays where it was.
+A merge moves the trunk under every pull request drive left open as well: one held for the operator by `protected_paths`, `--no-merge` or a split-out dependency, one parked `gate_refused` at the merge, and one a required merge queue still holds. Those items are past their turn at the trunk stage, so nothing above reaches them again. After each merge drive makes or finishes, reconciliation's included, and while `[supervise] update_open_prs` is `auto`, drive walks every item whose ledger records a pull request on the branch the item renders today, that is not merged, and that the forge still reports open. One at a time, inside the trunk stage the merge already holds, it merges origin's trunk into each one's branch in the item's worktree, runs the item's verify command on the merged tree and pushes, never forced: the same steps as the item's own branch update, without the wait for checks. The item stays where it was.
 
 - **A branch already holding the trunk** is left alone.
 - **A local branch that disagrees with origin's**, a worktree holding uncommitted work, or a worktree another drive holds is left alone and named on stderr.
@@ -538,7 +538,7 @@ A merge moves the trunk under every pull request drive left open as well: one wa
 
 ### Following what a finish unblocks
 
-`drover drive --follow` re-reads the ready queue after each finish and appends, in queue order, the items that list the finished item in `deps` and that the drive has not already listed. A chain of dependent items then runs in one drive, bounded by `--max-items`, `--for` and `--until` as any other queue is. Only a finish in the same drive counts, which in practice means a `merged_by_drover` item: a merge the forge queued completes after drive has moved on, so nothing is unblocked until the next drive's reconciliation records it. Without `--follow` the list drive started with is the list it walks.
+`drover drive --follow` re-reads the ready queue after each finish and appends, in queue order, the items that list the finished item in `deps` and that the drive has not already listed. A chain of dependent items then runs in one drive, bounded by `--max-items`, `--for` and `--until` as any other queue is. Only a finish in the same drive counts, which means a `merged_by_drover` item. A merge a required merge queue holds completes after drive has moved on, so nothing waiting on it is unblocked until the next drive's reconciliation records it. Without `--follow` the list drive started with is the list it walks.
 
 ```bash
 drover finish                    # the checked-out branch's item
@@ -555,7 +555,7 @@ drover finish 2 --no-tracker     # record the merge, close nothing
 
 ### Finishing while a drive is running
 
-It finishes. A drive runs its items in worktrees of their own, so what it does in your checkout is move the trunk ref, push branches, and add and remove worktrees. A merge the forge queued mid-drive is yours to finish at once.
+It finishes. A drive runs its items in worktrees of their own, so what it does in your checkout is move the trunk ref, push branches, and add and remove worktrees. A merge made outside the drive, by hand or by a merge queue, is yours to finish at once.
 
 Three collisions remain, and `finish` handles each:
 
