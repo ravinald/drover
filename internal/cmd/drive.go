@@ -698,21 +698,16 @@ may merge. Three things withhold the merge and none of them takes that back: a
 denied path, --no-merge, and a dep a mid-drive split just added. Each leaves a
 pull request for a human, which is the whole reason it exists.
 
-Where the trunk has required status checks, the merge goes through the
-forge's own --auto, so branch protection and those checks stay the authority
-and the merge completes after drive has moved on. Nothing is finished then: the
-next drive's reconciliation writes the ledger row for what the forge finished.
-drive asks the forge afterwards whether it merged, because --auto with nothing
-to wait on merges on the spot: that item reads merged_immediately and finishes in
-this drive, after the merge gate reads the merged head where one is declared. A merge gate
-that refuses a head already merged stops the drive.
-
-Where [drive] merge_gate is declared and the trunk has no required checks (or
-they cannot be read, or the forge refuses auto-merge), [drive] merge_gate is
-the only authority, and drive acts on it without --auto: it waits for the head
-commit's checks, runs the merge gate against that head, and on exit 0 merges with
---match-head-commit and [git] merge_method, then finishes the item in the same
-drive. A refusal there parks gate_refused with the pull request open.
+drive merges synchronously, never through the forge's --auto: gh pr merge with
+--match-head-commit on the head [drive] merge_gate passed and [git]
+merge_method. Branch protection still applies, because the forge refuses a merge
+its rules do not allow. When the head or the trunk moved since the merge gate
+read it, drive brings the branch level, waits for the new head's checks and runs
+the merge gate again first; a refusal there parks gate_refused with the pull
+request open. After the merge drive asks the forge whether the pull request
+merged, then finishes the item in the same drive, so the items waiting on it run
+behind it. One a required merge queue still holds reads ready_to_merge, and the
+next drive's reconciliation records it once it lands.
 
 Every merge moves the trunk under the items after it, so before the merge gate reads
 a branch drive merges in whatever the trunk gained since the branch was
@@ -3555,9 +3550,9 @@ func (s *session) mergeBranch(ctx context.Context, branch string) error {
 //
 // A kill between the merge and the ledger row leaves an item merged, unrecorded,
 // and reading as `ran`, which keeps it out of the queue forever: the worst state
-// a drive can leave, and the one nothing else repairs. --auto makes it the
-// ordinary state rather than a crash, because the forge completes the merge
-// after drive has moved on.
+// a drive can leave, and the one nothing else repairs. A required merge queue,
+// and any merge made by hand, reach the same state without a crash, and older
+// drovers left one behind for every --auto merge the forge queued.
 //
 // It invokes finish as a command rather than reimplementing it. That skips the
 // root's PersistentPreRunE, and what closes the hole is the classification
