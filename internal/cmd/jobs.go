@@ -61,9 +61,8 @@ type driveSched struct {
 
 	// Shared across every item's session, and touched only inside the trunk
 	// stage: each item caught up to the same trunk commit asks the same question
-	// of it, and the trunk's branch protection does not change between merges.
+	// of it.
 	trunkResults map[string]trunkResult
-	forgeWait    *forgeWait
 	// usage is usage_admission's hold, read by the dispatcher and by every
 	// item at each stage that launches a session.
 	usage *usageGate
@@ -231,9 +230,8 @@ func (s *session) inTrunkStage(it backlog.Item, fn func() DriveItem, park func(c
 		return park(parkDrained, fmt.Sprintf(
 			"the drive stopped while this item waited for the trunk (%v); its review passed, and nothing was updated, verified, opened as a pull request or merged", cause))
 	}
-	s.trunkResults, s.forgeWait = q.trunkResults, q.forgeWait
+	s.trunkResults = q.trunkResults
 	out := fn()
-	q.forgeWait = s.forgeWait
 	if out.stop != nil {
 		q.drain(out.stop)
 	}

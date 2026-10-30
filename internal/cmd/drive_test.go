@@ -714,7 +714,7 @@ func reconcileQueued(t *testing.T, drive string, d1 []ledger.Outcome, want bool,
 		t.Fatal(err)
 	}
 	s.recordPR("1", branch, 7)
-	s.recordMergeQueued(&DriveItem{ID: "1", Branch: branch, PR: 7, MergeQueued: true}, s.ledgerLen())
+	writeQueued(t, s, "1", branch, 7)
 	activeDrive.Store(nil)
 	rows := append(between, ledger.Row{ID: ledger.DriveRowID, Drive: "D1", Exit: &exit, Date: ledger.Today(), Outcomes: d1})
 	for _, r := range rows {
@@ -784,127 +784,6 @@ func TestALateEndRowDoesNotReviveAQueueACompletionEnded(t *testing.T) {
 	}
 	if pr, queued := l.MergeQueued("1"); queued {
 		t.Errorf("the completed item reads queued on PR %d after D1's late end row, want not queued", pr)
-	}
-}
-
-// The forge accepts --auto on PR 7, and while drive waits on the merged-state
-// query an operator either opens replacement PR 8 or records the item merged,
-// both through the real writers. The queue row drive writes after the query must
-// not restore PR 7 as the item's pull request or revive the ended lifecycle,
-// and reconciliation of the landed branch owes no merged event for PR 7.
-func TestAQueueWrittenAfterTheMergedQueryKeepsWhatTheOperatorRecorded(t *testing.T) {
-	for _, replacement := range []bool{true, false} {
-		t.Run(fmt.Sprintf("replacement=%v", replacement), func(t *testing.T) {
-			s := driveProject(t)
-			it, err := s.item("1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			branch, err := s.branchFor(it)
-			if err != nil {
-				t.Fatal(err)
-			}
-			git(t, s.cfg.Root, "switch", "-q", "-c", branch)
-			write(t, filepath.Join(s.cfg.Root, "shipped.txt"), "work\n")
-			git(t, s.cfg.Root, "add", "shipped.txt")
-			git(t, s.cfg.Root, "commit", "-q", "-m", "work")
-			if err := s.recordHead("1", branch); err != nil {
-				t.Fatal(err)
-			}
-			git(t, s.cfg.Root, "switch", "-q", "main")
-			git(t, s.cfg.Root, "merge", "-q", "--no-ff", "-m", "merge", branch)
-			if err := s.record(ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: ledger.Today()}); err != nil {
-				t.Fatal(err)
-			}
-			s.recordPR("1", branch, 7)
-			operator := *s
-			operator.ledger = &ledger.Ledger{}
-
-			state := t.TempDir()
-			signal, done := filepath.Join(state, "signal"), filepath.Join(state, "done")
-			t.Setenv("QUERY_SIGNAL", signal)
-			t.Setenv("QUERY_DONE", done)
-			ghPath, err := exec.LookPath("gh")
-			if err != nil {
-				t.Fatal(err)
-			}
-			stub(t, ghPath, `#!/bin/sh
-case "$*" in *'--state merged'*)
-  touch "$QUERY_SIGNAL"
-  i=0
-  while [ ! -f "$QUERY_DONE" ]; do
-    i=$((i+1)); [ "$i" -lt 500 ] || exit 1
-    sleep 0.01
-  done
-  ;;
-esac
-echo '[]'
-`)
-			finished := make(chan error, 1)
-			go func() {
-				deadline := time.Now().Add(5 * time.Second)
-				for {
-					if _, err := os.Stat(signal); err == nil {
-						break
-					}
-					if time.Now().After(deadline) {
-						finished <- errors.New("the merged-state query never ran")
-						return
-					}
-					time.Sleep(time.Millisecond)
-				}
-				var err error
-				if replacement {
-					operator.recordPR("1", branch, 8)
-				} else {
-					yes := true
-					err = operator.record(ledger.Row{ID: "1", Merged: &yes, Date: ledger.Today()})
-				}
-				if err == nil {
-					err = os.WriteFile(done, nil, 0o600)
-				}
-				finished <- err
-			}()
-
-			d := DriveItem{ID: "1", Branch: branch, PR: 7}
-			got := s.afterAutoMerge(context.Background(), it, &d, "main", time.Time{})
-			if err := <-finished; err != nil {
-				t.Fatal(err)
-			}
-			if got.MergeQueued || got.Merged {
-				t.Errorf("drive reports MergeQueued=%v Merged=%v, want neither: the lifecycle ended during the query", got.MergeQueued, got.Merged)
-			}
-			if replacement && (got.PR != 8 || got.Outcome != outcomeReviewed) {
-				t.Errorf("drive reports %s on PR %d, want %s on the replacement PR 8", got.Outcome, got.PR, outcomeReviewed)
-			}
-			if !replacement && (got.Outcome != outcomeSkipped || got.Park != stateDone) {
-				t.Errorf("drive reports %s %s, want %s %s for an item the operator recorded merged", got.Outcome, got.Park, outcomeSkipped, stateDone)
-			}
-
-			if err := s.reload(); err != nil {
-				t.Fatal(err)
-			}
-			if pr, queued := s.ledger.MergeQueued("1"); queued {
-				t.Errorf("the ledger reads queued on PR %d, want the ended lifecycle left ended", pr)
-			}
-			if current, _ := s.ledger.PR("1"); replacement && current != 8 {
-				t.Errorf("the ledger names PR %d, want the replacement PR 8", current)
-			}
-
-			var out bytes.Buffer
-			events = &eventSink{cfg: s.cfg, notifier: newNotifier(s.cfg), w: &out}
-			activeDrive.Store(&runningDrive{id: "D2"})
-			t.Cleanup(func() { events = nil; activeDrive.Store(nil) })
-			if _, _, err := s.reconcile(); err != nil {
-				t.Fatal(err)
-			}
-			for _, line := range strings.Split(out.String(), "\n") {
-				var e DriveEvent
-				if json.Unmarshal([]byte(line), &e) == nil && e.Event == evMerged {
-					t.Errorf("reconciliation announced the ended queue: id=%s PR=%d drive=%s", e.ID, e.PR, e.Drive)
-				}
-			}
-		})
 	}
 }
 
@@ -1207,10 +1086,12 @@ func mergeProject(t *testing.T) string {
 		"if [ \"$1 $2\" = 'auth status' ]; then exit 0; fi\n"+
 		"printf '%s\\n' \"$*\" >> \"$DROVER_TEST_GH_LOG\"\n"+
 		"case \"$1 $2\" in\n"+
-		"  'pr list')   echo '[]' ;;\n"+
+		"  'pr list')   case \"$*\" in *'--state merged'*) "+
+		"if [ -e \"$DROVER_TEST_GH_LOG.merged\" ]; then echo '[{\"number\":7,\"mergedAt\":\"2026-10-07T00:00:00Z\"}]'; else echo '[]'; fi ;; "+
+		"*) echo '[]' ;; esac ;;\n"+
 		"  'pr create') echo 'https://example.invalid/o/r/pull/7' ;;\n"+
+		"  'pr merge')  : > \"$DROVER_TEST_GH_LOG.merged\" ;;\n"+
 		"  'pr '*)      : ;;\n"+
-		"  'api '*/required_status_checks) echo '{\"contexts\":[\"ci\"],\"checks\":[]}' ;;\n"+
 		"  'api '*/check-runs*) echo '{\"total_count\":1,\"check_runs\":[{\"id\":1,\"name\":\"ci\",\"status\":\"completed\",\"conclusion\":\"success\"}]}' ;;\n"+
 		"  *)           echo '[]' ;;\n"+
 		"esac\n")
@@ -1378,9 +1259,9 @@ func TestDriveMergesWhatPassedAndParksWhatDidNot(t *testing.T) {
 	if pass.PR == 0 {
 		t.Error("the merged item reports no pull request; drover opens one for what it merges")
 	}
-	if !pass.MergeQueued || pass.Outcome != outcomeReviewed {
-		t.Errorf("the reviewed item is %q/merge_queued=%v, want %q/true; drive stopped short of the merge it was run to perform",
-			pass.Outcome, pass.MergeQueued, outcomeReviewed)
+	if pass.MergeQueued || pass.Outcome != outcomeMergedByGate || !pass.Finished {
+		t.Errorf("the reviewed item is %q/merge_queued=%v/finished=%v, want %q/false/true; drive stopped short of the merge it was run to perform",
+			pass.Outcome, pass.MergeQueued, pass.Finished, outcomeMergedByGate)
 	}
 	if park.Merged || park.Outcome != outcomeParked || park.Park != passSilent {
 		t.Errorf("the silent item is %q/%q/merged=%v, want %q/%q/false; a park is never merged",
@@ -1400,11 +1281,10 @@ func TestDriveMergesWhatPassedAndParksWhatDidNot(t *testing.T) {
 	if !strings.Contains(merges[0], pass.Branch) {
 		t.Errorf("gh merged %q, which does not name %s's branch %q", merges[0], pass.ID, pass.Branch)
 	}
-	// A forge that queues the merge decides it, so drive neither merges nor
-	// finishes anything itself: the next drive's reconciliation does.
-	if !strings.HasPrefix(merges[0], "pr merge --auto --squash --match-head-commit ") || pass.Finished {
-		t.Errorf("gh was asked %q and the row reads finished=%v; want a queued squash merge, not finished here",
-			merges[0], pass.Finished)
+	// The merge is synchronous and bound to the head the gate read, never a
+	// queued --auto that lands after the drive has moved on.
+	if !strings.HasPrefix(merges[0], "pr merge --squash --match-head-commit ") {
+		t.Errorf("gh was asked %q; want a synchronous squash merge bound to the head", merges[0])
 	}
 	if strings.Contains(merges[0], park.Branch) {
 		t.Errorf("gh was asked to merge the parked item's branch: %q", merges[0])
@@ -4615,14 +4495,11 @@ func mergeCalls(t *testing.T, ghLog string) []string {
 	return out
 }
 
-// The forge refuses auto-merge, a gate is declared, and the gate passes at the
-// head once its checks finish: drive merges without --auto, bound to that head,
-// and finishes the item in the same drive, rather than parking it merge_failed
-// for a person to merge by hand.
-func TestAForgeWithoutAutoMergeMergesOnTheGatesWord(t *testing.T) {
+// The gate passes at the head once its checks finish: drive merges bound to
+// that head, without --auto, and finishes the item in the same drive.
+func TestADriveMergesOnTheGatesWordAndFinishes(t *testing.T) {
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
-	t.Setenv("DROVER_TEST_NO_AUTO", "1")
 	t.Setenv("DROVER_TEST_PENDING", "2")
 	poll := checksPoll
 	checksPoll = time.Millisecond
@@ -4639,35 +4516,31 @@ func TestAForgeWithoutAutoMergeMergesOnTheGatesWord(t *testing.T) {
 	}
 
 	merges := mergeCalls(t, ghLog)
-	if len(merges) != 2 || !strings.Contains(merges[0], "--auto") {
-		t.Fatalf("merges = %q, want the --auto attempt and then the merge gate's merge", merges)
-	}
 	head := git(t, dir, "rev-parse", got.Branch)
-	if want := "pr merge --squash --match-head-commit " + head + " " + got.Branch; merges[1] != want {
-		t.Errorf("the merge gate's merge was %q, want %q", merges[1], want)
+	if want := "pr merge --squash --match-head-commit " + head + " " + got.Branch; len(merges) != 1 || merges[0] != want {
+		t.Fatalf("merges = %q, want only %q", merges, want)
 	}
 
-	// The checks finish before each gate reads them: two pending reads and a
-	// finished one before the first gate, then a finished one before the gate at
-	// the merge, all before the merge that follows it.
+	// The checks finish before the gate reads them: two pending reads and a
+	// finished one, all before the merge that follows it.
 	calls := ghCalls(t, ghLog)
 	var reads int
 	for _, c := range calls {
-		if strings.HasPrefix(c, "api ") && !strings.HasSuffix(c, "/required_status_checks") {
+		if strings.HasPrefix(c, "api ") {
 			if !strings.Contains(c, head) {
 				t.Errorf("checks read for another commit: %q", c)
 			}
 			reads++
 		}
-		if c == merges[1] {
+		if c == merges[0] {
 			break
 		}
 	}
-	if reads != 4 {
-		t.Errorf("checks were read %d times before the merge, want 4 (two pending and one finished at the first merge gate, one at the merge)", reads)
+	if reads != 3 {
+		t.Errorf("checks were read %d times before the merge, want 3 (two pending and one finished before the merge gate)", reads)
 	}
-	if n := len(gateLog(t, dir)); n != 2 {
-		t.Errorf("the merge gate ran %d times, want 2: once before the pull request and once at the merge", n)
+	if n := len(gateLog(t, dir)); n != 1 {
+		t.Errorf("the merge gate ran %d times, want 1: the trunk did not move, so its answer stands at the merge", n)
 	}
 
 	git(t, dir, "fetch", "-q", remote, "main:refs/remotes/origin/main")
@@ -4683,283 +4556,10 @@ func TestAForgeWithoutAutoMergeMergesOnTheGatesWord(t *testing.T) {
 	}
 }
 
-// A gate is declared and the trunk has no required checks, so an --auto request
-// would merge on the spot with nothing at the forge waiting. drive never makes
-// it: the gate reads the head and the merge is bound to it, whether the lookup
-// answered 404, 403 or failed outright. An --auto here would merge unchecked
-// whenever CI happens to finish first.
-func TestNoRequiredChecksMergesOnTheGateWithoutAuto(t *testing.T) {
-	for _, c := range []struct{ name, status, says string }{
-		{"no required checks", "404", "main has no required checks, so nothing at the forge would wait"},
-		{"plan cannot protect", "403", "main has no required checks, so nothing at the forge would wait"},
-		{"lookup fails", "500", "the required checks on main could not be read"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			ghLog := mergeProject(t)
-			dir, _ := forge(t, ghLog)
-			t.Setenv("DROVER_TEST_REQUIRED", c.status)
-			t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
-
-			var rows []DriveItem
-			errOut := captureErr(t, func() { rows = driveAll(t) })
-			got := rows[0]
-			if got.Outcome != outcomeMergedByGate || !got.Merged || !got.Finished {
-				t.Fatalf("item 1 is %q merged=%v finished=%v (%s), want %q, merged and finished",
-					got.Outcome, got.Merged, got.Finished, got.Reason, outcomeMergedByGate)
-			}
-			head := git(t, dir, "rev-parse", got.Branch)
-			merges := mergeCalls(t, ghLog)
-			if want := "pr merge --squash --match-head-commit " + head + " " + got.Branch; len(merges) != 1 || merges[0] != want {
-				t.Fatalf("merges = %q, want only %q", merges, want)
-			}
-			seen := gateLog(t, dir)
-			if len(seen) != 2 {
-				t.Fatalf("the merge gate ran %d times, want 2: once before the pull request and once at the merge", len(seen))
-			}
-			if _, local, remote := splitGateLine(t, seen[1]); local != head || remote != head {
-				t.Errorf("the merge gate at the merge read local %s remote %s, want %s", local, remote, head)
-			}
-			if !strings.Contains(errOut, "· 1: "+c.says) || !strings.Contains(errOut, "[drive] merge_gate decides at the head") {
-				t.Errorf("stderr does not say why --auto was skipped:\n%s", errOut)
-			}
-			var lookups int
-			for _, call := range ghCalls(t, ghLog) {
-				if strings.HasSuffix(call, "/branches/main/protection/required_status_checks") {
-					lookups++
-				}
-			}
-			if lookups != 1 {
-				t.Errorf("the required checks were read %d times, want 1", lookups)
-			}
-		})
-	}
-}
-
-// The trunk has required checks, so --auto is asked for and the forge decides.
-// Queued, the item reads reviewed and says so on stderr; merged on the spot, it
-// reads merged_immediately, the gate reads the merged head, and it finishes.
-func TestRequiredChecksLeaveTheMergeToTheForge(t *testing.T) {
-	t.Run("queued", func(t *testing.T) {
-		ghLog := mergeProject(t)
-		forge(t, ghLog)
-
-		var rows []DriveItem
-		errOut := captureErr(t, func() { rows = driveAll(t) })
-		got := rows[0]
-		if got.Outcome != outcomeReviewed || got.Merged || !got.MergeQueued || got.Finished {
-			t.Fatalf("item 1 is %q merged=%v merge_queued=%v finished=%v (%s), want reviewed, queued, not merged, not finished",
-				got.Outcome, got.Merged, got.MergeQueued, got.Finished, got.Reason)
-		}
-		if merges := mergeCalls(t, ghLog); len(merges) != 1 || !strings.Contains(merges[0], "--auto") {
-			t.Errorf("merges = %q, want the one --auto request", merges)
-		}
-		if !strings.Contains(errOut, "· 1: merge queued at the forge; the next drive finishes it") {
-			t.Errorf("stderr does not report the queued merge:\n%s", errOut)
-		}
-		l, err := ledger.Load("ledger.jsonl")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if pr, queued := l.MergeQueued("1"); !queued || pr != got.PR {
-			t.Errorf("the ledger reads queued=%v on PR %d, want the queue on PR %d the forge accepted", queued, pr, got.PR)
-		}
-	})
-	t.Run("queued is reported as queued", func(t *testing.T) {
-		ghLog := mergeProject(t)
-		forge(t, ghLog)
-
-		evs, _, err := driveEventsOf(t)
-		if err != nil {
-			t.Fatalf("drive: %v", err)
-		}
-		var queued, merged, queuedPR int
-		var summary *ExitSummary
-		for _, e := range evs {
-			switch e.Event {
-			case evMergeQueued:
-				if e.ID == "1" && e.PR > 0 && e.Title != "" {
-					queued, queuedPR = queued+1, e.PR
-				}
-			case evMerged:
-				merged++
-			case evExit:
-				summary = e.Summary
-			}
-		}
-		if queued != 1 || merged != 0 {
-			t.Errorf("the stream holds %d merge_queued for item 1 and %d merged, want 1 and 0", queued, merged)
-		}
-		if summary == nil {
-			t.Fatal("no exit event carried a summary")
-		}
-		if summary.Merged != 0 || summary.MergeQueued != 1 {
-			t.Errorf("the exit counts merged %d merge_queued %d, want 0 and 1", summary.Merged, summary.MergeQueued)
-		}
-		s, err := open()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if pr, queued := s.ledger.MergeQueued("1"); !queued || pr != queuedPR {
-			t.Errorf("the drive's end row records queued=%v on PR %d, want the merge queued on PR %d, so the next drive can report it", queued, pr, queuedPR)
-		}
-	})
-	t.Run("merged at once", func(t *testing.T) {
-		ghLog := mergeProject(t)
-		dir, _ := forge(t, ghLog)
-		t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
-
-		got := driveAll(t)[0]
-		if got.Outcome != outcomeMergedAtForge || !got.Merged || !got.Finished || got.PR != 7 {
-			t.Fatalf("item 1 is %q merged=%v finished=%v pr=%d (%s), want %q, merged, finished, PR 7",
-				got.Outcome, got.Merged, got.Finished, got.PR, got.Reason, outcomeMergedAtForge)
-		}
-		head := git(t, dir, "rev-parse", got.Branch)
-		if !strings.Contains(got.Reason, shortSHA(head)) || !strings.Contains(got.Reason, "merged") {
-			t.Errorf("the reason does not name the merged head %s: %s", shortSHA(head), got.Reason)
-		}
-		if merges := mergeCalls(t, ghLog); len(merges) != 1 || !strings.Contains(merges[0], "--auto") {
-			t.Errorf("merges = %q, want the one --auto request", merges)
-		}
-		if n := len(gateLog(t, dir)); n != 2 {
-			t.Errorf("the merge gate ran %d times, want 2: once before the pull request and once on the merged head", n)
-		}
-		s, err := open()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !s.ledger.State("1").Merged {
-			t.Error("item 1 merged at the forge and the ledger does not record it done")
-		}
-	})
-	t.Run("merged at once and the merge gate refuses", func(t *testing.T) {
-		ghLog := mergeProject(t)
-		forge(t, ghLog)
-		t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
-		t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "1")
-
-		rows, err := driveRows(t)
-		if !errors.Is(err, errMergedRed) {
-			t.Fatalf("drive ended on %v, want %v", err, errMergedRed)
-		}
-		if len(rows) != 1 {
-			t.Fatalf("drive reported %d rows, want 1: the drive stops at the refused merge", len(rows))
-		}
-		got := rows[0]
-		if got.Outcome != outcomeMergedAtForge || !got.Merged || got.Finished {
-			t.Fatalf("item 1 is %q merged=%v finished=%v, want %q, merged, not finished",
-				got.Outcome, got.Merged, got.Finished, outcomeMergedAtForge)
-		}
-		if !strings.Contains(got.Reason, "PR #7") || !strings.Contains(got.Reason, "ci/test: failure on linux") {
-			t.Errorf("the reason does not name the pull request and the merge gate's output:\n%s", got.Reason)
-		}
-	})
-	// The forge merges --no-ff, so origin's main is never an ancestor of the
-	// merged head, which is what a squash or a rebase does as well. A gate
-	// running the ancestry check as merge-gate.sh does refuses every such head
-	// with exit 4 unless drive says the head was merged.
-	t.Run("merged at once and the merge gate checks ancestry", func(t *testing.T) {
-		ghLog := mergeProject(t)
-		dir, _ := forge(t, ghLog)
-		t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
-		t.Setenv("DROVER_TEST_GATE_ANCESTRY", "on")
-
-		rows, err := driveRows(t)
-		if err != nil {
-			t.Fatalf("drive ended on %v, want a clean finish", err)
-		}
-		got := rows[0]
-		if got.Outcome != outcomeMergedAtForge || !got.Merged || !got.Finished {
-			t.Fatalf("item 1 is %q merged=%v finished=%v (%s), want %q, merged, finished",
-				got.Outcome, got.Merged, got.Finished, got.Reason, outcomeMergedAtForge)
-		}
-		b, err := os.ReadFile(filepath.Join(dir, "merge-gate.merged")) // #nosec G304 -- written by the fixture's own stub
-		if err != nil {
-			t.Fatal(err)
-		}
-		if seen := strings.Split(strings.TrimSuffix(string(b), "\n"), "\n"); len(seen) != 2 || seen[0] != "" || seen[1] != "1" {
-			t.Errorf("the merge gate saw %s = %q, want empty before the pull request and 1 on the merged head", "DROVER_GATE_MERGED", seen)
-		}
-	})
-	t.Run("merged at once and the merge gate ignores the merged flag", func(t *testing.T) {
-		ghLog := mergeProject(t)
-		forge(t, ghLog)
-		t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
-		t.Setenv("DROVER_TEST_GATE_ANCESTRY", "ignore")
-
-		rows, err := driveRows(t)
-		if !errors.Is(err, errMergedRed) {
-			t.Fatalf("drive ended on %v, want %v", err, errMergedRed)
-		}
-		got := rows[0]
-		if got.Finished {
-			t.Error("item 1 finished on a merge gate that never read its checks")
-		}
-		if !strings.Contains(got.Reason, "exit 4") || !strings.Contains(got.Reason, "DROVER_GATE_MERGED=1") {
-			t.Errorf("the reason does not say the merge gate called a merged head behind under %s=1:\n%s", "DROVER_GATE_MERGED", got.Reason)
-		}
-	})
-	t.Run("state unreadable", func(t *testing.T) {
-		ghLog := mergeProject(t)
-		forge(t, ghLog)
-		t.Setenv("DROVER_TEST_MERGED_FAIL", "1")
-
-		got := driveAll(t)[0]
-		if got.Outcome != outcomeReviewed || got.Merged || !got.MergeQueued || got.Finished {
-			t.Fatalf("item 1 is %q merged=%v merge_queued=%v finished=%v (%s), want reviewed, queued, not merged, not finished",
-				got.Outcome, got.Merged, got.MergeQueued, got.Finished, got.Reason)
-		}
-		if !strings.Contains(got.Reason, "could not be read") || !strings.Contains(got.Reason, "reconciliation decides it") {
-			t.Errorf("the reason does not say the merge state went unread: %s", got.Reason)
-		}
-	})
-}
-
-// With no gate declared --auto is the only path, and a merge the forge made on
-// the spot still finishes. drive refuses to merge with no gate declared, so the arm
-// is reached here directly.
-func TestAnAutoMergeWithoutAGateFinishesWhatTheForgeMerged(t *testing.T) {
-	ghLog := mergeProject(t)
-	dir, _ := forge(t, ghLog)
-	t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
-	s, err := open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.cfg.Loop.MergeGate = nil
-	it, err := s.item("1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	data, err := s.promptData(it)
-	if err != nil {
-		t.Fatal(err)
-	}
-	git(t, dir, "switch", "-q", "-c", data.Branch)
-	git(t, dir, "commit", "-q", "--allow-empty", "-m", "work")
-	git(t, dir, "push", "-q", "origin", data.Branch)
-	git(t, dir, "switch", "-q", "main")
-
-	d := DriveItem{ID: "1", Branch: data.Branch}
-	park := func(cause, why string) DriveItem {
-		d.Outcome, d.Park, d.Reason = outcomeParked, cause, why
-		return d
-	}
-	got := s.driveMerge(t.Context(), it, &d, park, "main", time.Time{})
-	if got.Outcome != outcomeMergedAtForge || !got.Merged || !got.Finished {
-		t.Fatalf("item 1 is %q/%q merged=%v finished=%v (%s), want %q, merged and finished",
-			got.Outcome, got.Park, got.Merged, got.Finished, got.Reason, outcomeMergedAtForge)
-	}
-	for _, c := range ghCalls(t, ghLog) {
-		if strings.Contains(c, "required_status_checks") {
-			t.Errorf("drive read the required checks with no merge gate to decide on them: %q", c)
-		}
-	}
-}
-
-// B lists A in its deps and A merges at the forge on the spot. A finishes in
-// the same drive, so B runs at its turn, whether named after A or appended by
-// --follow, rather than skipping as blocked.
-func TestADependentRunsBehindAMergeTheForgeMadeAtOnce(t *testing.T) {
+// B lists A in its deps. A merges and finishes in the same drive, so B runs
+// at its turn, whether named after A or appended by --follow, rather than
+// skipping as blocked behind a merge the drive left for later.
+func TestADependentRunsBehindAMergeInTheSameDrive(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		args []string
@@ -4978,8 +4578,8 @@ func TestADependentRunsBehindAMergeTheForgeMadeAtOnce(t *testing.T) {
 			if len(rows) != 2 {
 				t.Fatalf("drive reported %d rows, want 2: %+v", len(rows), rows)
 			}
-			if a := rows[0]; a.Outcome != outcomeMergedAtForge || !a.Finished {
-				t.Fatalf("item 1 is %q finished=%v (%s), want %q and finished", a.Outcome, a.Finished, a.Reason, outcomeMergedAtForge)
+			if a := rows[0]; a.Outcome != outcomeMergedByGate || !a.Finished {
+				t.Fatalf("item 1 is %q finished=%v (%s), want %q and finished", a.Outcome, a.Finished, a.Reason, outcomeMergedByGate)
 			}
 			if b := rows[1]; b.ID != "2" || b.Outcome == outcomeSkipped {
 				t.Errorf("item 2 is %s %q/%q (%s), want it run behind item 1", b.ID, b.Outcome, b.Park, b.Reason)
@@ -5005,8 +4605,8 @@ func TestAGateRefusalAtTheMergeParksWithThePullRequestOpen(t *testing.T) {
 	if !strings.Contains(got.Reason, "ci/test: failure on linux") {
 		t.Errorf("the reason does not carry the merge gate's output:\n%s", got.Reason)
 	}
-	if merges := mergeCalls(t, ghLog); len(merges) != 1 {
-		t.Errorf("merges = %q, want only the refused --auto attempt", merges)
+	if merges := mergeCalls(t, ghLog); len(merges) != 0 {
+		t.Errorf("merges = %q, want none: the gate refused the head", merges)
 	}
 	f := driveFollowUp(got, "work/01-first.md", true, 0, polOperator)
 	if !strings.Contains(f.Outcome, "PR #7 is open") {
@@ -5014,59 +4614,33 @@ func TestAGateRefusalAtTheMergeParksWithThePullRequestOpen(t *testing.T) {
 	}
 }
 
-// Without a gate nothing could authorize a merge the forge will not queue, so
-// the refusal parks merge_failed. drive refuses to merge with
-// no gate declared, so the arm is reached here directly. An error that is not
-// the auto-merge refusal parks merge_failed with a gate too: the forge saying
-// no to this pull request is not the gate's to overrule.
-func TestAnAutoMergeRefusalWithoutAGateStaysMergeFailed(t *testing.T) {
-	for _, c := range []struct {
-		name   string
-		gate   bool
-		output string
-	}{
-		{"no merge gate", false, "GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)"},
-		{"some other refusal", true, "GraphQL: Pull request is not mergeable (mergePullRequest)"},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			ghLog := mergeProject(t)
-			dir, err := os.Getwd()
-			if err != nil {
-				t.Fatal(err)
-			}
-			ghPath, err := exec.LookPath("gh")
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("DROVER_TEST_GH_LOG", ghLog)
-			t.Setenv("DROVER_TEST_GH_STDERR", c.output)
-			stub(t, ghPath, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$DROVER_TEST_GH_LOG\"\necho \"$DROVER_TEST_GH_STDERR\" >&2\nexit 1\n")
-			git(t, dir, "switch", "-q", "-c", "b1")
-			git(t, dir, "commit", "-q", "--allow-empty", "-m", "work")
-			s, err := open()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !c.gate {
-				s.cfg.Loop.MergeGate = nil
-			}
-			it, err := s.item("1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			d := DriveItem{ID: "1", Branch: "b1"}
-			park := func(cause, why string) DriveItem {
-				d.Outcome, d.Park, d.Reason = outcomeParked, cause, why
-				return d
-			}
-			got := s.driveMerge(t.Context(), it, &d, park, "main", time.Time{})
-			if got.Park != "merge_failed" || got.Merged {
-				t.Fatalf("parked %q merged=%v (%s), want merge_failed", got.Park, got.Merged, got.Reason)
-			}
-			if merges := mergeCalls(t, ghLog); len(merges) != 1 {
-				t.Errorf("merges = %q, want the one --auto attempt", merges)
-			}
-		})
+// The forge refusing the merge itself parks merge_failed with the pull request
+// open and the forge's words in the reason. The gate passed, but the forge
+// saying no to this pull request is not the gate's to overrule.
+func TestAForgeRefusingTheMergeParksMergeFailed(t *testing.T) {
+	ghLog := mergeProject(t)
+	forge(t, ghLog)
+	path, err := exec.LookPath("gh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path, path+".orig"); err != nil {
+		t.Fatal(err)
+	}
+	stub(t, path, "#!/bin/sh\n"+
+		"if [ \"$1 $2\" = 'pr merge' ]; then printf '%s\\n' \"$*\" >> \"$DROVER_TEST_GH_LOG\"; "+
+		"echo 'GraphQL: Pull request is not mergeable (mergePullRequest)' >&2; exit 1; fi\n"+
+		"exec \"$0.orig\" \"$@\"\n")
+
+	got := driveAll(t)[0]
+	if got.Park != "merge_failed" || got.Merged || got.PR != 7 {
+		t.Fatalf("item 1 is %q/%q merged=%v pr=%d (%s), want merge_failed with PR 7 open", got.Outcome, got.Park, got.Merged, got.PR, got.Reason)
+	}
+	if !strings.Contains(got.Reason, "not mergeable") {
+		t.Errorf("the reason does not carry the forge's refusal: %s", got.Reason)
+	}
+	if merges := mergeCalls(t, ghLog); len(merges) != 1 || strings.Contains(merges[0], "--auto") {
+		t.Errorf("merges = %q, want one synchronous attempt", merges)
 	}
 }
 
@@ -5081,11 +4655,11 @@ func TestATrunkThatMovedIsMergedInBeforeTheGate(t *testing.T) {
 
 	rows := driveAll(t)
 	got := rows[0]
-	if got.Outcome != outcomeReviewed || !got.MergeQueued {
+	if got.Outcome != outcomeMergedByGate || !got.Merged {
 		t.Fatalf("item 1 is %q/%q (%s), want reviewed and merged", got.Outcome, got.Park, got.Reason)
 	}
 	git(t, dir, "fetch", "-q", "origin")
-	moved := git(t, dir, "rev-parse", "origin/main")
+	moved := git(t, dir, "rev-parse", "origin/main^1")
 	if ok, err := isAncestor(dir, moved, got.Branch); err != nil || !ok {
 		t.Errorf("the branch does not hold the trunk's new commit %s (err %v)", moved, err)
 	}
@@ -5156,15 +4730,10 @@ func TestEveryRowCarriesWhenItEnded(t *testing.T) {
 		name, outcome, park string
 		setup               func(t *testing.T)
 	}{
-		{"reviewed", outcomeReviewed, "", func(*testing.T) {}},
 		{"merged by the merge gate", outcomeMergedByGate, "", func(t *testing.T) {
-			t.Setenv("DROVER_TEST_NO_AUTO", "1")
 			poll := checksPoll
 			checksPoll = time.Millisecond
 			t.Cleanup(func() { checksPoll = poll })
-		}},
-		{"merged at forge", outcomeMergedAtForge, "", func(t *testing.T) {
-			t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
 		}},
 		// Refused before the pull request, where the item is sent back without
 		// the park closure; at the merge the closure stamps it.
@@ -5275,7 +4844,7 @@ func TestAnUnmovedTrunkRerunsNoVerify(t *testing.T) {
 	dir, _ := forge(t, ghLog)
 
 	got := driveAll(t)[0]
-	if got.Outcome != outcomeReviewed || !got.MergeQueued {
+	if got.Outcome != outcomeMergedByGate || !got.Merged {
 		t.Fatalf("item 1 is %q/%q (%s), want reviewed and merged", got.Outcome, got.Park, got.Reason)
 	}
 	if runs := checkLog(t, dir); len(runs) != 0 {
@@ -5484,7 +5053,7 @@ func TestACatchUpWithNoVerifyCommandSaysSoAndMerges(t *testing.T) {
 	var rows []DriveItem
 	stderr := captureErr(t, func() { rows = driveAll(t) })
 	got := rows[0]
-	if got.Outcome != outcomeReviewed || !got.MergeQueued {
+	if got.Outcome != outcomeMergedByGate || !got.Merged {
 		t.Fatalf("item 1 is %q/%q (%s), want reviewed and merged", got.Outcome, got.Park, got.Reason)
 	}
 	if got.CatchUp == nil || got.CatchUp.Verify != catchUpSkipped {
@@ -5498,16 +5067,15 @@ func TestACatchUpWithNoVerifyCommandSaysSoAndMerges(t *testing.T) {
 	}
 }
 
-// Where the forge has no auto-merge the catch-up before the merge gets the
-// same rerun. The trunk moves while the forge refuses --auto, so the catch-up
-// that merges it is mergeByGate's, with the pull request already open: it stays
-// open and unmerged, and --match-head-commit never sees the failed head.
+// The catch-up before the merge gets the same rerun. The trunk moves once the
+// pull request opens, so the catch-up that merges it is mergeByGate's, with the
+// pull request already open: it stays open and unmerged, and
+// --match-head-commit never sees the failed head.
 func TestARedCatchUpAtTheMergeKeepsThePullRequestOpen(t *testing.T) {
 	isolate(t)
 	ghLog := mergeProject(t)
 	dir, remote := forge(t, ghLog)
-	t.Setenv("DROVER_TEST_NO_AUTO", "1")
-	moveTrunkAfter(t, remote, "gh", "pr merge --auto*", "a.txt", "a")
+	moveTrunkAfter(t, remote, "gh", "pr create*", "a.txt", "a")
 	t.Setenv("DROVER_TEST_CHECK_REFUSE", "a.txt implemented.txt")
 
 	got := driveAll(t)[0]
@@ -5517,8 +5085,8 @@ func TestARedCatchUpAtTheMergeKeepsThePullRequestOpen(t *testing.T) {
 	if got.CatchUp == nil || got.CatchUp.Verify != catchUpFailed {
 		t.Errorf("update_branch = %+v, want verify %q", got.CatchUp, catchUpFailed)
 	}
-	if merges := mergeCalls(t, ghLog); len(merges) != 1 {
-		t.Errorf("merges = %q, want only the refused --auto attempt", merges)
+	if merges := mergeCalls(t, ghLog); len(merges) != 0 {
+		t.Errorf("merges = %q, want none: the branch update failed its verify", merges)
 	}
 	if n := len(gateLog(t, dir)); n != 1 {
 		t.Errorf("[drive] merge_gate ran %d times, want 1: the red branch update stops before it", n)
@@ -5667,11 +5235,11 @@ func TestACatchUpDoesNotChargeTheItemWithTheTrunksFiles(t *testing.T) {
 				t.Fatalf("item 1 is %q/%q (%s), want parked protected_paths", got.Outcome, got.Park, got.Reason)
 			case tc.hold && strings.Contains(got.Reason, "deny.txt"):
 				t.Errorf("the hold names the trunk's file as the item's:\n%s", got.Reason)
-			case !tc.hold && (got.Outcome != outcomeReviewed || !got.MergeQueued):
+			case !tc.hold && (got.Outcome != outcomeMergedByGate || !got.Merged):
 				t.Fatalf("item 1 is %q/%q (%s), want reviewed and merged", got.Outcome, got.Park, got.Reason)
 			}
 			git(t, dir, "fetch", "-q", "origin")
-			if ok, err := isAncestor(dir, "origin/main", got.Branch); !tc.hold && (err != nil || !ok) {
+			if ok, err := isAncestor(dir, "origin/main^1", got.Branch); !tc.hold && (err != nil || !ok) {
 				t.Errorf("the branch never took the trunk, so nothing here exercised the branch update (err %v)", err)
 			}
 		})
@@ -5874,7 +5442,7 @@ func TestFollowPicksUpWhatAFinishUnblocked(t *testing.T) {
 	}
 }
 
-// [git] merge_method is the flag every merge carries, queued or not.
+// [git] merge_method is the flag every merge carries.
 func TestMergeMethodPicksTheFlag(t *testing.T) {
 	for _, method := range config.MergeMethods() {
 		t.Run(method, func(t *testing.T) {
@@ -5890,34 +5458,15 @@ func TestMergeMethodPicksTheFlag(t *testing.T) {
 
 			s := &session{cfg: &config.Config{Root: dir}}
 			s.cfg.Git.MergeMethod = method
-			for _, auto := range []bool{true, false} {
-				if err := s.mergeBranch(t.Context(), "b1", auto); err != nil {
-					t.Fatal(err)
-				}
+			if err := s.mergeBranch(t.Context(), "b1"); err != nil {
+				t.Fatal(err)
 			}
 			calls := ghCalls(t, log)
-			want := []string{
-				"pr merge --auto --" + method + " --match-head-commit " + head + " b1",
-				"pr merge --" + method + " --match-head-commit " + head + " b1",
-			}
+			want := []string{"pr merge --" + method + " --match-head-commit " + head + " b1"}
 			if !slices.Equal(calls, want) {
 				t.Errorf("gh saw %q, want %q", calls, want)
 			}
 		})
-	}
-}
-
-func TestAutoMergeRefusedMatchesTheRefusalAndNothingElse(t *testing.T) {
-	for out, want := range map[string]bool{
-		"GraphQL: Auto merge is not allowed for this repository (enablePullRequestAutoMerge)":                      true,
-		"GraphQL: Pull request Protected branch rules not configured for this branch (enablePullRequestAutoMerge)": true,
-		"GraphQL: Pull request is not mergeable (mergePullRequest)":                                                false,
-		"X Pull request #7 is not mergeable: the merge commit cannot be cleanly created.":                          false,
-		"": false,
-	} {
-		if got := autoMergeRefused(out); got != want {
-			t.Errorf("autoMergeRefused(%q) = %v, want %v", out, got, want)
-		}
 	}
 }
 
@@ -5982,7 +5531,7 @@ func TestAClearedBlockPasses(t *testing.T) {
 	if len(rows) == 0 || rows[0].ID != "1" {
 		t.Fatalf("drive reported %+v, want item 1 first", rows)
 	}
-	if got := rows[0]; got.Park != "" || !got.MergeQueued {
+	if got := rows[0]; got.Park != "" || !got.Merged {
 		t.Errorf("item 1 is %q/%q merged=%v (%s), want merged", got.Outcome, got.Park, got.Merged, got.Reason)
 	}
 }
@@ -6818,7 +6367,12 @@ func TestAGateSayingBehindIsRetriedOnceAfterACatchUp(t *testing.T) {
 				t.Errorf("[drive] merge_gate ran %d times, want 2: the first and one retry", n)
 			}
 			git(t, dir, "fetch", "-q", "origin")
-			moved := git(t, dir, "rev-parse", "origin/main")
+			trunk := "origin/main"
+			if got.Merged {
+				// The merge commit sits on top of the trunk the retry took.
+				trunk = "origin/main^1"
+			}
+			moved := git(t, dir, "rev-parse", trunk)
 			if got.CatchUp == nil || got.CatchUp.To != moved {
 				t.Errorf("update_branch = %+v, want the retry's merge of %s", got.CatchUp, moved)
 			}
@@ -6826,7 +6380,7 @@ func TestAGateSayingBehindIsRetriedOnceAfterACatchUp(t *testing.T) {
 				t.Fatalf("item 1 parked %q (%s), want %q", got.Park, got.Reason, c.park)
 			}
 			if c.park == "" {
-				if !got.MergeQueued {
+				if !got.Merged {
 					t.Errorf("item 1 is %q (%s), want the merge requested after the retry", got.Outcome, got.Reason)
 				}
 				return
@@ -6922,8 +6476,8 @@ func TestAGateExitingOneOnAHeadBehindTheTrunkIsReadAsBehind(t *testing.T) {
 			switch {
 			case c.park == "":
 				git(t, dir, "fetch", "-q", "origin")
-				moved := git(t, dir, "rev-parse", "origin/main")
-				if !got.MergeQueued || got.CatchUp == nil || got.CatchUp.To != moved {
+				moved := git(t, dir, "rev-parse", "origin/main^1")
+				if !got.Merged || got.CatchUp == nil || got.CatchUp.To != moved {
 					t.Errorf("item 1 is %q with update_branch %+v (%s), want the retry's merge of %s merged",
 						got.Outcome, got.CatchUp, got.Reason, moved)
 				}
@@ -6968,8 +6522,8 @@ func TestTheTrunkIsCaughtUpAgainWhenItMovesBeforeTheGate(t *testing.T) {
 		t.Errorf("[drive] merge_gate ran %d times, want once, on the head caught up again", n)
 	}
 	git(t, dir, "fetch", "-q", "origin")
-	moved := git(t, dir, "rev-parse", "origin/main")
-	if !got.MergeQueued || got.CatchUp == nil || got.CatchUp.To != moved {
+	moved := git(t, dir, "rev-parse", "origin/main^1")
+	if !got.Merged || got.CatchUp == nil || got.CatchUp.To != moved {
 		t.Errorf("item 1 is %q with update_branch %+v (%s), want %s merged in before the gate", got.Outcome, got.CatchUp, got.Reason, moved)
 	}
 }
@@ -7665,6 +7219,11 @@ func TestAConflictAtDispatchGoesToTheSessionAtAuto(t *testing.T) {
 	staleBranch(t, dir, "shared.txt", "ours")
 	mergedSibling(t, dir)
 	resolvingImpl(t)
+	// Item 1 merges by the end of the drive, so the trunk the conflict was
+	// against is read now, before the drive moves it.
+	git(t, dir, "fetch", "-q", "origin")
+	trunkAt := git(t, dir, "rev-parse", "origin/main")
+	prior := git(t, dir, "rev-parse", "origin/main~1")
 
 	evs, stderr, err := driveEventsOf(t, "1")
 	if err != nil {
@@ -7694,9 +7253,9 @@ func TestAConflictAtDispatchGoesToTheSessionAtAuto(t *testing.T) {
 	}
 	git(t, dir, "fetch", "-q", "origin")
 	tree := t.TempDir() + "/tree"
-	git(t, dir, "worktree", "add", "-q", "--detach", tree, "origin/main~1")
+	git(t, dir, "worktree", "add", "-q", "--detach", tree, prior)
 	s.tree = tree
-	c := s.conflictBrief("1", "origin/main", "origin/main~1", git(t, dir, "rev-parse", "origin/main"), []string{"shared.txt"})
+	c := s.conflictBrief("1", trunkAt, prior, trunkAt, []string{"shared.txt"})
 	if len(c.Paths) != 1 || len(c.Paths[0].Items) != 1 || c.Paths[0].Items[0].ID != "2" ||
 		len(c.Paths[0].Items[0].Requirements) != 1 {
 		t.Errorf("Conflict = %+v, want shared.txt owned by item 2 with its requirement", c)
@@ -8444,243 +8003,6 @@ cd "$DROVER_ROOT" && DROVER_TEST_AS_DROVER=1 "$DROVER_TEST_SELF" request-changes
 	}
 }
 
-func TestAuditCompletionWithdrawalCannotReviveAnOldQueue(t *testing.T) {
-	for _, replacement := range []bool{false} {
-		t.Run(fmt.Sprintf("replacement=%v", replacement), func(t *testing.T) {
-			s := driveProject(t)
-			it, err := s.item("1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			branch, err := s.branchFor(it)
-			if err != nil {
-				t.Fatal(err)
-			}
-			git(t, s.cfg.Root, "switch", "-q", "-c", branch)
-			write(t, filepath.Join(s.cfg.Root, "shipped.txt"), "work\n")
-			git(t, s.cfg.Root, "add", "shipped.txt")
-			git(t, s.cfg.Root, "commit", "-q", "-m", "work")
-			if err := s.recordHead("1", branch); err != nil {
-				t.Fatal(err)
-			}
-			git(t, s.cfg.Root, "switch", "-q", "main")
-			git(t, s.cfg.Root, "merge", "-q", "--no-ff", "-m", "merge", branch)
-			if err := s.record(ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: ledger.Today()}); err != nil {
-				t.Fatal(err)
-			}
-			s.recordPR("1", branch, 7)
-			operator := *s
-			operator.ledger = &ledger.Ledger{}
-
-			state := t.TempDir()
-			signal, done := filepath.Join(state, "signal"), filepath.Join(state, "done")
-			t.Setenv("QUERY_SIGNAL", signal)
-			t.Setenv("QUERY_DONE", done)
-			ghPath, err := exec.LookPath("gh")
-			if err != nil {
-				t.Fatal(err)
-			}
-			stub(t, ghPath, `#!/bin/sh
-case "$*" in *'--state merged'*)
-  touch "$QUERY_SIGNAL"
-  i=0
-  while [ ! -f "$QUERY_DONE" ]; do
-    i=$((i+1)); [ "$i" -lt 500 ] || exit 1
-    sleep 0.01
-  done
-  ;;
-esac
-echo '[]'
-`)
-			finished := make(chan error, 1)
-			go func() {
-				deadline := time.Now().Add(5 * time.Second)
-				for {
-					if _, err := os.Stat(signal); err == nil {
-						break
-					}
-					if time.Now().After(deadline) {
-						finished <- errors.New("the merged-state query never ran")
-						return
-					}
-					time.Sleep(time.Millisecond)
-				}
-				var err error
-				if replacement {
-					operator.recordPR("1", branch, 8)
-				} else {
-					yes := true
-					err = operator.record(ledger.Row{ID: "1", Merged: &yes, Date: ledger.Today()})
-					if err == nil {
-						no := false
-						err = operator.record(ledger.Row{ID: "1", Merged: &no, Date: ledger.Today()})
-					}
-				}
-				if err == nil {
-					err = os.WriteFile(done, nil, 0o600)
-				}
-				finished <- err
-			}()
-
-			d := DriveItem{ID: "1", Branch: branch, PR: 7}
-			got := s.afterAutoMerge(context.Background(), it, &d, "main", time.Time{})
-			if err := <-finished; err != nil {
-				t.Fatal(err)
-			}
-			if got.MergeQueued || got.Merged {
-				t.Errorf("drive reports MergeQueued=%v Merged=%v, want neither: the lifecycle ended during the query", got.MergeQueued, got.Merged)
-			}
-			if replacement && (got.PR != 8 || got.Outcome != outcomeReviewed) {
-				t.Errorf("drive reports %s on PR %d, want %s on the replacement PR 8", got.Outcome, got.PR, outcomeReviewed)
-			}
-
-			if err := s.reload(); err != nil {
-				t.Fatal(err)
-			}
-			if pr, queued := s.ledger.MergeQueued("1"); queued {
-				t.Errorf("the ledger reads queued on PR %d, want the ended lifecycle left ended", pr)
-			}
-			if current, _ := s.ledger.PR("1"); replacement && current != 8 {
-				t.Errorf("the ledger names PR %d, want the replacement PR 8", current)
-			}
-
-			var out bytes.Buffer
-			events = &eventSink{cfg: s.cfg, notifier: newNotifier(s.cfg), w: &out}
-			activeDrive.Store(&runningDrive{id: "D2"})
-			t.Cleanup(func() { events = nil; activeDrive.Store(nil) })
-			if _, _, err := s.reconcile(); err != nil {
-				t.Fatal(err)
-			}
-			for _, line := range strings.Split(out.String(), "\n") {
-				var e DriveEvent
-				if json.Unmarshal([]byte(line), &e) == nil && e.Event == evMerged {
-					t.Errorf("reconciliation announced the ended queue: id=%s PR=%d drive=%s", e.ID, e.PR, e.Drive)
-				}
-			}
-		})
-	}
-}
-
-func TestAWithdrawalDuringTheMergedQueryEndsTheQueue(t *testing.T) {
-	for _, replacement := range []bool{false} {
-		t.Run(fmt.Sprintf("replacement=%v", replacement), func(t *testing.T) {
-			s := driveProject(t)
-			it, err := s.item("1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			branch, err := s.branchFor(it)
-			if err != nil {
-				t.Fatal(err)
-			}
-			git(t, s.cfg.Root, "switch", "-q", "-c", branch)
-			write(t, filepath.Join(s.cfg.Root, "shipped.txt"), "work\n")
-			git(t, s.cfg.Root, "add", "shipped.txt")
-			git(t, s.cfg.Root, "commit", "-q", "-m", "work")
-			if err := s.recordHead("1", branch); err != nil {
-				t.Fatal(err)
-			}
-			git(t, s.cfg.Root, "switch", "-q", "main")
-			git(t, s.cfg.Root, "merge", "-q", "--no-ff", "-m", "merge", branch)
-			if err := s.record(ledger.Row{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: ledger.Today()}); err != nil {
-				t.Fatal(err)
-			}
-			s.recordPR("1", branch, 7)
-			yes := true
-			if err := s.record(ledger.Row{ID: "1", Merged: &yes, Date: ledger.Today()}); err != nil {
-				t.Fatal(err)
-			}
-			operator := *s
-			operator.ledger = &ledger.Ledger{}
-
-			state := t.TempDir()
-			signal, done := filepath.Join(state, "signal"), filepath.Join(state, "done")
-			t.Setenv("QUERY_SIGNAL", signal)
-			t.Setenv("QUERY_DONE", done)
-			ghPath, err := exec.LookPath("gh")
-			if err != nil {
-				t.Fatal(err)
-			}
-			stub(t, ghPath, `#!/bin/sh
-case "$*" in *'--state merged'*)
-  touch "$QUERY_SIGNAL"
-  i=0
-  while [ ! -f "$QUERY_DONE" ]; do
-    i=$((i+1)); [ "$i" -lt 500 ] || exit 1
-    sleep 0.01
-  done
-  ;;
-esac
-echo '[]'
-`)
-			finished := make(chan error, 1)
-			go func() {
-				deadline := time.Now().Add(5 * time.Second)
-				for {
-					if _, err := os.Stat(signal); err == nil {
-						break
-					}
-					if time.Now().After(deadline) {
-						finished <- errors.New("the merged-state query never ran")
-						return
-					}
-					time.Sleep(time.Millisecond)
-				}
-				var err error
-				if replacement {
-					operator.recordPR("1", branch, 8)
-				} else {
-					no := false
-					err = operator.record(ledger.Row{ID: "1", Merged: &no, Date: ledger.Today()})
-				}
-				if err == nil {
-					err = os.WriteFile(done, nil, 0o600)
-				}
-				finished <- err
-			}()
-
-			d := DriveItem{ID: "1", Branch: branch, PR: 7}
-			got := s.afterAutoMerge(context.Background(), it, &d, "main", time.Time{})
-			if err := <-finished; err != nil {
-				t.Fatal(err)
-			}
-			if got.MergeQueued || got.Merged {
-				t.Errorf("drive reports MergeQueued=%v Merged=%v, want neither: the lifecycle ended during the query", got.MergeQueued, got.Merged)
-			}
-			if !replacement && (got.Outcome != outcomeSkipped || got.Park != stateDone) {
-				t.Errorf("drive reports %s %s, want %s %s: a completion row landed during the query", got.Outcome, got.Park, outcomeSkipped, stateDone)
-			}
-			if replacement && (got.PR != 8 || got.Outcome != outcomeReviewed) {
-				t.Errorf("drive reports %s on PR %d, want %s on the replacement PR 8", got.Outcome, got.PR, outcomeReviewed)
-			}
-
-			if err := s.reload(); err != nil {
-				t.Fatal(err)
-			}
-			if pr, queued := s.ledger.MergeQueued("1"); queued {
-				t.Errorf("the ledger reads queued on PR %d, want the ended lifecycle left ended", pr)
-			}
-			if current, _ := s.ledger.PR("1"); replacement && current != 8 {
-				t.Errorf("the ledger names PR %d, want the replacement PR 8", current)
-			}
-
-			var out bytes.Buffer
-			events = &eventSink{cfg: s.cfg, notifier: newNotifier(s.cfg), w: &out}
-			activeDrive.Store(&runningDrive{id: "D2"})
-			t.Cleanup(func() { events = nil; activeDrive.Store(nil) })
-			if _, _, err := s.reconcile(); err != nil {
-				t.Fatal(err)
-			}
-			for _, line := range strings.Split(out.String(), "\n") {
-				var e DriveEvent
-				if json.Unmarshal([]byte(line), &e) == nil && e.Event == evMerged {
-					t.Errorf("reconciliation announced the ended queue: id=%s PR=%d drive=%s", e.ID, e.PR, e.Drive)
-				}
-			}
-		})
-	}
-}
-
 // drive's own send-backs are not review rounds. With max_review_rounds = 2,
 // the fixture's sourceless row (a round, as every row written before the source
 // existed is) and two verify send-backs leave the next review's request-changes
@@ -8843,4 +8165,16 @@ func TestE92SendBackDoesNotAnswerCapDecision(t *testing.T) {
 	if Code(err) != ExitRefused || !strings.Contains(fmt.Sprint(err), kept) {
 		t.Fatalf("unanswered cap after send-back: %v, want exit 3 naming %s", err, kept)
 	}
+}
+
+// writeQueued appends the row a drive wrote when it queued an --auto merge.
+// Drive no longer writes one, but ledgers from before that still hold them and
+// reconcile is what finishes the merges they name.
+func writeQueued(t *testing.T, s *session, id, branch string, pr int) {
+	t.Helper()
+	row := ledger.Stamp(driveStamp(ledger.Row{ID: id, Branch: branch, PR: pr, MergeQueued: true, Date: ledger.Today()}))
+	if err := ledger.Append(s.cfg.Abs(s.cfg.Paths.Ledger), row); err != nil {
+		t.Fatal(err)
+	}
+	s.ledger.Rows = append(s.ledger.Rows, row)
 }
