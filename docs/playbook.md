@@ -197,7 +197,7 @@ Set `[review] max_review_rounds` when nobody is watching the loop:
 max_review_rounds = 4
 ```
 
-Past it `drover request-changes` exits 3 and writes nothing, the prompt stops instructing `request-changes` and renders the filing path instead, and `drover finish` says so if the item merges with nothing filed against it. Set it higher than the worst item that went round the loop and merged correctly.
+Past it `drover request-changes` exits 3 and the item parks for you. The prompt still tells the reviewer to route every finding as on any other pass and record it with `request-changes`, and says drover will refuse the send-back, keep the findings and park the item: nothing is filed, and nothing merges with them. Whether it takes another round is your decision. Set it higher than the worst item that went round the loop and merged correctly.
 
 The escape is `drover request-changes --over-limit`, and it is yours rather than the reviewer's: it refuses inside a session drover launched, because a refusal that names its own override is an instruction and the agent is the party being bounded. If you find yourself passing it, raise the number instead.
 

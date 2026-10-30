@@ -120,7 +120,7 @@ The audit note rides verbatim because a re-review needs to read what the last pa
 
 Modified files only. A feature creates files no body could have named, and a body cites the code it is about rather than the test that does not exist yet, so counting either puts clean work beside work that spread.
 
-`.Capped` is the pair to `.Rounds` and `.MaxReviewRounds`: a prompt that instructs `drover request-changes` beside a command that will refuse is the tool arguing with itself, and the agent meeting that spends its turn retrying. Render the filing path instead when it is set.
+`.Capped` is the pair to `.Rounds` and `.MaxReviewRounds`: a prompt that instructs `drover request-changes` without saying the command will refuse sends the agent retrying. The built-in template keeps the `request-changes` instructions when it is set and adds that drover will refuse the send-back, keep the findings and park the item for the operator, so the reviewer records its findings once and files nothing.
 
 A `Resolution` is `.Number .Title .Body .State .Disposition .By .Note .Applied .Unavailable`, plus `.Undisposed`, which reports one nobody has judged yet. `.State` is the issue's own, so a reviewer sees one somebody closed by hand; `.Applied` names what `finish` already wrote to the tracker, so a reviewer does not re-litigate a public comment; `.Unavailable` says why an issue could not be read, which renders as a question drover could not ask rather than as an empty report. `.UndisposedCloses` filters `.Closes` to the reviewer's actual worklist, and it is the list to render: `finish` refuses to act on anything else.
 

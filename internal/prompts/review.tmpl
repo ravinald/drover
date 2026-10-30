@@ -307,6 +307,12 @@ No run log for this item, so there is no self-report to check against. Review
 the code on its own terms and say so in the note.
 {{ end }}
 Then:
+- Before reading anything else, check the run's requirement-to-test map: its
+  report carries one line per numbered requirement naming the test that fails
+  without the change. A requirement with no line, or a line naming a test the
+  branch does not hold, is unmet and goes back as `BRANCH-REQUIREMENT` whatever
+  the code looks like. Then read each mapped test against its requirement: one
+  that would pass on the trunk proves nothing about the change.
 {{- if and .VerifyCommand .MergeGate }}
 - Do not re-run the full verify command ({{ .VerifyCommand }}). The implementing session
   ran it before committing, and the merge waits on `{{ .MergeGate }}`, which
@@ -322,15 +328,17 @@ Then:
 {{- end }}
 {{- if .Capped }}
 - **{{ .ID }} is at its round cap.** A review has sent it back {{ .Rounds }} times and
-  `[review] max_review_rounds` is {{ .MaxReviewRounds }}, so `drover request-changes` refuses and nothing you
-  find goes back to the branch in this pass. That is the loop terminating, not a
-  result on what you found.
+  `[review] max_review_rounds` is {{ .MaxReviewRounds }}. Route every finding exactly as on any other
+  pass, and record what goes back to the branch with
+  `drover request-changes {{ .ID }} -f <file>` as below. drover will refuse the
+  send-back, keep the findings and park the item for the operator, who decides
+  whether it takes another round. That is the loop terminating, not a result on
+  what you found.
 
-  Send every finding to its destination accordingly. A defect that would break something in use is
-  still real: file it against this item so whoever merges sees it, and say so in
-  your report and your audit note. Anything cheaper is `FIX-IN-REVIEW`,
-  `NEW-ITEM` or `REPORT-ONLY` as usual. Level the item honestly either way — the
-  cap changes where a finding goes and nothing about how hard you looked.
+  Nothing is filed, and nothing merges with these findings standing: a defect in
+  this item's own work is unfinished implementation however many rounds it took
+  to find. Level the item honestly either way, because the cap changes who
+  decides the next round and nothing about how hard you looked.
 {{ end }}
 {{- if .Repeated }}
 - Where this pass sits. The ledger records {{ .Runs }} run{{ if ne .Runs 1 }}s{{ end }} of {{ .ID }} and
@@ -346,8 +354,9 @@ Then:
   defect that would reach production goes back to the branch on pass nine as
   readily as on pass two. What the number is for is the marginal finding: one
   you would not have spent a run on had you met it on pass one does not become
-  worth one on pass eight. Send that one to `REPORT-ONLY`, fix it here, or file
-  it, and say in your audit note which you did and why.
+  worth one on pass eight. A marginal finding in the diff is `FIX-IN-REVIEW` or
+  `REPORT-ONLY`; say in your audit note which you did and why. One in the diff
+  that would change behavior is not marginal, and goes back at any pass.
 {{ end }}
 - Read the diff for what it changed that no numbered requirement names. A fix
   aimed at one reported case routinely moves something beside it: a permission,
@@ -414,7 +423,7 @@ Then:
   `{{ .Token }}` > {{ .Where }}
 {{ .Wrap 4 }}
 {{- end }}
-{{ if and .Path (not .Capped) }}
+{{ if .Path }}
 - Anything going back to the branch gets written into the item body, before you
   hand back:
 
@@ -427,10 +436,15 @@ Then:
   and did not write down is a gap the next run rediscovers or ships again.
 
   Write what the next run cannot re-derive cheaply: the file and line, the
-  command that reproduces it and its actual output, the shape of the fix, and
-  the test that would fail today. Evidence, not a result. "Requirement 3 is
-  unmet" sends a session hunting; a paste of the wrong output next to the right
-  one does not.
+  command that reproduces it and its actual output, and the shape of the fix.
+  Evidence, not a result. "Requirement 3 is unmet" sends a session hunting; a
+  paste of the wrong output next to the right one does not.
+
+  Every finding sent back carries a test that fails on the branch as it stands,
+  as a fenced block in the file or the path and name of a test already on the
+  branch, and you ran it and saw it fail. The next run commits that test unchanged and makes it
+  pass, so a finding without one is a finding the fix can claim to close
+  without anyone being able to check.
 
   `request-changes` replaces that section rather than appending to it, so say which
   requirements now hold and which findings are settled: a block naming gaps a
@@ -492,10 +506,10 @@ Then:
   looked, not how the item scored. What happens to the gap depends on whether
   the work can still be changed. Before the merge the three `BRANCH-` cases
   above go back through a request for changes and `FIX-IN-REVIEW` is corrected in this pass;
-  either way nothing is filed. After the merge the branch is gone, so each
-  `BRANCH-` case becomes a follow-up filed against its owner, `FIX-IN-REVIEW` has no
-  branch left to commit to and becomes `NEW-ITEM`, and the row still records
-  that someone traced them all.
+  either way nothing is filed. A defect found after the merge is a bug: the
+  branch is gone, so it is filed through intake (your tracker's bug label, then
+  `drover intake <n>`) or with `drover new <kind> "<title>" -f <file>` without
+  `--found-in`, and the row still records that someone traced them all.
 
   `--code-by` names who wrote the code: `agent` for the implement session drover
   launched, a person's name, or a comma list (`agent,sam`) for mixed
