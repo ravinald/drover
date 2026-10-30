@@ -534,6 +534,10 @@ type DriveItem struct {
 	// head is the commit whose checks drive last settled, which the re-check at
 	// the end of the drive reads again for an item parked on them.
 	head string
+	// gated is the commit the merge gate passed before the pull request
+	// opened. The merge reuses that answer only while the branch still points
+	// there.
+	gated string
 	// signoff is the same for an [operator] requirement park: which ones, and
 	// the command that records them.
 	signoff string
@@ -4211,6 +4215,10 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 		return *d
 	}
 
+	if h, err := revParse(s.cfg.Root, d.Branch); err == nil {
+		d.gated = h
+	}
+
 	// The pull request opens here and nowhere later. A green gate on a passed
 	// review is the whole claim it makes, so everything below decides whether the
 	// merge follows and none of it takes the pull request back: a denied path and
@@ -4257,29 +4265,54 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 // driveMerge merges a reviewed head whose gate just passed, synchronously, so
 // the merge, its record and its dependents all happen in this drive.
 //
-// The gate's answer stands while the trunk has not moved past the head it
-// read: nothing else pushes to the branch inside the trunk stage, and
-// --match-head-commit refuses the merge if something did. A trunk that moved,
-// or a fetch that cannot say, goes through mergeByGate, which catches the
-// branch up and asks the gate again about the head that merges.
+// The gate's answer stands while the branch is still the commit the gate
+// passed and the trunk has not moved past it. A branch that moved, a trunk
+// that moved, or a fetch that cannot say goes through mergeByGate, which
+// catches the branch up and asks the gate again about the head that merges.
 func (s *session) driveMerge(ctx context.Context, it backlog.Item, d *DriveItem,
 	park func(cause, why string) DriveItem, trunk string, deadline time.Time,
 ) DriveItem {
-	if past, err := s.trunkPast(d.Branch, trunk); err != nil || past {
-		return s.mergeByGate(ctx, it, d, park, trunk, deadline)
-	}
 	head, err := revParse(s.cfg.Root, d.Branch)
 	if err != nil {
 		return park("merge_failed", err.Error())
+	}
+	if past, err := s.trunkPast(d.Branch, trunk); err != nil || past || head != d.gated {
+		return s.mergeByGate(ctx, it, d, park, trunk, deadline)
 	}
 	events.stage(d.ID, stageMerge)
 	if err := s.mergeBranch(ctx, d.Branch); err != nil {
 		return park("merge_failed", err.Error())
 	}
+	return s.afterMergeCall(ctx, it, d, "[drive] merge_gate passed "+shortSHA(head)+" and drover merged it")
+}
+
+// afterMergeCall confirms with the forge that the pull request merged before
+// the item is recorded merged. `gh pr merge` without --auto still enqueues
+// where branch protection requires a merge queue, and it exits 0 having merged
+// nothing: recorded merged, finish would refuse it and the dependents behind
+// it would skip as blocked. A queued merge is reported as one, and the next
+// drive's reconciliation records it once it lands.
+func (s *session) afterMergeCall(ctx context.Context, it backlog.Item, d *DriveItem, reason string) DriveItem {
+	n, merged, err := gh.MergedPR(s.labels(), d.Branch)
+	if err != nil || !merged {
+		d.Outcome = outcomeReviewed
+		d.Reason = "gh pr merge returned, and the forge does not report the pull request merged (a required merge queue holds it, or the read failed); the next drive's reconciliation records it once it lands"
+		if err != nil {
+			d.Reason += ": " + err.Error()
+		}
+		fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
+		s.leaveItem(d)
+		return *d
+	}
+	if n > 0 {
+		d.PR = n
+	}
 	d.Merged = true
 	d.Outcome = outcomeMergedByGate
-	d.Reason = "[drive] merge_gate passed " + shortSHA(head) + " and drover merged it"
+	d.Reason = reason
 	s.leaveItem(d)
+	// A tree the gate dirtied keeps the item parked on it: the merge stands, and
+	// the next drive's reconciliation finishes it once the tree is dealt with.
 	if d.Outcome == outcomeMergedByGate {
 		s.finishMerged(it, d)
 	}
@@ -4345,17 +4378,7 @@ func (s *session) mergeByGate(ctx context.Context, it backlog.Item, d *DriveItem
 	if err := s.mergeBranch(ctx, d.Branch); err != nil {
 		return park("merge_failed", err.Error())
 	}
-	d.Merged = true
-	d.Outcome = outcomeMergedByGate
-	d.Reason = "[drive] merge_gate passed " + shortSHA(head) + " and drover merged it"
-	s.leaveItem(d)
-	// A tree the gate dirtied keeps the item parked on it: the merge stands, and
-	// the next drive's reconciliation finishes it once the tree is dealt with.
-	if d.Outcome == outcomeMergedByGate {
-		s.finishMerged(it, d)
-	}
-	s.afterMerge(ctx, d)
-	return *d
+	return s.afterMergeCall(ctx, it, d, "[drive] merge_gate passed "+shortSHA(head)+" and drover merged it")
 }
 
 // finishMerged records a merge this drive made, as finish does: the ledger row, the

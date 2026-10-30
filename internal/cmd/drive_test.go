@@ -1090,7 +1090,7 @@ func mergeProject(t *testing.T) string {
 		"if [ -e \"$DROVER_TEST_GH_LOG.merged\" ]; then echo '[{\"number\":7,\"mergedAt\":\"2026-10-07T00:00:00Z\"}]'; else echo '[]'; fi ;; "+
 		"*) echo '[]' ;; esac ;;\n"+
 		"  'pr create') echo 'https://example.invalid/o/r/pull/7' ;;\n"+
-		"  'pr merge')  : > \"$DROVER_TEST_GH_LOG.merged\" ;;\n"+
+		"  'pr merge')  [ -n \"${DROVER_TEST_GH_QUEUES:-}\" ] || : > \"$DROVER_TEST_GH_LOG.merged\" ;;\n"+
 		"  'pr '*)      : ;;\n"+
 		"  'api '*/check-runs*) echo '{\"total_count\":1,\"check_runs\":[{\"id\":1,\"name\":\"ci\",\"status\":\"completed\",\"conclusion\":\"success\"}]}' ;;\n"+
 		"  *)           echo '[]' ;;\n"+
@@ -4590,10 +4590,13 @@ func TestADependentRunsBehindAMergeInTheSameDrive(t *testing.T) {
 
 // A gate that refuses at the merge parks the item with the pull request open
 // and the gate's own last lines in the reason, and nothing merges.
+//
+// The trunk moves once the pull request opens, which is what sends the merge
+// back through the gate: an unmoved trunk reuses the first gate's answer.
 func TestAGateRefusalAtTheMergeParksWithThePullRequestOpen(t *testing.T) {
 	ghLog := mergeProject(t)
-	forge(t, ghLog)
-	t.Setenv("DROVER_TEST_NO_AUTO", "1")
+	_, remote := forge(t, ghLog)
+	moveTrunkAfter(t, remote, "gh", "pr create*", "elsewhere.txt", "theirs")
 	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "1")
 
 	rows := driveAll(t)
@@ -8177,4 +8180,83 @@ func writeQueued(t *testing.T, s *session, id, branch string, pr int) {
 		t.Fatal(err)
 	}
 	s.ledger.Rows = append(s.ledger.Rows, row)
+}
+
+// gh pr merge exits 0 on a branch whose protection requires a merge queue,
+// having merged nothing. drive reads the forge before recording the merge, so
+// the item reads ready to merge rather than merged, and nothing is finished.
+func TestAMergeTheForgeQueuedIsNotRecordedMerged(t *testing.T) {
+	mergeProject(t)
+	t.Setenv("DROVER_TEST_GH_QUEUES", "1")
+
+	got := driveAll(t)[0]
+	if got.Merged || got.Finished || got.Outcome != outcomeReviewed {
+		t.Fatalf("item 1 is %q merged=%v finished=%v (%s), want %q, not merged, not finished",
+			got.Outcome, got.Merged, got.Finished, got.Reason, outcomeReviewed)
+	}
+	if !strings.Contains(got.Reason, "merge queue") {
+		t.Errorf("the reason does not say why the merge is not recorded: %s", got.Reason)
+	}
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.ledger.State("1").Merged {
+		t.Error("the ledger records item 1 merged although the forge never merged it")
+	}
+}
+
+// The gate's answer is reused at the merge only for the commit it read. A
+// branch that moved since sends the merge back through the gate.
+func TestAMergeReadsTheGateAgainWhenTheBranchMoved(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		moved bool
+		gates int
+	}{
+		{"branch at the gated commit", false, 0},
+		{"branch moved since the gate", true, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ghLog := mergeProject(t)
+			dir, _ := forge(t, ghLog)
+			s, err := open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			it, err := s.item("1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := s.promptData(it)
+			if err != nil {
+				t.Fatal(err)
+			}
+			git(t, dir, "switch", "-q", "-c", data.Branch)
+			git(t, dir, "commit", "-q", "--allow-empty", "-m", "work")
+			gated := git(t, dir, "rev-parse", "HEAD")
+			if c.moved {
+				git(t, dir, "commit", "-q", "--allow-empty", "-m", "pushed after the gate")
+			}
+			git(t, dir, "push", "-q", "origin", data.Branch)
+			git(t, dir, "switch", "-q", "main")
+
+			d := DriveItem{ID: "1", Branch: data.Branch, gated: gated}
+			park := func(cause, why string) DriveItem {
+				d.Outcome, d.Park, d.Reason = outcomeParked, cause, why
+				return d
+			}
+			got := s.driveMerge(t.Context(), it, &d, park, "main", time.Now().Add(time.Minute))
+			if !got.Merged {
+				t.Fatalf("item 1 is %q/%q (%s), want merged", got.Outcome, got.Park, got.Reason)
+			}
+			if n := len(gateLog(t, dir)); n != c.gates {
+				t.Errorf("the merge gate ran %d times at the merge, want %d", n, c.gates)
+			}
+			head := git(t, dir, "rev-parse", data.Branch)
+			if merges := mergeCalls(t, ghLog); len(merges) != 1 || !strings.Contains(merges[0], head) {
+				t.Errorf("merges = %q, want one bound to %s", merges, head)
+			}
+		})
+	}
 }
