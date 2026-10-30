@@ -534,6 +534,10 @@ type DriveItem struct {
 	// head is the commit whose checks drive last settled, which the re-check at
 	// the end of the drive reads again for an item parked on them.
 	head string
+	// gated is the commit the merge gate passed before the pull request
+	// opened. The merge reuses that answer only while the branch still points
+	// there.
+	gated string
 	// signoff is the same for an [operator] requirement park: which ones, and
 	// the command that records them.
 	signoff string
@@ -586,8 +590,9 @@ const (
 	// what reached the trunk unattended needs these apart from the merges branch
 	// protection decided.
 	outcomeMergedByGate = "merged_by_drover"
-	// outcomeMergedAtForge is an --auto request the forge merged on the spot
-	// because nothing at the forge had to wait, rather than queueing it.
+	// outcomeMergedAtForge is an --auto request the forge merged on the spot.
+	// Drive no longer asks for --auto; the outcome stays so drive end rows
+	// written before that still read as merges.
 	outcomeMergedAtForge = "merged_immediately"
 )
 
@@ -3120,14 +3125,8 @@ func driveFollowUp(d DriveItem, item string, drafted bool, maxReviewRounds int, 
 			"nothing yet: the next drover drive finishes it, or drover finish " + id,
 		}
 	case outcomeMergedAtForge:
-		switch {
-		case d.Finished:
+		if d.Finished {
 			return followUp{pr + " merged at the forge at once, and finished" + because, "nothing"}
-		case errors.Is(d.stop, errMergedRed):
-			return followUp{
-				pr + " merged at the forge at once, and the merge gate refused it after" + because,
-				"read the merge gate's output and fix the trunk, then drover finish " + id + " and drover drive again",
-			}
 		}
 		return followUp{
 			pr + " merged at the forge at once, and not finished" + because,
@@ -3527,17 +3526,14 @@ func (s *session) pushBranch(branch string) error {
 // mergeBranch asks the forge to merge, bound to the commit the gate tested, by
 // the project's [git] merge_method.
 //
-// auto lets branch protection and the required checks decide, which is an
-// authority an agent's own pull request cannot weaken without that change
-// itself going through a pull request. --match-head-commit is what stops a push
-// finishing between the gate and the merge: without it `gh` merges whatever the
-// head is now, which may be a commit nothing tested.
-//
-// A forge that refuses auto-merge as a feature returns errNoAutoMerge, matched
-// on the refusal's own wording: every other error is the forge declining this
-// pull request, and reading those as "no auto-merge" would hand the gate a merge
-// the forge had a reason to refuse.
-func (s *session) mergeBranch(ctx context.Context, branch string, auto bool) error {
+// The merge is synchronous, never --auto. A queued merge completes after the
+// drive has moved on, so nothing records it, its dependents are skipped, and a
+// push landing before the forge acts merges a head no review read; the field
+// ledgers carried all three. --match-head-commit is what stops a push finishing
+// between the gate and the merge: without it `gh` merges whatever the head is
+// now, which may be a commit nothing tested. Branch protection still applies:
+// the forge refuses a synchronous merge its rules do not allow.
+func (s *session) mergeBranch(ctx context.Context, branch string) error {
 	head, err := revParse(s.cfg.Root, branch)
 	if err != nil {
 		return err
@@ -3546,40 +3542,13 @@ func (s *session) mergeBranch(ctx context.Context, branch string, auto bool) err
 	if method == "" {
 		method = config.MergeMethods()[0]
 	}
-	args := []string{"pr", "merge"}
-	if auto {
-		args = append(args, "--auto")
-	}
-	args = append(args, "--"+method, "--match-head-commit", head, branch)
+	args := []string{"pr", "merge", "--" + method, "--match-head-commit", head, branch}
 	cmd := exec.CommandContext(ctx, "gh", args...) // #nosec G204 -- branch and head come from git, method from validated config
 	cmd.Dir = s.cfg.Root
 	if out, err := cmd.CombinedOutput(); err != nil {
-		text := strings.TrimSpace(string(out))
-		if auto && autoMergeRefused(text) {
-			return fmt.Errorf("%w: %s", errNoAutoMerge, text)
-		}
-		return fmt.Errorf("gh pr merge: %w: %s", err, text)
+		return fmt.Errorf("gh pr merge: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
-}
-
-// errNoAutoMerge is a forge that will not queue a merge for any pull request,
-// as opposed to one declining this one.
-var errNoAutoMerge = errors.New("the forge does not allow auto-merge")
-
-// autoMergeRefused reads gh's output for the forge refusing auto-merge itself.
-// GitHub names the GraphQL mutation in both forms it uses: "Auto merge is not
-// allowed for this repository (enablePullRequestAutoMerge)" where the setting
-// is off or the plan lacks it, and "Protected branch rules not configured for
-// this branch (enablePullRequestAutoMerge)" where nothing exists to wait on.
-func autoMergeRefused(out string) bool {
-	low := strings.ToLower(out)
-	for _, sign := range []string{"enablepullrequestautomerge", "auto merge is not allowed", "auto-merge is not allowed"} {
-		if strings.Contains(low, sign) {
-			return true
-		}
-	}
-	return false
 }
 
 // reconcile finishes what merged since the last drive.
@@ -4246,6 +4215,10 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 		return *d
 	}
 
+	if h, err := revParse(s.cfg.Root, d.Branch); err == nil {
+		d.gated = h
+	}
+
 	// The pull request opens here and nowhere later. A green gate on a passed
 	// review is the whole claim it makes, so everything below decides whether the
 	// merge follows and none of it takes the pull request back: a denied path and
@@ -4289,221 +4262,70 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 	return s.driveMerge(ctx, it, d, park, trunk, deadline)
 }
 
-// driveMerge asks the forge to queue the merge where the forge has something to
-// wait on, and merges on the gate's word where it has not. Any refusal other
-// than auto-merge itself is the forge saying no about this pull request, and the
-// verify does not get to overrule that.
+// driveMerge merges a reviewed head whose gate just passed, synchronously, so
+// the merge, its record and its dependents all happen in this drive.
 //
-// A declared gate goes straight to mergeByGate when the trunk has no required
-// checks. GitHub merges an --auto request on the spot when nothing is required,
-// and refuses --auto only while checks are still running, so keeping --auto
-// there would let a head merge unchecked whenever its CI happened to finish
-// before its review did.
+// The gate's answer stands while the branch is still the commit the gate
+// passed and the trunk has not moved past it. A branch that moved, a trunk
+// that moved, or a fetch that cannot say goes through mergeByGate, which
+// catches the branch up and asks the gate again about the head that merges.
 func (s *session) driveMerge(ctx context.Context, it backlog.Item, d *DriveItem,
 	park func(cause, why string) DriveItem, trunk string, deadline time.Time,
 ) DriveItem {
-	gate := len(s.cfg.Loop.MergeGate) > 0
-	if gate {
-		if why := s.nothingWaits(trunk); why != "" {
-			fmt.Fprintf(errOut, "  · %s: %s; [drive] merge_gate decides at the head\n", d.ID, why)
-			return s.mergeByGate(ctx, it, d, park, trunk, deadline)
-		}
+	head, err := revParse(s.cfg.Root, d.Branch)
+	if err != nil {
+		return park("merge_failed", err.Error())
 	}
-	events.stage(d.ID, stageMerge)
-	err := s.mergeBranch(ctx, d.Branch, true)
-	switch {
-	case err == nil:
-		return s.afterAutoMerge(ctx, it, d, trunk, deadline)
-	case errors.Is(err, errNoAutoMerge) && gate:
-		fmt.Fprintf(errOut, "  · %s: the forge will not queue an auto-merge; [drive] merge_gate decides at the head\n", d.ID)
+	if past, err := s.trunkPast(d.Branch, trunk); err != nil || past || head != d.gated {
 		return s.mergeByGate(ctx, it, d, park, trunk, deadline)
 	}
-	return park("merge_failed", err.Error())
+	events.stage(d.ID, stageMerge)
+	if err := s.mergeBranch(ctx, d.Branch); err != nil {
+		return park("merge_failed", err.Error())
+	}
+	return s.afterMergeCall(ctx, it, d, "[drive] merge_gate passed "+shortSHA(head)+" and drover merged it")
 }
 
-// forgeWait is the cached answer to whether the trunk has required checks.
-type forgeWait struct {
-	required bool
-	err      error
-}
-
-// nothingWaits is why an auto-merge would not wait at the forge, or "" when the
-// trunk has required checks. A lookup that fails reads as nothing waiting: the
-// verify then decides, which costs CI wall time and never merges a red head.
-func (s *session) nothingWaits(trunk string) string {
-	if s.forgeWait == nil {
-		ok, err := gh.RequiredChecks(s.labels(), trunk)
-		s.forgeWait = &forgeWait{required: ok, err: err}
-	}
-	switch {
-	case s.forgeWait.err != nil:
-		return "the required checks on " + trunk + " could not be read (" + s.forgeWait.err.Error() + "), so nothing says the forge would wait"
-	case !s.forgeWait.required:
-		return trunk + " has no required checks, so nothing at the forge would wait"
-	}
-	return ""
-}
-
-// recordMergeQueued writes the pull request row saying the forge accepted d's
-// --auto merge. Reconciliation owes a merged event on the strength of it, so a
-// row that will not write is reported: the merge still lands, silently.
-//
-// The row is decided under the ledger's lock, against the file as it stands.
-// The forge accepted --auto before the merged-state query, and an operator can
-// finish the item or open a replacement pull request while that query waits.
-// A row written from what this drive read earlier would then restart a queue
-// that already ended, and name the closed pull request as the item's current
-// one. since is how many rows the ledger held before the query: any row for d
-// from there on that records a completion, or its withdrawal, or names another
-// pull request ended this lifecycle, whatever the item's state reads now. A
-// withdrawal counts because it is evidence a completion happened, and folding
-// the two to the latest boolean would replay an acceptance that preceded both.
-// The current state is checked as well, and d is rewritten to the lifecycle
-// the ledger holds.
-func (s *session) recordMergeQueued(d *DriveItem, since int) {
-	pr := d.PR
-	if pr <= 0 {
-		pr, _ = s.ledger.PR(d.ID)
-	}
-	if pr <= 0 {
-		fmt.Fprintf(errOut, "warn: %s: the merge is queued on a pull request the ledger does not name, so no drive will report it merged\n", d.ID)
-		return
-	}
-	path := s.cfg.Abs(s.cfg.Paths.Ledger)
-	row := ledger.Stamp(driveStamp(s.verifyStamp(ledger.Row{ID: d.ID, Branch: d.Branch, PR: pr, MergeQueued: true, Date: ledger.Today()})))
-	current, merged, replaced := 0, false, false
-	wrote, err := ledger.AppendUnless(path, row, func(l *ledger.Ledger) bool {
-		current, _ = l.PR(d.ID)
-		merged = l.State(d.ID).Merged
-		replaced = current > 0 && current != pr
-		for _, r := range l.Rows[min(max(since, 0), len(l.Rows)):] {
-			switch {
-			case r.ID != d.ID:
-			case r.Merged != nil:
-				merged = true
-			case r.PR > 0 && r.PR != pr:
-				replaced = true
-			}
-		}
-		return merged || replaced
-	})
-	switch {
-	case err != nil:
-		fmt.Fprintf(errOut, "warn: %s: the merge is queued on #%d, but the ledger row naming it failed, so no drive will report it merged: %v\n", d.ID, pr, err)
-		return
-	case wrote:
-		s.ledger.Rows = append(s.ledger.Rows, row)
-		appended()
-		return
-	}
-	if l, err := ledger.Load(path); err == nil {
-		s.ledger = l
-	}
-	d.MergeQueued = false
-	if current > 0 && current != pr {
-		d.PR = current
-	}
-	if merged {
-		d.Outcome, d.Park = outcomeSkipped, stateDone
-		d.Reason = fmt.Sprintf("merge requested on #%d, and the ledger recorded a completion for the item before the queue was written; nothing is left queued", pr)
-	} else {
-		d.Reason = fmt.Sprintf("merge requested on #%d, and the ledger recorded #%d for the item before the queue was written; #%d is the one to merge", pr, d.PR, d.PR)
-	}
-	fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
-}
-
-// ledgerLen is how many rows the ledger holds on disk now, which marks where a
-// later read starts counting what happened since. An unreadable file falls back
-// to the rows in memory, which are never more than the file holds, so the mark
-// can only move earlier and treat more as having happened since.
-func (s *session) ledgerLen() int {
-	if l, err := ledger.Load(s.cfg.Abs(s.cfg.Paths.Ledger)); err == nil {
-		return len(l.Rows)
-	}
-	return len(s.ledger.Rows)
-}
-
-// afterAutoMerge reads what an accepted --auto did. gh returns nil both when
-// the forge queued the merge and when it merged on the spot, and only the forge
-// can say which.
-//
-// A merge already made is finished in this drive, so dependents run behind it. Where
-// a gate is declared it still reads the merged head: the merge cannot be undone,
-// but a red head on the trunk is something every later item would build on, so
-// a refusal stops the drive.
-func (s *session) afterAutoMerge(ctx context.Context, it backlog.Item, d *DriveItem, trunk string, deadline time.Time) DriveItem {
-	since := s.ledgerLen()
+// afterMergeCall confirms with the forge that the pull request merged before
+// the item is recorded merged. `gh pr merge` without --auto still enqueues
+// where branch protection requires a merge queue, and it exits 0 having merged
+// nothing: recorded merged, finish would refuse it and the dependents behind
+// it would skip as blocked. A queued merge is reported as one, and the next
+// drive's reconciliation records it once it lands.
+func (s *session) afterMergeCall(ctx context.Context, it backlog.Item, d *DriveItem, reason string) DriveItem {
 	n, merged, err := gh.MergedPR(s.labels(), d.Branch)
-	switch {
-	case err != nil:
+	if err != nil || !merged {
 		d.Outcome = outcomeReviewed
-		d.MergeQueued = true
-		d.Reason = "merge requested, and its state could not be read (" + err.Error() + "); the next drive's reconciliation decides it"
+		d.Reason = "gh pr merge returned, and the forge does not report the pull request merged (a required merge queue holds it, or the read failed); the next drive's reconciliation records it once it lands"
+		if err != nil {
+			d.Reason += ": " + err.Error()
+		}
 		fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
-		s.recordMergeQueued(d, since)
-		s.leaveItem(d)
-		return *d
-	case !merged:
-		d.Outcome = outcomeReviewed
-		d.MergeQueued = true
-		d.Reason = "merge queued at the forge; the next drive finishes it"
-		fmt.Fprintf(errOut, "  · %s: %s\n", d.ID, d.Reason)
-		s.recordMergeQueued(d, since)
 		s.leaveItem(d)
 		return *d
 	}
-	d.Merged = true
 	if n > 0 {
 		d.PR = n
 	}
-	head, err := revParse(s.cfg.Root, d.Branch)
-	if err != nil {
-		head = d.Branch
-	}
-	d.Outcome = outcomeMergedAtForge
-	d.Reason = "the forge merged " + shortSHA(head) + " at once, with nothing to wait on"
-	if len(s.cfg.Loop.MergeGate) > 0 {
-		_, _ = s.waitChecks(ctx, d.ID, head, deadline, nil)
-		events.stage(d.ID, stageGate)
-		code, out, err := s.runGateOn(ctx, d.Branch, trunk, true)
-		if err != nil {
-			out = err.Error()
-		}
-		if err != nil || code != gateGreen {
-			d.stop = errMergedRed
-			d.Reason = fmt.Sprintf("PR #%d merged at the forge at once, and [drive] merge_gate then refused %s (exit %d), so it is not finished:\n%s",
-				d.PR, shortSHA(head), code, lastLines(out, verifyTail))
-			if code == gateBehind {
-				// No catch-up follows: the head is on the trunk, and the gate
-				// never said whether its checks passed.
-				d.Reason = fmt.Sprintf("PR #%d merged at the forge at once, and [drive] merge_gate then said %s is behind %s (exit 4) "+
-					"with %s=1 set; a merged head cannot be updated, so the merge gate has to skip that check under it. Not finished:\n%s",
-					d.PR, shortSHA(head), trunk, envGateMerged, lastLines(out, verifyTail))
-			}
-			s.leaveItem(d)
-			return *d
-		}
-		d.Reason += "; [drive] merge_gate passed it after"
-	}
+	d.Merged = true
+	d.Outcome = outcomeMergedByGate
+	d.Reason = reason
 	s.leaveItem(d)
-	if d.Outcome == outcomeMergedAtForge {
+	// A tree the gate dirtied keeps the item parked on it: the merge stands, and
+	// the next drive's reconciliation finishes it once the tree is dealt with.
+	if d.Outcome == outcomeMergedByGate {
 		s.finishMerged(it, d)
 	}
 	s.afterMerge(ctx, d)
 	return *d
 }
 
-// errMergedRed is the sentinel a gate refusing a head the forge already merged
-// raises. Nothing can unmerge it, and every later item would catch up to a trunk
-// carrying it.
-var errMergedRed = errors.New("the forge merged a head the merge gate refuses")
-
-// mergeByGate merges a pull request the forge would not queue, on the gate's
-// word about the exact head that merges.
+// mergeByGate merges a pull request on the gate's word about the exact head
+// that merges.
 //
 // The gate already passed once, before the pull request opened, and that pass
-// is not reused: the checks it read may still have been running, and with no
-// auto-merge nothing at the forge waits for them. So the checks finish first,
+// is not reused: the checks it read may still have been running, and nothing
+// at the forge waits for them. So the checks finish first,
 // the gate reads the head again, and --match-head-commit binds the merge to the
 // commit it read. A plain merge without the gate would merge whatever CI
 // happened to say at that moment.
@@ -4553,20 +4375,10 @@ func (s *session) mergeByGate(ctx context.Context, it backlog.Item, d *DriveItem
 			shortSHA(head), code, lastLines(out, verifyTail))))
 	}
 	events.stage(d.ID, stageMerge)
-	if err := s.mergeBranch(ctx, d.Branch, false); err != nil {
+	if err := s.mergeBranch(ctx, d.Branch); err != nil {
 		return park("merge_failed", err.Error())
 	}
-	d.Merged = true
-	d.Outcome = outcomeMergedByGate
-	d.Reason = "the forge has no auto-merge, so [drive] merge_gate passed " + shortSHA(head) + " and drover merged it"
-	s.leaveItem(d)
-	// A tree the gate dirtied keeps the item parked on it: the merge stands, and
-	// the next drive's reconciliation finishes it once the tree is dealt with.
-	if d.Outcome == outcomeMergedByGate {
-		s.finishMerged(it, d)
-	}
-	s.afterMerge(ctx, d)
-	return *d
+	return s.afterMergeCall(ctx, it, d, "[drive] merge_gate passed "+shortSHA(head)+" and drover merged it")
 }
 
 // finishMerged records a merge this drive made, as finish does: the ledger row, the

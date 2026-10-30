@@ -20,7 +20,9 @@
 ==> argv   <path> <prompt>
 ==> log    <path>
 
-  · 1: merge queued at the forge; the next drive finishes it
+  ✓ first is merged (PR #7)
+  ✓ ledger: merged, implementer impl
+  ✓ report: reports/01-first.md
   · work not linked into the worktree: git would not ignore a link there (ignore it as work, without the trailing slash, to give sessions a copy)
   · reports not linked into the worktree: git would not ignore a link there (ignore it as reports, without the trailing slash, to give sessions a copy)
 ==> 2 · implement · branch second · round 1
@@ -40,16 +42,16 @@
 
   ! 2 parked no_record at <sha>: the review recorded nothing: no audit and no request for changes, so what it found is unknown
 
-2 attempted · 1 ready to merge · 1 parked · 0 skipped
+2 attempted · 0 ready to merge · 1 merged by drover · 1 parked · 0 skipped
 
 1
-  Outcome:    green and reviewed; PR #7 went to the forge to merge: merge queued at the forge; the next drive finishes it
-  Next steps: nothing yet: the next drover drive finishes it, or drover finish 1 once the forge has merged it
+  Outcome:    PR #7 merged on [drive] merge_gate's word, and finished: [drive] merge_gate passed <sha> and drover merged it
+  Next steps: nothing
 
 2
   Outcome:    the review recorded nothing: no audit and no request for changes, so what it found is unknown
   Next steps: drover drive 2, or record what you found with drover audit 2
 == stdout
-{"id":"1","title":"First","branch":"first","outcome":"ready_to_merge","reason":"merge queued at the forge; the next drive finishes it","rounds":0,"reviews":1,"changes_requested":0,"audits":1,"implementer":"impl","review_runner":"rev","pr":7,"merge_queued":true,"started":"<time>","ended":"<time>"}
+{"id":"1","title":"First","branch":"first","outcome":"merged_by_drover","reason":"[drive] merge_gate passed <sha> and drover merged it","rounds":0,"reviews":1,"changes_requested":0,"audits":1,"implementer":"impl","review_runner":"rev","pr":7,"merged":true,"finished":true,"started":"<time>","ended":"<time>"}
 {"id":"2","title":"Second","branch":"second","outcome":"parked","park":"no_record","reason":"the review recorded nothing: no audit and no request for changes, so what it found is unknown","detail":"unknown","evidence":"{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false}","log":"<path>","rounds":0,"reviews":1,"changes_requested":0,"audits":0,"implementer":"impl","review_runner":"rev","started":"<time>","ended":"<time>"}
 {"findings_by_coverage":{"blocked":0,"orphaned":0,"queued":0,"scaffold":0,"unowned":0,"unqueued":0},"findings_needing_triage":[]}
