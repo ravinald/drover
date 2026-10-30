@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -329,6 +330,14 @@ var refusalCases = map[string][]refusalCase{
 			newProject(t)
 			return refuse(t, "new", "epic", "a title the project has no kind for")
 		},
+	}, {
+		why: "--found-in names an item not recorded merged",
+		run: func(t *testing.T) error {
+			dir := newProject(t)
+			write(t, filepath.Join(dir, "work", "B01-open.md"), "---\ntitle: open\ndeps:\n---\n\n1. Fix it.\n")
+			t.Cleanup(func() { newFoundIn = "" })
+			return refuse(t, "new", "bug", "a finding", "--found-in", "B1")
+		},
 	}},
 	"intake": {{
 		why: "the register backend is not github",
@@ -351,6 +360,14 @@ var refusalCases = map[string][]refusalCase{
 		run: func(t *testing.T) error {
 			newProject(t)
 			return refuse(t, "follow-up", "open", "a title")
+		},
+	}, {
+		why: "--owner names an item not recorded merged",
+		run: func(t *testing.T) error {
+			dir := fileRegisterProject(t, "")
+			write(t, filepath.Join(dir, "work", "B02-open.md"), body("an open bug", "[]"))
+			t.Cleanup(func() { followUpOwners = nil })
+			return refuse(t, "follow-up", "open", "a title", "--owner", "B2")
 		},
 	}},
 	"supervise": {{
@@ -512,6 +529,33 @@ func TestRefusalTableMatchesTheCommandsThatRefuse(t *testing.T) {
 				documentedRefusalRows(t, tab.doc, tab.heading, tab.exitCol), canRefuse())
 		})
 	}
+	t.Run("unmerged items and the cap", func(t *testing.T) {
+		for _, d := range unmergedRefusalDocs {
+			if !strings.Contains(strings.Join(docLines(t, d.doc), "\n"), d.says) {
+				t.Errorf("%s no longer says %q, %s", d.doc, d.says, d.why)
+			}
+		}
+		for _, line := range docLines(t, automationDoc) {
+			if strings.HasPrefix(line, "`park` is the machine-readable cause") && strings.Contains(line, "`at_limit`") {
+				t.Errorf("%s lists `at_limit` as a park cause; a capped review parks needs_decision", automationDoc)
+			}
+		}
+	})
+}
+
+// A command-name comparison passes on a row that names the command but not the
+// refusal, so the refusals that keep a finding off an unmerged item are pinned
+// by what each doc has to say about them.
+var unmergedRefusalDocs = []struct{ doc, says, why string }{
+	{agentGuideDoc, "`--found-in` names an item not recorded merged", "which new refuses"},
+	{agentGuideDoc, "`open --owner` also refuses an item not recorded merged", "which follow-up open refuses"},
+	{agentGuideDoc, "naming the `refused-N.md` file that holds its findings", "which open-pr refuses on"},
+	{agentGuideDoc, "the item parks `needs_decision` for the operator", "where a capped request-changes leaves the item"},
+	{automationDoc, "`--found-in` names an item not recorded merged", "which new refuses"},
+	{automationDoc, "`open` also refuses an `--owner` not recorded merged", "which follow-up open refuses"},
+	{automationDoc, "A `needs_decision` park the cap caused", "the capped review's park detail"},
+	{automationDoc, "its findings kept in .drover/reports/04-fourth.refused-1.md", "the findings path in that detail"},
+	{automationDoc, "`drover shelve`, or `drover request-changes <id> -f <file> --over-limit`. No filing command", "the operator's options at the cap"},
 }
 
 // compare names which side each command falls on. "Documented and cannot" and
@@ -832,4 +876,43 @@ func use(lit *ast.CompositeLit) string {
 		}
 	}
 	return ""
+}
+
+func TestE92DocumentationGuardsRejectMissingCapDetail(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "internal", "cmd")
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0750); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"agent-guide.md", "automation.md"} {
+		b, err := os.ReadFile(filepath.Join("..", "..", "docs", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(b)
+		if name == "automation.md" {
+			start := strings.Index(text, "A `needs_decision` park the cap caused")
+			if start < 0 {
+				t.Fatal("cap detail explanation is absent")
+			}
+			end := strings.Index(text[start:], "\n\n")
+			if end < 0 {
+				t.Fatal("cap detail paragraph has no end")
+			}
+			text = text[:start] + text[start+end:]
+		}
+		write(t, filepath.Join(root, "docs", name), text)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := exec.Command(self, "-test.run=^Test(RefusalTableMatchesTheCommandsThatRefuse|ExitCodeTableMatchesTheCommandsThatRefuse)$", "-test.count=1")
+	child.Dir = dir
+	if out, err := child.CombinedOutput(); err == nil {
+		t.Fatalf("R8 mapped tests accepted documentation with capped park detail deleted:\n%s", out)
+	}
 }

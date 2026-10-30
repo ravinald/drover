@@ -218,14 +218,11 @@ func splitRepo(t *testing.T) string {
 }
 
 // resetSplitFlags clears what one split leaves on the shared command, Changed
-// included: cobra's mutual-exclusion check reads it, so a --before left set
-// refuses the next test's --after.
+// included.
 func resetSplitFlags(t *testing.T) {
 	t.Cleanup(func() {
-		splitFile, splitInto, splitAfter, splitBefore, acceptYes = "", "", false, false, false
-		for _, f := range []string{"after", "before"} {
-			splitCmd.Flags().Lookup(f).Changed = false
-		}
+		splitFile, splitInto, splitAfter, acceptYes = "", "", false, false
+		splitCmd.Flags().Lookup("after").Changed = false
 		acceptCmd.Flags().Lookup("yes").Changed = false
 	})
 }
@@ -233,8 +230,7 @@ func resetSplitFlags(t *testing.T) {
 // The direction of a split, and whether the new item stands on the trunk.
 // Under --after, a proposal citing what only the original's branch has makes
 // a pair neither of which can finish; split warns, accept refuses without
-// --yes, and check reports it however the pair was written. Under --before the
-// original stays runnable and nothing deadlocks.
+// --yes, and check reports it however the pair was written.
 func TestSplitDirection(t *testing.T) {
 	for _, c := range []struct {
 		name     string
@@ -263,18 +259,12 @@ func TestSplitDirection(t *testing.T) {
 			deadlock: []string{"B2 cites `insertWidget`, which only 1's branch has; with --after these items deadlock"},
 			yes:      true,
 		},
-		{
-			name:  "--before reverses the deps and leaves the original runnable",
-			flags: []string{"--before"},
-			cites: "Fix `pkg/widget.go:3`, where `createWidget()` writes the row.",
-		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			dir := splitRepo(t)
 			resetSplitFlags(t)
 			proposal := filepath.Join(dir, "proposal.md")
 			write(t, proposal, c.cites+"\n\nRequirements:\n\n1. Reject duplicates.\n")
-			before := len(c.flags) > 0
 			args := append([]string{"split", "1", "unique widgets", "--into", "bug", "-f", proposal}, c.flags...)
 			var err error
 			stderr := captureErr(t, func() { err = execute(t, args...) })
@@ -283,29 +273,11 @@ func TestSplitDirection(t *testing.T) {
 			}
 
 			original, split := readItem(t, dir, "01"), readItem(t, dir, "B02")
-			if before {
-				if !strings.Contains(split, "deps: 1\n") || !strings.Contains(original, "deps:\n") {
-					t.Errorf("--before did not put the dep on the new item:\n%s\n---\n%s", original, split)
-				}
-				if !strings.Contains(split, "Split from 1 with --before: this item waits on 1") {
-					t.Errorf("the scaffold does not record --before:\n%s", split)
-				}
-				s, err := open()
-				if err != nil {
-					t.Fatal(err)
-				}
-				for _, r := range s.rows() {
-					if r.ID == "1" && r.State != "ready" {
-						t.Errorf("the original reads %s after --before, want ready", r.State)
-					}
-				}
-			} else {
-				if !strings.Contains(original, "deps: B2") || !strings.Contains(split, "\ndeps: \n") {
-					t.Errorf("--after did not block the original on the new item:\n%s\n---\n%s", original, split)
-				}
-				if !strings.Contains(split, "Split from 1 with --after: 1 waits on this item.") {
-					t.Errorf("the scaffold does not record --after:\n%s", split)
-				}
+			if !strings.Contains(original, "deps: B2") || !strings.Contains(split, "\ndeps: \n") {
+				t.Errorf("--after did not block the original on the new item:\n%s\n---\n%s", original, split)
+			}
+			if !strings.Contains(split, "Split from 1 with --after: 1 waits on this item.") {
+				t.Errorf("the scaffold does not record --after:\n%s", split)
 			}
 			for _, want := range c.deadlock {
 				if !strings.Contains(stderr, want) {
@@ -439,29 +411,20 @@ func setDeps(t *testing.T, dir, id string, edit func([]string) []string) {
 	write(t, matches[0], strings.Replace(body, line, strings.TrimSpace("deps: "+strings.Join(deps, " ")), 1))
 }
 
-// --before leaves the original's deps alone, so an original something already
-// blocks is still blocked, and split must not call it runnable.
-func TestSplitBeforeOfABlockedItem(t *testing.T) {
+// --before is gone: an item whose own work went out to another may not merge
+// ahead of it, so split has one direction and cobra refuses the old flag.
+func TestSplitBeforeIsAnUnknownFlag(t *testing.T) {
 	dir := draftProject(t, "")
 	resetSplitFlags(t)
 	proposal := filepath.Join(dir, "proposal.md")
 	write(t, proposal, "Requirements:\n\n1. Reject duplicates.\n")
-	if err := execute(t, "split", "1", "first split", "--into", "bug", "-f", proposal); err != nil {
-		t.Fatal(err)
+	items, _ := filepath.Glob(filepath.Join(dir, "work", "*.md"))
+	err := execute(t, "split", "1", "second split", "--into", "bug", "-f", proposal, "--before")
+	if err == nil || !strings.Contains(err.Error(), "unknown flag: --before") {
+		t.Fatalf("split --before = %v, want an unknown flag", err)
 	}
-	splitCmd.Flags().Lookup("after").Changed = false
-	var err error
-	out := capture(t, func() {
-		err = execute(t, "split", "1", "second split", "--into", "bug", "-f", proposal, "--before")
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(out, "runnable") {
-		t.Errorf("split --before calls an item blocked by B2 runnable:\n%s", out)
-	}
-	if !strings.Contains(out, "unchanged, still blocked by B2; B3 waits on it") {
-		t.Errorf("split --before does not name what still blocks the original:\n%s", out)
+	if after, _ := filepath.Glob(filepath.Join(dir, "work", "*.md")); len(after) != len(items) {
+		t.Errorf("split --before wrote a scaffold: %v", after)
 	}
 }
 
@@ -531,7 +494,6 @@ func TestShowNamesTheSplitDirectionOnBothItems(t *testing.T) {
 		want  string
 	}{
 		{want: "B2 split out of 1, --after: 1 waits on B2"},
-		{flags: []string{"--before"}, want: "B2 split out of 1, --before: B2 waits on 1"},
 	} {
 		t.Run(c.want, func(t *testing.T) {
 			dir := draftProject(t, "")

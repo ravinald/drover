@@ -209,7 +209,6 @@ var parkActions = map[string]string{
 	"blocked_on_deps":       "write_scaffold_requirements",
 	parkImplementDied:       "relaunch_after_runner_death",
 	passDied:                "rerun_lost_review",
-	passCapped:              "override_review_limit",
 	passNeedsDecision:       "decide_requirement",
 	parkDrained:             "cleanup_interrupted_drive",
 	"interrupted":           "cleanup_interrupted_drive",

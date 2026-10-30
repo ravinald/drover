@@ -190,8 +190,7 @@ Drive's reading of one review session, stored as `review_result`.
 | `body_edited`       | The body changed outside drover after the review launched.                             |
 | `no_record`         | The review recorded nothing.                                                           |
 | `repeating`         | The review returned the same evidence twice, or marked one finding still open twice.   |
-| `at_limit`          | The review wanted to send work back and `max_review_rounds` refused it.                |
-| `needs_decision`    | The review handed a requirement no run can meet as written to the operator.            |
+| `needs_decision`    | The review handed the operator a requirement no run can meet, or the cap refused it.   |
 | `died`              | The session left no terminal event.                                                    |
 | `unreadable`        | The session left a stream drover has no schema for.                                    |
 | `faulted`           | The service or the account failed, not the work.                                       |

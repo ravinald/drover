@@ -222,7 +222,7 @@ func TestAHeadlessReviewThatDiedSaysSo(t *testing.T) {
 // Every pass token names a next step of its own, and none falls through to the
 // generic line: that line exists for a token added later, not for these.
 func TestEveryPassTokenHasItsOwnNextStep(t *testing.T) {
-	for _, token := range []string{passDied, passFaulted, passUnreadable, passSilent, passCapped,
+	for _, token := range []string{passDied, passFaulted, passUnreadable, passSilent, passNeedsDecision,
 		passRepeating, passChangesRequested, passChangesUnrecorded, passEdited, passPassed} {
 		f := passFollowUp(token, pass{cap: 4}, "7", "work/07-x.md", "rev", "", "drover review 7 --runner rev")
 		if f.Outcome == "" || f.Next == "" {
@@ -252,7 +252,8 @@ func TestDriveEndsEachItemOnItsNextStep(t *testing.T) {
 		{"scaffold", DriveItem{ID: "3", Outcome: outcomeSkipped, Park: stateScaffold}, "write them in work/03-x.md, then drover accept 3", false, "", ""},
 		{"drafted scaffold", DriveItem{ID: "3", Outcome: outcomeSkipped, Park: stateScaffold}, "read them in work/03-x.md, then drover accept 3", true, "", ""},
 		{"ran, unnamed", DriveItem{ID: "3", Outcome: outcomeSkipped, Park: stateRan}, "drover drive 3 to resume it by name", false, "", ""},
-		{"at limit", DriveItem{ID: "3", Outcome: outcomeParked, Park: passCapped}, "drover split 3", false, "", ""},
+		{"at the cap", DriveItem{ID: "3", Outcome: outcomeParked, Park: passNeedsDecision, decision: capDecisionNext("3", "reports/03-x.refused-1.md")},
+			"read reports/03-x.refused-1.md and decide: drover amend 3", false, "", "drover split"},
 		{"no_record", DriveItem{ID: "3", Outcome: outcomeParked, Park: passSilent}, "drover drive 3, or record", false, "", ""},
 		{"denied paths", DriveItem{ID: "3", Outcome: outcomeParked, Park: "protected_paths", PR: 12}, "merge PR #12 by hand, then drover finish 3", false, "", ""},
 		{"denied paths, supervisor", DriveItem{ID: "3", Outcome: outcomeParked, Park: "protected_paths", PR: 12}, "read the diff of each denied file, merge PR #12, then drover finish 3", false, polSupervisor, "by hand"},

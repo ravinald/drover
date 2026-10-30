@@ -71,6 +71,9 @@ func TestNewFromAReviewSessionResolvesToItsDrive(t *testing.T) {
 	ledgerPath := filepath.Join(dir, "ledger.jsonl")
 	write(t, filepath.Join(dir, "work", "B01-reviewed.md"), "---\ntitle: reviewed\ndeps:\nkind: bug\n---\n\n1. Fix it.\n")
 	write(t, ledgerPath, `{"id":"B1","stage":"review","runner":"codex","session":"5e55","drive":"D3","date":"2026-10-27"}`+"\n")
+	// A finding is filed only against merged work, so the review this session
+	// ran is of an item that has since merged.
+	markMerged(t, dir, "B1")
 	t.Setenv(runner.EnvActor, runner.ActorAgent)
 	t.Setenv(runner.EnvSession, "5e55")
 	t.Setenv(envClaudeCode, "1")
