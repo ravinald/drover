@@ -151,6 +151,9 @@ wording, so never match on it.
                       braces, {provider-dir}, is never one
   HOLD MARKER         an accepted, unmerged item whose body carries a line matching
                       [intake] hold_markers outside a fenced block
+  LIVE REQUIREMENT    an accepted, unmerged item whose numbered requirement names a
+                      live host, ssh, a deploy or a dev run without opening with
+                      [operator], which no headless session can meet
   BROAD CITATION      a scaffold whose body cites a directory at the top of the
                       repository, so under drive --jobs it waits for any item
                       citing a path below it. A paragraph opened with
@@ -778,6 +781,28 @@ func (s *session) checkReport() CheckReport {
 			f.Message = fmt.Sprintf("%s:%d carries %s", rel(s.cfg.Root, it.Path), h.line, h.what)
 			f.Path, f.Line, f.ID = rel(s.cfg.Root, it.Path), h.line, it.ID.Bare()
 			add(f)
+		}
+	}
+
+	// An accepted requirement no headless session can meet, accepted with --yes
+	// or edited in afterwards. A review sends it back every round until the
+	// item parks, so it is reported while the body can still change.
+	for _, it := range s.backlog.Items {
+		if s.isScaffold(it) || s.done(it.ID.Bare()) {
+			continue
+		}
+		lines, err := bodyLines(it.Path)
+		if err != nil {
+			continue
+		}
+		for _, r := range liveRequirements(lines) {
+			add(Finding{
+				Kind:    "LIVE REQUIREMENT",
+				Message: fmt.Sprintf("%s R%d names %q, which a headless session cannot reach", it.ID.Bare(), r.Num, r.what),
+				Detail:  "open it with " + backlog.OperatorTag + " so a person signs it off, or rewrite it so the session can meet it in the repository",
+				Path:    rel(s.cfg.Root, it.Path),
+				ID:      it.ID.Bare(),
+			})
 		}
 	}
 

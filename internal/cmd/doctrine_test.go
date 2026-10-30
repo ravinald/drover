@@ -354,10 +354,10 @@ func TestNoReviewPromptFilesAnUnmergedItemsOwnWork(t *testing.T) {
 	}
 	regression, item := rows["BRANCH-REGRESSION"], rows["NEW-ITEM"]
 
-	if !strings.HasPrefix(regression.Found, "Any defect this branch's own diff introduced") {
-		t.Errorf("BRANCH-REGRESSION no longer takes every defect the diff introduced:\n%s", regression.Found)
+	if !strings.HasPrefix(regression.Found, "A defect this branch's own diff introduced that would break something in use") {
+		t.Errorf("BRANCH-REGRESSION no longer bounds a send-back to a defect that breaks something:\n%s", regression.Found)
 	}
-	for _, gone := range []string{"that would break something in use", "`NEW-ITEM`"} {
+	for _, gone := range []string{"`NEW-ITEM`", "at any size"} {
 		if strings.Contains(regression.Found, gone) || strings.Contains(regression.Do, gone) {
 			t.Errorf("BRANCH-REGRESSION still conditions or reroutes a diff defect (%q)", gone)
 		}

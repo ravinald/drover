@@ -294,13 +294,13 @@ func TestRequestChangesCatchesEvidenceThatContradictsTheContract(t *testing.T) {
 		{name: "a requirement number the list lacks", evidence: "## R3 unmet\n\nStill failing.\n", refused: true, want: "no requirement 3"},
 		{name: "requirement N in prose", evidence: "Requirement 2 still fails.\n", refused: true, want: "no requirement 2"},
 		{name: "a removal the count does not show", evidence: "Requirement 1 was removed; strip its code.\n", refused: true, want: "no drover amend"},
-		{name: "a removal after an amend", evidence: "Requirement 2 was removed; strip its code.\n", amendFirst: true},
+		{name: "a removal after an amend", evidence: "BRANCH-REGRESSION: requirement 2 was removed; strip its code.\n", amendFirst: true},
 		{name: "a number no amend removed", evidence: "R9 unmet.\n", amendFirst: true, refused: true, want: "no requirement 9"},
 		{name: "a requirement the list holds", evidence: "R1 is unmet: the walk over-excludes.\n"},
-		{name: "a number inside a fence", evidence: "The gate failed:\n\n```\nR9 FAIL\n```\n"},
+		{name: "a number inside a fence", evidence: "BRANCH-REGRESSION: the gate failed:\n\n```\nR9 FAIL\n```\n"},
 		{name: "code that was removed", evidence: "R1's dead code was removed, but the walk over-excludes.\n"},
 		{name: "over the limit without --yes", evidence: "R3 unmet.\n", overLimit: true, refused: true, want: "--yes"},
-		{name: "over the limit with --yes", evidence: "R3 unmet.\n", overLimit: true, yes: true},
+		{name: "over the limit with --yes", evidence: "BRANCH-REGRESSION: R3 unmet.\n", overLimit: true, yes: true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			resetAmendFlags(t)

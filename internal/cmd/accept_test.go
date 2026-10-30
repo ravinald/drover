@@ -732,3 +732,43 @@ func TestNewNotesATopLevelDirectory(t *testing.T) {
 		t.Errorf("new did not note the top-level directory:\n%s", out)
 	}
 }
+
+// A requirement no headless session can meet is refused at accept unless it
+// opens with [operator], because a review would send it back every round.
+func TestAcceptRefusesALiveRequirement(t *testing.T) {
+	cases := []struct {
+		name, req string
+		refused   bool
+	}{
+		{"ssh to a host", "1. Confirm the service answers over ssh on the dev host.", true},
+		{"test guest", "1. Run the installer on the test guest and record the output.", true},
+		{"operator tag", "1. [operator] Run the installer on the test guest.", false},
+		{"repository work", "1. Add a deploy/ directory README naming the steps.", false},
+		{"guest users", "1. Reject guest users from the admin routes.", false},
+		{"git staging", "1. Preserve the git staging state across a rebase.", false},
+		{"ssh parser", "1. Unit-test the SSH config parser in internal/ssh/config.go.", false},
+		{"wrapped live line", "1. Verify the installer:\n   run it on the test guest and record the output.", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Cleanup(func() { acceptYes = false })
+			body := strings.Replace(unfinished("Act as a maintainer."), "1. Do the work.", c.req, 1)
+			dir := markerProject(t, map[string]string{"B01-unfinished.md": body})
+			t.Chdir(dir)
+			var err error
+			capture(t, func() { err = acceptCmd.RunE(acceptCmd, []string{"B1"}) })
+			if !c.refused {
+				if err != nil {
+					t.Fatalf("accept refused %q: %v", c.req, err)
+				}
+				return
+			}
+			if err == nil || Code(err) != ExitRefused {
+				t.Fatalf("accept = %v, want a refusal", err)
+			}
+			if !strings.Contains(err.Error(), "R1 names") || !strings.Contains(err.Error(), "drover accept B1 --yes") {
+				t.Errorf("the refusal does not name the requirement and the override:\n%v", err)
+			}
+		})
+	}
+}

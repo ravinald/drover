@@ -337,7 +337,8 @@ type Destination struct {
 // standing between the run and a requirement cannot be somebody else's problem
 // when the contract cannot be discharged without touching it. What a defect
 // outside the diff would break in use then says whether it is worth a run at
-// all; one inside it is unfinished work at any size. Provenance
+// all; one inside it goes back when it would break something in use, and is
+// a note in the audit otherwise. Provenance
 // alone answers who caused a defect, which decides attribution and not whether
 // a pull request should stay open.
 //
@@ -358,8 +359,8 @@ var destinations = []Destination{{
 }, {
 	Token: "BRANCH-REGRESSION",
 	Where: "back to the branch",
-	Found: "Any defect this branch's own diff introduced, whatever it would break in use: a wrong answer, lost data, a silent failure, a command that stops working, or something smaller. One that is a typo, a stale comment or a dead link is `FIX-IN-REVIEW` by that row's own definition.",
-	Do:    "`git diff <trunk>...HEAD` is the boundary, not the numbered list, and both halves of that have to hold. An unmerged item has no bugs: a defect in its own work is unfinished implementation, so a regression nobody wrote a requirement for goes back the same way an unmet requirement does, at any size and on any pass. It is never filed, because an issue or a new item for it lets the branch merge carrying a defect its own run wrote. When the fix for it changes a contract no requirement names, the regression is still yours and the implementation is `SPLIT-OUT`. The report is where a real one evaporates and another item is where it lands on somebody who did not cause it.",
+	Found: "A defect this branch's own diff introduced that would break something in use: a wrong answer, lost data, a silent failure, a command that stops working. Anything smaller in the diff, a harmless undeclared delta, a naming or style point, a typo, is `FIX-IN-REVIEW` when you can correct it here and `REPORT-ONLY` when you cannot, and costs no round.",
+	Do:    "Put `BRANCH-REGRESSION` in the finding's heading. `git diff <trunk>...HEAD` is the boundary, not the numbered list. An unmerged item has no bugs: a defect in its own work that would break something is unfinished implementation, so it goes back the same way an unmet requirement does, on any pass, and it is never filed, because an issue or a new item for it lets the branch merge carrying a defect its own run wrote. When the fix for it changes a contract no requirement names, the regression is still yours and the implementation is `SPLIT-OUT`. `drover request-changes` refuses a send-back whose findings name neither a numbered requirement nor this token, so a finding that is neither belongs in the audit note.",
 }, {
 	Token: "BRANCH-BLOCKER",
 	Where: "back to the branch",
