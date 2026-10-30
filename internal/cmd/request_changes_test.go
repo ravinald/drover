@@ -792,6 +792,10 @@ func TestRequestChangesRefusesFindingsOutsideTheContract(t *testing.T) {
 		{"structural heading beside a finding", "### Settled, do not reopen\n\nNothing.\n\n### R2 is unmet\n\nStill wrong.\n", false},
 		{"unscoped heading", "### R4 is unmet\n\nNo link.\n\n### The helper name reads oddly\n\nRename it.\n", true},
 		{"unscoped prose", "The error message could be friendlier.\n", true},
+		{"subheading under a requirement", "### R3 unmet\n\n#### Reason\n\nNothing ran.\n", false},
+		{"wrapper over scoped findings", "## Findings\n\n### R2 unmet\n\nStill wrong.\n", false},
+		{"wrapper over an unscoped finding", "## Findings\n\n### Rename the helper\n\nIt reads oddly.\n", true},
+		{"requirement only in a fence", "Rename the helper.\n\n```\n# R1\n```\n", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

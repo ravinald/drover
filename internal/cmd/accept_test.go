@@ -744,6 +744,10 @@ func TestAcceptRefusesALiveRequirement(t *testing.T) {
 		{"test guest", "1. Run the installer on the test guest and record the output.", true},
 		{"operator tag", "1. [operator] Run the installer on the test guest.", false},
 		{"repository work", "1. Add a deploy/ directory README naming the steps.", false},
+		{"guest users", "1. Reject guest users from the admin routes.", false},
+		{"git staging", "1. Preserve the git staging state across a rebase.", false},
+		{"ssh parser", "1. Unit-test the SSH config parser in internal/ssh/config.go.", false},
+		{"wrapped live line", "1. Verify the installer:\n   run it on the test guest and record the output.", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

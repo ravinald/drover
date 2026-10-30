@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -201,9 +202,13 @@ func (s *session) acceptOne(bare string) error {
 // in a worktree can do: reach a host, deploy, or run against a live system.
 // Every field project's longest review loops were requirements like these,
 // sent back round after round because no implementing session could meet them.
-var liveWork = regexp.MustCompile(`(?i)\b(ssh|scp|systemctl|tailscale|live (?:host|server|system|run|check)|` +
-	`(?:test |dev |staging )?guests?|staging|production (?:host|server|run)|deploy(?:s|ed|ing)? (?:to|on)|` +
-	`dev (?:run|server|host|box|environment)|real (?:host|device|guest))\b`)
+// It matches phrases rather than words, since "guest", "staging" and "ssh"
+// alone name ordinary code: guest users, git staging, an ssh config parser.
+var liveWork = regexp.MustCompile(`(?i)\b(systemctl|tailscale|` +
+	`(?:over|via|through) ssh|ssh (?:to|into|onto)|scp (?:to|from)|` +
+	`on the (?:test |dev |staging |live )?(?:guest|host|server|vm|box)\b|test guests?|` +
+	`live (?:host|server|system|run|check)|staging (?:run|host|server|environment)|production (?:host|server|run)|` +
+	`deploy(?:s|ed|ing)? (?:to|on)|dev (?:run|server|host|box|environment)|real (?:host|device|guest))`)
 
 // liveHit is one requirement liveWork matched, and the words it matched.
 type liveHit struct {
@@ -212,15 +217,53 @@ type liveHit struct {
 }
 
 // liveRequirements is each numbered requirement of the body that liveWork
-// matches and that does not already open with [operator].
+// matches and that does not already open with [operator]. It reads each
+// requirement's whole block, its first line and every line up to the next
+// requirement or heading, since a requirement wrapped onto a second line
+// says the live part there as often as not.
 func liveRequirements(lines []string) []liveHit {
+	body := lines[bodyStart(lines):]
+	blocks := requirementBlocks(body)
 	var out []liveHit
-	for _, r := range (backlog.Item{Body: strings.Join(lines[bodyStart(lines):], "\n")}).Requirements() {
+	for _, r := range (backlog.Item{Body: strings.Join(body, "\n")}).Requirements() {
 		if r.Operator {
 			continue
 		}
-		if m := liveWork.FindString(r.Text); m != "" {
+		text := blocks[r.Num]
+		if text == "" {
+			text = r.Text
+		}
+		if m := liveWork.FindString(text); m != "" {
 			out = append(out, liveHit{r.Num, m})
+		}
+	}
+	return out
+}
+
+// topRequirement is a top-level numbered line, the form Requirements reads.
+var topRequirement = regexp.MustCompile(`^(\d+)\. `)
+
+// requirementBlocks is each top-level requirement's text with the lines that
+// continue it, keyed by its number, outside fenced blocks.
+func requirementBlocks(lines []string) map[int]string {
+	out := map[int]string{}
+	cur := 0
+	var f fence
+	for _, l := range lines {
+		if f.skip(l) {
+			continue
+		}
+		if m := topRequirement.FindStringSubmatch(l); m != nil {
+			cur, _ = strconv.Atoi(m[1])
+			out[cur] = l
+			continue
+		}
+		if headingDepth(l) > 0 {
+			cur = 0
+			continue
+		}
+		if cur > 0 {
+			out[cur] += "\n" + l
 		}
 	}
 	return out

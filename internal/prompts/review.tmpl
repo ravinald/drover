@@ -399,9 +399,10 @@ Then:
   all. A finding that traces to a requirement the code cannot meet as written,
   because it depends on something outside the repository (a release upstream
   never made, a live host, a deploy, a dev or staging run, ssh), on a path
-  outside the worktree the session cannot write, on a decision nobody has made
-  yet, or on evidence that does not exist, is recorded with `--operator` on the
-  first pass it is seen, and not sent back as an ordinary finding:
+  outside the worktree the session cannot write,
+  on a decision nobody has made yet, or on evidence that does not exist, is
+  recorded with `--operator` on the first pass it is seen, and not sent back as
+  an ordinary finding:
 
       drover request-changes {{ .ID }} -f <file> --operator N[,N...]
 

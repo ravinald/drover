@@ -505,8 +505,15 @@ const regressionToken = "BRANCH-REGRESSION"
 const branchToken = "BRANCH-"
 
 // unscopedFindings is each finding in a review's evidence that names neither a
-// numbered requirement (R<n>) nor a BRANCH- destination, skipping the headings
-// structuralHeadings reads as organization.
+// numbered requirement (R<n>) nor a BRANCH- destination.
+//
+// A finding is a heading outside a code fence with no heading nested under it,
+// and it is scoped when it or any heading above it names one: "### R3 unmet"
+// over "#### Reason" is one scoped finding, and "## Findings" over scoped
+// headings is a wrapper rather than a finding. Headings structuralHeadings
+// reads as organization are set aside. Evidence with no heading is one finding,
+// read with its fenced blocks removed, so an R<n> in quoted output scopes
+// nothing.
 //
 // A round is the most expensive thing a review can spend, and every field
 // project's longest loops were rounds spent on findings no requirement asked
@@ -515,16 +522,52 @@ const branchToken = "BRANCH-"
 // a note belongs in the audit, where it costs nothing.
 func unscopedFindings(it backlog.Item, text string) []string {
 	reqs := requirementsByNum(it)
-	findings, headed := findingTexts(text)
+	scoped := func(t string) bool {
+		return strings.Contains(t, branchToken) || len(namedRequirements(t, reqs)) > 0
+	}
+	type heading struct {
+		depth  int
+		text   string
+		scoped bool
+		parent bool
+	}
+	var hs []heading
+	var prose []string
+	var f fence
+	for _, l := range strings.Split(text, "\n") {
+		if f.skip(l) {
+			continue
+		}
+		d := headingDepth(l)
+		if d == 0 {
+			prose = append(prose, l)
+			continue
+		}
+		t := strings.TrimSpace(l)
+		h := heading{depth: d, text: t, scoped: scoped(t)}
+		// The nearest shallower heading is the parent, and its scope already
+		// carries every heading above it.
+		for i := len(hs) - 1; i >= 0; i-- {
+			if hs[i].depth < d {
+				hs[i].parent = true
+				h.scoped = h.scoped || hs[i].scoped
+				break
+			}
+		}
+		hs = append(hs, h)
+	}
+	if len(hs) == 0 {
+		if body := strings.Join(prose, "\n"); !scoped(body) {
+			return []string{text}
+		}
+		return nil
+	}
 	var loose []string
-	for _, f := range findings {
-		if strings.Contains(f, branchToken) || len(namedRequirements(f, reqs)) > 0 {
+	for _, h := range hs {
+		if h.parent || h.scoped || structuralHeadings[leadingWord(h.text)] {
 			continue
 		}
-		if headed && structuralHeadings[leadingWord(f)] {
-			continue
-		}
-		loose = append(loose, f)
+		loose = append(loose, h.text)
 	}
 	return loose
 }
