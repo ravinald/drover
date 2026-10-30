@@ -168,6 +168,10 @@ fixed only when the report that opened it would no longer reproduce.
 {{- else if .Disposition }}
     recorded {{ .Disposition }}{{ if .By }} by {{ .By }}{{ end }}{{ if .Note }}: {{ .Note }}{{ end }}
     Re-judge it yourself. Your row supersedes that one.
+{{- if .Amended }}
+    Amended on {{ .Amended }}, after this was recorded: the requirement it
+    rested on changed since, so the answer is not settled.
+{{- end }}
 {{- end }}
 {{- end }}
 

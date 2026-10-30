@@ -846,3 +846,36 @@ func TestE92OnlyReviewOrAbsentSourceConsumesReviewRounds(t *testing.T) {
 		t.Fatalf("review rounds = %d, want 2 (review and absent source only)", got)
 	}
 }
+
+// An amend replaces the requirements a disposition was judged against, so two
+// passes agreeing before it are agreement about a contract that no longer
+// stands. B101's #41 is the case: partial twice under an R4 the amend narrowed.
+func TestAnAmendAfterTheDispositionsUnsettlesThem(t *testing.T) {
+	partial := func(date string) Row {
+		return Row{ID: "1", Issue: 41, Disposition: DispositionPartial, CodeBy: CodeAgent, Independent: true, Date: date}
+	}
+	amend := Row{ID: "1", Amend: &Amendment{From: 5, To: 5}, Date: "2026-10-29"}
+
+	after := Ledger{Rows: []Row{partial("2026-10-28"), partial("2026-10-28"), amend}}
+	r, _ := after.Resolution("1", 41)
+	if r.Settled {
+		t.Error("two partials then an amend read as settled")
+	}
+	if r.Amended != "2026-10-29" {
+		t.Errorf("amended = %q, want the amend's date", r.Amended)
+	}
+
+	before := Ledger{Rows: []Row{{ID: "1", Amend: &Amendment{From: 5, To: 5}, Date: "2026-10-27"}, partial("2026-10-28"), partial("2026-10-28")}}
+	r, _ = before.Resolution("1", 41)
+	if !r.Settled {
+		t.Error("an amend before both partials unsettled them")
+	}
+	if r.Amended != "" {
+		t.Errorf("amended = %q, want empty for an amend the dispositions postdate", r.Amended)
+	}
+
+	other := Ledger{Rows: []Row{partial("2026-10-28"), partial("2026-10-28"), {ID: "2", Amend: &Amendment{From: 1, To: 1}, Date: "2026-10-29"}}}
+	if r, _ := other.Resolution("1", 41); !r.Settled {
+		t.Error("another item's amend unsettled this one")
+	}
+}

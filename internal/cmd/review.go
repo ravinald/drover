@@ -282,7 +282,7 @@ func (s *session) closesData(it backlog.Item) []prompts.Resolution {
 		r := prompts.Resolution{Number: n}
 		if res, ok := s.ledger.Resolution(id, n); ok || res.Applied != "" {
 			r.Disposition, r.By, r.Note, r.Applied = res.Disposition, res.CodeBy, res.Note, res.Applied
-			r.Settled = res.Settled
+			r.Settled, r.Amended = res.Settled, res.Amended
 		}
 		switch {
 		case !available:
