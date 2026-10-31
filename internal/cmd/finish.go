@@ -156,7 +156,7 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 				if ctx == nil {
 					ctx = context.Background()
 				}
-				if err := s.mergeBranchAt(ctx, branch, open, false); err != nil {
+				if err := s.mergeBranchAt(ctx, branch, open); err != nil {
 					return fmt.Errorf("merge the pull request for %s at %s: %w", branch, shortSHA(open), err)
 				}
 				fmt.Printf("  ✓ merged the pull request for %s at %s\n", branch, shortSHA(open))

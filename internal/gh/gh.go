@@ -705,38 +705,6 @@ func MergedPRHead(labels Labels, branch string) (number int, head string, merged
 	return prs[0].Number, prs[0].HeadRefOid, true, nil
 }
 
-// RequiredChecks reports whether the trunk has required status checks: whether
-// the forge has anything to wait on before an auto-merge, or merges it on the
-// spot.
-//
-// GitHub answers 404 for a branch with no protection or no required checks, and
-// 403 where the plan cannot protect the branch at all (a private repository on
-// the free plan). Both mean nothing waits, so both are false rather than errors.
-func RequiredChecks(labels Labels, trunk string) (bool, error) {
-	if !Available() {
-		return false, fmt.Errorf("gh unavailable")
-	}
-	repo := labels.Repo
-	if repo == "" {
-		repo = "{owner}/{repo}"
-	}
-	out, err := run(labels.Dir, []string{"api", "repos/" + repo + "/branches/" + trunk + "/protection/required_status_checks"})
-	if err != nil {
-		if msg := err.Error(); strings.Contains(msg, "(HTTP 404)") || strings.Contains(msg, "(HTTP 403)") {
-			return false, nil
-		}
-		return false, err
-	}
-	var rc struct {
-		Contexts []string          `json:"contexts"`
-		Checks   []json.RawMessage `json:"checks"`
-	}
-	if err := json.Unmarshal(out, &rc); err != nil {
-		return false, fmt.Errorf("required_status_checks answered %q: %w", strings.TrimSpace(string(out)), err)
-	}
-	return len(rc.Contexts) > 0 || len(rc.Checks) > 0, nil
-}
-
 // OpenPR reports the open pull request for a head branch, if there is one.
 //
 // Read before every create. `gh pr create` fails on a branch that already has

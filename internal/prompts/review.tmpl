@@ -366,9 +366,9 @@ Then:
   aimed at one reported case routinely moves something beside it: a permission,
   a default, an ordering, a lifetime, an error a caller used to see. The builder
   was asked to name each one and say why it is safe, so check the list and check
-  the reasoning. An undeclared delta is a finding whether or not it turns out to
-  be harmless, because a judgment nobody wrote down is one nobody can falsify,
-  and the verify command passing says only that no test covers it.
+  the reasoning. An undeclared delta that would break something in use is a
+  `BRANCH-REGRESSION`. A harmless one goes in your audit note, named, because a
+  judgment nobody wrote down is one nobody can falsify; it costs no round.
 {{- if and .Repeated (or .Modified .ScopeUnavailable) }}
 - Whether this is still one item.
 {{- if .ScopeUnavailable }}
@@ -398,8 +398,11 @@ Then:
 - Before any destination, ask whether a session could meet the requirement at
   all. A finding that traces to a requirement the code cannot meet as written,
   because it depends on something outside the repository (a release upstream
-  never made), on a decision nobody has made yet, or on evidence that does not
-  exist, is recorded with `--operator` and not sent back as an ordinary finding:
+  never made, a live host, a deploy, a dev or staging run, ssh), on a path
+  outside the worktree the session cannot write,
+  on a decision nobody has made yet, or on evidence that does not exist, is
+  recorded with `--operator` on the first pass it is seen, and not sent back as
+  an ordinary finding:
 
       drover request-changes {{ .ID }} -f <file> --operator N[,N...]
 

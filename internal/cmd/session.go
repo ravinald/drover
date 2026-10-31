@@ -34,10 +34,6 @@ type session struct {
 	// and gate command, for the life of one drive. Every item caught up to the
 	// same trunk commit asks the same question of it.
 	trunkResults map[string]trunkResult
-	// forgeWait is whether the trunk has required checks, read once per drive:
-	// the trunk's protection does not change between one item's merge and the
-	// next's.
-	forgeWait *forgeWait
 	// slot is this item's place in a drive's schedule, nil everywhere else.
 	slot *driveSlot
 	// inputs is what a drive's session runs under, so a stage boundary can

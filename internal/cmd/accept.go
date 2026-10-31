@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -165,6 +166,16 @@ func (s *session) acceptOne(bare string) error {
 			"or accept anyway: drover accept %s --yes\n"+
 			"A variable part is written in braces, {name}, which is never read as a placeholder", strings.Join(msgs, "\n"), it.ID.Bare())}
 	}
+	if live := liveRequirements(kept); len(live) > 0 && !acceptYes {
+		msgs := make([]string, len(live))
+		for i, r := range live {
+			msgs[i] = fmt.Sprintf("R%d names %q", r.Num, r.what)
+		}
+		return Refusal{fmt.Errorf("%s\nNothing was accepted. A headless session cannot reach a live host, a deploy or a dev run, "+
+			"and a review sends such a requirement back every round until the item parks.\n"+
+			"Open each with %s so a person signs it off, rewrite it so the session can meet it in the repository, "+
+			"or accept anyway: drover accept %s --yes", strings.Join(msgs, "\n"), backlog.OperatorTag, it.ID.Bare())}
+	}
 	if err := s.writeBody(it, "accept", kept); err != nil {
 		return err
 	}
@@ -185,6 +196,90 @@ func (s *session) acceptOne(bare string) error {
 		return err
 	}
 	return s.publish(it)
+}
+
+// liveWork is wording that puts a requirement outside what a headless session
+// in a worktree can do: reach a host, deploy, or run against a live system.
+// Every field project's longest review loops were requirements like these,
+// sent back round after round because no implementing session could meet them.
+// It matches phrases rather than words, since "guest", "staging" and "ssh"
+// alone name ordinary code: guest users, git staging, an ssh config parser.
+var liveWork = regexp.MustCompile(`(?i)\b(systemctl|tailscale|` +
+	`(?:over|via|through) ssh|ssh (?:to|into|onto)|scp (?:to|from)|` +
+	`on the (?:test |dev |staging |live )?(?:guest|host|server|vm|box)\b|test guests?|` +
+	`live (?:host|server|system|run|check)|staging (?:run|host|server|environment)|production (?:host|server|run)|` +
+	`deploy(?:s|ed|ing)? (?:to|on)|dev (?:run|server|host|box|environment)|real (?:host|device|guest))`)
+
+// liveHit is one requirement liveWork matched, and the words it matched.
+type liveHit struct {
+	Num  int
+	what string
+}
+
+// liveRequirements is each numbered requirement of the body that liveWork
+// matches and that does not already open with [operator]. It reads each
+// requirement's whole block, its first line and every line up to the next
+// requirement or heading, since a requirement wrapped onto a second line
+// says the live part there as often as not.
+func liveRequirements(lines []string) []liveHit {
+	body := lines[bodyStart(lines):]
+	blocks := requirementBlocks(body)
+	var out []liveHit
+	for _, r := range (backlog.Item{Body: strings.Join(body, "\n")}).Requirements() {
+		if r.Operator {
+			continue
+		}
+		text := blocks[r.Num]
+		if text == "" {
+			text = r.Text
+		}
+		if m := liveWork.FindString(text); m != "" {
+			out = append(out, liveHit{r.Num, m})
+		}
+	}
+	return out
+}
+
+// topRequirement is a top-level numbered line, the form Requirements reads.
+var topRequirement = regexp.MustCompile(`^(\d+)\. `)
+
+// requirementBlocks is each top-level requirement's text with the lines that
+// continue it, keyed by its number, outside fenced blocks.
+func requirementBlocks(lines []string) map[int]string {
+	out := map[int]string{}
+	cur := 0
+	gap := false
+	var f fence
+	for _, l := range lines {
+		if f.skip(l) {
+			continue
+		}
+		if m := topRequirement.FindStringSubmatch(l); m != nil {
+			cur, _ = strconv.Atoi(m[1])
+			out[cur] = l
+			gap = false
+			continue
+		}
+		if headingDepth(l) > 0 {
+			cur = 0
+			continue
+		}
+		if strings.TrimSpace(l) == "" {
+			gap = true
+			continue
+		}
+		// Past a blank line only an indented line still belongs to the list
+		// item; a paragraph at the margin is prose after the list, which is
+		// where bodies put operator steps and the post-finish Live check line.
+		if gap && !strings.HasPrefix(l, " ") && !strings.HasPrefix(l, "\t") {
+			cur = 0
+		}
+		gap = false
+		if cur > 0 {
+			out[cur] += "\n" + l
+		}
+	}
+	return out
 }
 
 // prefixedHint adds, to the refusal for a planned id in a project whose items

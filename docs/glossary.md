@@ -202,8 +202,8 @@ What one item came to, on drive's end row and in `drive --json` `outcome`.
 | Term                 | Meaning                                                                         |
 | -------------------- | ------------------------------------------------------------------------------- |
 | `ready_to_merge`     | Green and reviewed; nothing merged it.                                          |
-| `merged_by_drover`   | drover merged it on the merge gate's word because the forge refused auto-merge. |
-| `merged_immediately` | The forge's auto-merge merged it on the spot.                                   |
+| `merged_by_drover`   | drover merged it on the merge gate's word and the forge reported it merged.     |
+| `merged_immediately` | Older drovers only: the forge's auto-merge merged it on the spot.               |
 | `parked`             | Stopped; the park cause says why.                                               |
 | `skipped`            | Not attempted: merged, scaffolded, blocked or broken.                           |
 | `held`               | Kept back by a usage hold until the drive's deadline; nothing parked.           |
@@ -234,7 +234,7 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `needs_operator`   | Event: an action stopped at operator policy and waits on a person.                                                     |
 | `needs_supervisor` | Event: an action waits on the supervising session.                                                                     |
 | `merged`           | Event: an item's pull request merged.                                                                                  |
-| `merge_queued`     | Event: the forge accepted an item's auto-merge and has not merged it yet.                                              |
+| `merge_queued`     | Event, older drovers only: the forge accepted an item's auto-merge and had not merged it.                              |
 | `paused`           | Event: the drive paused.                                                                                               |
 | `resumed`          | Event: the drive resumed, naming what changed.                                                                         |
 | `config_changed`   | Event: the `.drover.toml` on disk differs from the one the running drive uses, which it does not apply until a resume. |
@@ -284,6 +284,7 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `NO REQUIREMENTS`     | An accepted item has no numbered requirements.                                        |
 | `PLACEHOLDER`         | An accepted item's body still carries a `<placeholder>`.                              |
 | `HOLD MARKER`         | An accepted item's body still carries an `[intake] hold_markers` line.                |
+| `LIVE REQUIREMENT`    | An accepted requirement names a live host or deploy without `[operator]`.           |
 | `BROAD CITATION`      | A scaffold cites a top-level directory, which serializes it under `--jobs`.           |
 | `HAND EDITED`         | An accepted item's body changed outside drover since its last digest.                 |
 | `UNREADABLE`          | A backlog file did not parse.                                                         |
@@ -399,6 +400,7 @@ The `[supervise]` keys, each an action drive or a supervisor may take, and the p
 | `merge_drive_pr`              | Merge a pull request drive opened, then finish it.                                        |
 | `merge_protected_paths`       | Merge a pull request that changes a `[drive] protected_paths` file.                       |
 | `rerun_infra_failure`         | Rerun a check that failed on infrastructure.                                              |
+| `fix_gate_refusal`            | Send a branch the merge gate refused over its own diff back to its implementer.           |
 | `report_trunk_red`            | Report a trunk that fails the verify command on its own, and stop dispatching.            |
 | `post_finish_check`           | Run `[finish] post_check` after each finish.                                              |
 | `rerun_lost_review`           | Rerun, once, a review whose session died or was cut.                                      |
