@@ -460,6 +460,8 @@ This is the one list command that emits an object, and the lease is why. It belo
 
 The checked-out item carries `"current": true`.
 
+`branch` is the branch the latest ledger row recorded for the item's work, from an implement or review launch, a pushed head or a pull request, whole however long. It is absent for an item nothing has run, and it is never the name `[run] branch` would render today.
+
 `pr` is the item's pull request, absent when the forge lists none from its branch, the project has no branches, or no remote names a GitHub host. `state` is `open`, `draft`, `merged`, `closed` or `unknown`. `unknown` comes with `error`, which names the read that did not complete (`gh missing`, `not authenticated`, `forge unreachable`, `gh failed`, `no GitHub remote` on a number the ledger recorded, `--no-tracker`) followed by what gh said, so a degraded read says what it could not ask rather than reporting no pull request. `number` is absent only when the read failed and the ledger recorded none. A merged item whose number `open-pr` recorded carries `{"number":236,"state":"merged"}` without the forge being asked. One `gh pr list` call serves the whole array.
 
 ```json

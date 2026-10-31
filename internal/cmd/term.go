@@ -47,19 +47,7 @@ func titleWidth() int { return titleWidthBeside(statusCell) }
 // fallback. maxTitle bounds only that fallback, since a measured width fits the
 // screen by construction and a pipe has no screen to fit.
 func titleWidthBeside(noteCell int) int {
-	w, measured := fallbackTerm, false
-	if cols := os.Getenv("COLUMNS"); cols != "" {
-		if n, err := strconv.Atoi(cols); err == nil && n > 0 {
-			w, measured = n, true
-		}
-	}
-	if !measured {
-		if fd := int(os.Stdout.Fd()); term.IsTerminal(fd) {
-			if n, _, err := term.GetSize(fd); err == nil && n > 0 {
-				w, measured = n, true
-			}
-		}
-	}
+	w, measured := screenWidth()
 	w -= fixedCells + noteCell
 	if w < minTitle {
 		return minTitle
@@ -68,6 +56,41 @@ func titleWidthBeside(noteCell int) int {
 		return maxTitle
 	}
 	return w
+}
+
+// screenWidth is the width a table is sized to and whether it was measured:
+// COLUMNS, then the terminal stdout is attached to, then fallbackTerm.
+func screenWidth() (int, bool) {
+	if cols := os.Getenv("COLUMNS"); cols != "" {
+		if n, err := strconv.Atoi(cols); err == nil && n > 0 {
+			return n, true
+		}
+	}
+	if fd := int(os.Stdout.Fd()); term.IsTerminal(fd) {
+		if n, _, err := term.GetSize(fd); err == nil && n > 0 {
+			return n, true
+		}
+	}
+	return fallbackTerm, false
+}
+
+// padRunes pads s to n runes, where fmt's width counts the bytes of a · twice.
+func padRunes(s string, n int) string {
+	if pad := n - utf8.RuneCountInString(s); pad > 0 {
+		return s + strings.Repeat(" ", pad)
+	}
+	return s
+}
+
+// truncMiddle fits s in n runes by cutting its middle, for a name whose both
+// ends carry meaning: a branch's kind at the front and its id-slug behind it.
+func truncMiddle(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n || n < 3 {
+		return s
+	}
+	head := (n - 1) / 2
+	return string(r[:head]) + "…" + string(r[len(r)-(n-1-head):])
 }
 
 // colorMode is --color: auto, always or never. --no-color writes never here
