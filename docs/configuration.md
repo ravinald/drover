@@ -302,6 +302,13 @@ A template that needs more control reaches `.VerifyCommands` directly and ignore
 
 drover hands the selected verify command to the implementing session through the prompt, and runs it itself in one place: `drover drive`, after a branch update merges origin's trunk into an item's branch. It runs the same command the item's run was told to pass, as `sh -c` in the item's worktree with `DROVER_ROOT` set, before the merge is pushed. When it fails there, drive runs it once more on the trunk alone to decide whether the branch or the trunk is at fault. A verify command that cannot run twice per item in reasonable time makes every moved trunk cost that much more. See [Keeping each branch level with the trunk](lifecycle.md#keeping-each-branch-level-with-the-trunk).
 
+**The verify command and CI should check the same things.** The implementing session can only fix what it can run. A test CI runs and the verify command does not shows up first as a red check at the merge gate, after the review passed, and the session handed it back under [`fix_gate_refusal`](#supervise) has the failure lines from the job log and nothing it can run to reproduce them. There are two workable setups:
+
+- **The verify command is CI.** One target runs a leg per CI job, and a check fails when the two lists stop agreeing, so a job added to CI cannot reach the trunk without reaching the verify command too. A red check then means the runner's environment differed, never that a test went unrun.
+- **The verify command is a subset, on purpose.** Where the whole suite is too slow to run two or three times per item (a sharded browser suite, say), the verify command keeps the build, the unit tests and the suite files the branch touched, and CI runs the rest. A failure only CI saw comes back through `fix_gate_refusal` carrying the lines [`[forge] failure_patterns`](#forge) picks out of the job log, so add the patterns your test runner needs, and tell the implementing session how to run one failing file locally.
+
+[Example configurations](example-configurations.md) shows one project set up each way, and the gap each key closed.
+
 ## `[status]`
 
 | Key             | Meaning                                                                                                |
@@ -598,12 +605,12 @@ The escape is `drover request-changes --over-limit`, and it refuses inside a ses
 
 It carries three exit codes rather than `merge_check`'s two, because a red check means opposite things depending on what reddened it:
 
-| Exit | Means                                                    | drive does                                                                                                                                 |
-| ---- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `0`  | green                                                    | open the pull request, then merge                                                                                                          |
-| `1`  | red, and this diff caused it                             | checks the head holds the trunk, then sends the merge gate's output back to the branch and re-runs; a head behind the trunk is read as `4` |
-| `2`  | red, and the code did not cause it                       | stops the whole drive                                                                                                                      |
-| `4`  | the head is behind the trunk, and nothing else was asked | updates the branch and runs the merge gate once more; a second `4` parks `gate_refused`, and so does a `1` on a head still behind          |
+| Exit | Means                                                    | drive does                                                                                                                                                             |
+| ---- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | green                                                    | open the pull request, then merge                                                                                                                                      |
+| `1`  | red, and this diff caused it                             | checks the head holds the trunk, then sends the merge gate's output back to the branch and re-runs it under `fix_gate_refusal`; a head behind the trunk is read as `4` |
+| `2`  | red, and the code did not cause it                       | stops the whole drive                                                                                                                                                  |
+| `4`  | the head is behind the trunk, and nothing else was asked | updates the branch and runs the merge gate once more; a second `4` parks `gate_refused`, and so does a `1` on a head still behind                                      |
 
 drive does not take an exit `1` on trust. Before it sends anything back it fetches the trunk and asks git whether `origin/<trunk>` is an ancestor of the head the merge gate read; when it is not, the refusal is read as `4`, and the stderr line and any park reason say the merge gate exited 1 on a head behind the trunk. A fetch that fails, or a head that holds the trunk, leaves the `1` standing as the diff's. drive also fetches just before every merge gate run and updates a branch the trunk moved past while its checks settled, which spends the one retry; a trunk that moves again once the retry is spent parks `gate_refused` without the merge gate being run on a head already known to be behind. At a `retry_moved_trunk` policy other than `auto`, a behind answer after that update still parks with the hand-off. Exit `4` stays the faster answer, since it skips the ancestry read, but it is no longer the only way a merge gate can say the branch is merely behind.
 
@@ -791,18 +798,30 @@ The built-in infrastructure lines, matched case-insensitively as substrings of t
 
 For a `code` check, `drive` also reads what failed out of the same job log: up to 5 lines matching one of the failure patterns, each with its Actions timestamp, its `##[error]` annotation and its terminal colors stripped. The built-in patterns, matched as Go regular expressions against each stripped line:
 
-| Pattern                         | Matches                                               |
-| ------------------------------- | ----------------------------------------------------- |
-| `^--- FAIL`                     | A failed Go test                                      |
-| `^FAIL\b`                       | A failed Go test package                              |
-| `^\S+:\d+:\d+: .*\(\w[\w-]*\)$` | A golangci-lint finding, its linter named last        |
-| `^\S+\.\w+:\d+:\d+: `           | A compiler or `go vet` error                          |
-| `^Vulnerability #\d+`           | A govulncheck finding                                 |
-| `^\s*Found in: `                | The module or package version govulncheck found it in |
-| `^\s*Fixed in: `                | The version that fixes it                             |
-| `^panic: `                      | A Go panic                                            |
+| Pattern                         | Matches                                                                   |
+| ------------------------------- | ------------------------------------------------------------------------- |
+| `^--- FAIL`                     | A failed Go test                                                          |
+| `^FAIL\b`                       | A failed Go test package                                                  |
+| `^\S+:\d+:\d+: .*\(\w[\w-]*\)$` | A golangci-lint finding, its linter named last                            |
+| `^\S+\.\w+:\d+:\d+:`           | A compiler or `go vet` error                                              |
+| `^Vulnerability #\d+`           | A govulncheck finding                                                     |
+| `^\s*Found in:`                | The module or package version govulncheck found it in                     |
+| `^\s*Fixed in:`                | The version that fixes it                                                 |
+| `^panic:`                      | A Go panic                                                                |
+| `^not ok \d+\b`                 | A failed TAP test point: `node --test`, `tap` and most JavaScript runners |
 
-A log matching none of them falls back to the last 5 non-blank lines before its first `make: ***` or `Error:` line. `failure_patterns` adds to the list, so a project whose test runner prints `ERROR <name>` adds `'^ERROR '`; a pattern that does not compile is refused at load. Those lines are what the [`gate_refused`](automation.md#drive---json) park carries when the merge gate then blames the diff: its reason names the check and the first line, its `detail` is `code`, its `evidence` is the lines, and the body sent back to the item adds them and the check's URL under the merge gate's output.
+Each line is kept once, since a runner that retries a failed file prints its failures again. A TAP suite's own `not ok` point, printed one indent out after the subtests it summarizes, is dropped in favor of those subtests, which name what failed. A log matching none of them falls back to the last 5 non-blank lines before its first `make: ***` or `Error:` line. `failure_patterns` adds to the list, so a project whose test runner prints `ERROR <name>` adds `'^ERROR '`; a pattern that does not compile is refused at load. A TAP point names the failing test but not why it failed. For a Playwright suite run under `node --test`, these add the timeout and the selector it waited for, which usually name the cause:
+
+```toml
+[forge]
+failure_patterns = [
+  '^(locator|page|frame|browserContext)\.\w+: ',
+  '^- waiting for ',
+  '^AssertionError',
+]
+```
+
+Those lines are what the [`gate_refused`](automation.md#drive---json) park carries when the merge gate then blames the diff: its reason names the check and the first line, its `detail` is `code`, its `evidence` is the lines, and the body sent back to the item adds them and the check's URL under the merge gate's output.
 
 `reruns` counts `gh run rerun` calls on one head across drives, from the ledger, so a later drive does not rerun a head the earlier one already spent. A head that needs more reruns than remain is read as `code`, and the merge gate sends it back. Beside a `code` failure, an `infra` one is recorded and not rerun, since the head is going back either way.
 
@@ -980,37 +999,38 @@ Every other key is an action from the catalog, set to a policy:
 
 The policies are ordered `off` < `operator` < `supervisor` < `auto`, and each action has a ceiling: a policy above it is a load error naming the key, the policy requested and the ceiling. An omitted key takes its default, and an unknown key is a load error. Each command listed beside an action is that action when a supervisor runs it, and refuses there with exit `3` unless the action is at `supervisor` or `auto`.
 
-| Action                        | Category     | Default      | Ceiling      | Command                        | What it is                                                                                                      |
-| ----------------------------- | ------------ | ------------ | ------------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `update_open_prs`             | merge        | `auto`       | `auto`       |                                | After a merge, merge the trunk into every other open drive pull request, run its verify command, and push.      |
-| `retry_moved_trunk`           | merge        | `auto`       | `auto`       |                                | Retry, once, a merge gate that refused only because the trunk moved under the head.                             |
-| `resolve_conflict`            | merge        | `supervisor` | `auto`       |                                | Resolve a branch update merge conflict in the item's worktree.                                                  |
-| `merge_drive_pr`              | merge        | `operator`   | `supervisor` | `finish`                       | Merge a pull request drive opened for an item, then finish it.                                                  |
-| `merge_protected_paths`       | merge        | `operator`   | `supervisor` |                                | Merge a pull request that changes a [drive] protected_paths file.                                               |
-| `rerun_infra_failure`         | checks       | `auto`       | `auto`       |                                | Rerun a check that failed on the forge's infrastructure rather than on the code.                                |
-| `report_trunk_red`            | checks       | `operator`   | `auto`       |                                | Report a trunk that fails the verify command on its own, and stop dispatching.                                  |
-| `post_finish_check`           | checks       | `off`        | `auto`       |                                | Run a live check after each finish.                                                                             |
-| `rerun_lost_review`           | sessions     | `auto`       | `auto`       |                                | Rerun, once, a review pass whose session died or was cut.                                                       |
-| `relaunch_after_runner_death` | sessions     | `supervisor` | `auto`       |                                | Relaunch an item whose implementing session died.                                                               |
-| `auth_expired`                | sessions     | `operator`   | `operator`   |                                | Stop when a runner's credentials expired.                                                                       |
-| `push_refused_by_hook`        | sessions     | `operator`   | `operator`   |                                | Stop when a pre-push hook refused the item's branch.                                                            |
-| `write_scaffold_requirements` | requirements | `supervisor` | `supervisor` |                                | Write the numbered requirements of a scaffold a review filed.                                                   |
-| `triage_finding`              | requirements | `operator`   | `supervisor` |                                | Find an owner for a follow-up a drive's session filed that nothing is scheduled to carry.                       |
-| `close_changes`               | requirements | `supervisor` | `supervisor` | `close-changes`                | Close a sent-back section whose findings a later pass closed.                                                   |
-| `accept`                      | requirements | `operator`   | `operator`   | `accept`                       | Accept an item's requirements.                                                                                  |
-| `override_review_limit`       | requirements | `operator`   | `operator`   | `request-changes --over-limit` | Send an item back past [review] max_review_rounds.                                                              |
-| `decide_requirement`          | requirements | `operator`   | `operator`   |                                | Decide a requirement a review found no implementing session can meet as written.                                |
-| `move_requirement`            | requirements | `operator`   | `operator`   |                                | Move a numbered requirement from one item to another.                                                           |
-| `signoff`                     | requirements | `operator`   | `operator`   |                                | Meet a requirement only a person can meet.                                                                      |
-| `enqueue`                     | queue        | `supervisor` | `auto`       | `drive`                        | Queue the next drive.                                                                                           |
-| `pause_for_config_change`     | queue        | `operator`   | `supervisor` |                                | Pause a running drive to take a config change.                                                                  |
-| `cleanup_interrupted_drive`   | queue        | `supervisor` | `auto`       |                                | Remove the worktrees and branches an interrupted drive left behind.                                             |
-| `host_load_admission`         | queue        | `off`        | `auto`       |                                | Hold dispatch while the host is loaded.                                                                         |
-| `usage_admission`             | queue        | `auto`       | `auto`       |                                | Hold dispatch at a `[usage]` pause level, on purchased credit, and on a quota refusal, and resume at the reset. |
-| `drive_digest`                | queue        | `auto`       | `auto`       |                                | Summarize each drive when it exits.                                                                             |
-| `stale_citations`             | preflight    | `auto`       | `auto`       |                                | Report cited lines that no longer exist on the trunk before launching.                                          |
-| `worktree_links_gap`          | preflight    | `auto`       | `auto`       |                                | Report files the verify command reads that the worktree lacks.                                                  |
-| `deps_lint`                   | preflight    | `auto`       | `auto`       |                                | Refuse a malformed deps line.                                                                                   |
+| Action                        | Category     | Default      | Ceiling      | Command                        | What it is                                                                                                                     |
+| ----------------------------- | ------------ | ------------ | ------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `update_open_prs`             | merge        | `auto`       | `auto`       |                                | After a merge, merge the trunk into every other open drive pull request, run its verify command, and push.                     |
+| `retry_moved_trunk`           | merge        | `auto`       | `auto`       |                                | Retry, once, a merge gate that refused only because the trunk moved under the head.                                            |
+| `resolve_conflict`            | merge        | `supervisor` | `auto`       |                                | Resolve a branch update merge conflict in the item's worktree.                                                                 |
+| `merge_drive_pr`              | merge        | `operator`   | `supervisor` | `finish`                       | Merge a pull request drive opened for an item, then finish it.                                                                 |
+| `merge_protected_paths`       | merge        | `operator`   | `supervisor` |                                | Merge a pull request that changes a [drive] protected_paths file.                                                              |
+| `rerun_infra_failure`         | checks       | `auto`       | `auto`       |                                | Rerun a check that failed on the forge's infrastructure rather than on the code.                                               |
+| `fix_gate_refusal`            | checks       | `auto`       | `auto`       |                                | Send a branch the merge gate or its verify command refused over its own diff back to its implementing session, once per drive. |
+| `report_trunk_red`            | checks       | `operator`   | `auto`       |                                | Report a trunk that fails the verify command on its own, and stop dispatching.                                                 |
+| `post_finish_check`           | checks       | `off`        | `auto`       |                                | Run a live check after each finish.                                                                                            |
+| `rerun_lost_review`           | sessions     | `auto`       | `auto`       |                                | Rerun, once, a review pass whose session died or was cut.                                                                      |
+| `relaunch_after_runner_death` | sessions     | `supervisor` | `auto`       |                                | Relaunch an item whose implementing session died.                                                                              |
+| `auth_expired`                | sessions     | `operator`   | `operator`   |                                | Stop when a runner's credentials expired.                                                                                      |
+| `push_refused_by_hook`        | sessions     | `operator`   | `operator`   |                                | Stop when a pre-push hook refused the item's branch.                                                                           |
+| `write_scaffold_requirements` | requirements | `supervisor` | `supervisor` |                                | Write the numbered requirements of a scaffold a review filed.                                                                  |
+| `triage_finding`              | requirements | `operator`   | `supervisor` |                                | Find an owner for a follow-up a drive's session filed that nothing is scheduled to carry.                                      |
+| `close_changes`               | requirements | `supervisor` | `supervisor` | `close-changes`                | Close a sent-back section whose findings a later pass closed.                                                                  |
+| `accept`                      | requirements | `operator`   | `operator`   | `accept`                       | Accept an item's requirements.                                                                                                 |
+| `override_review_limit`       | requirements | `operator`   | `operator`   | `request-changes --over-limit` | Send an item back past [review] max_review_rounds.                                                                             |
+| `decide_requirement`          | requirements | `operator`   | `operator`   |                                | Decide a requirement a review found no implementing session can meet as written.                                               |
+| `move_requirement`            | requirements | `operator`   | `operator`   |                                | Move a numbered requirement from one item to another.                                                                          |
+| `signoff`                     | requirements | `operator`   | `operator`   |                                | Meet a requirement only a person can meet.                                                                                     |
+| `enqueue`                     | queue        | `supervisor` | `auto`       | `drive`                        | Queue the next drive.                                                                                                          |
+| `pause_for_config_change`     | queue        | `operator`   | `supervisor` |                                | Pause a running drive to take a config change.                                                                                 |
+| `cleanup_interrupted_drive`   | queue        | `supervisor` | `auto`       |                                | Remove the worktrees and branches an interrupted drive left behind.                                                            |
+| `host_load_admission`         | queue        | `off`        | `auto`       |                                | Hold dispatch while the host is loaded.                                                                                        |
+| `usage_admission`             | queue        | `auto`       | `auto`       |                                | Hold dispatch at a `[usage]` pause level, on purchased credit, and on a quota refusal, and resume at the reset.                |
+| `drive_digest`                | queue        | `auto`       | `auto`       |                                | Summarize each drive when it exits.                                                                                            |
+| `stale_citations`             | preflight    | `auto`       | `auto`       |                                | Report cited lines that no longer exist on the trunk before launching.                                                         |
+| `worktree_links_gap`          | preflight    | `auto`       | `auto`       |                                | Report files the verify command reads that the worktree lacks.                                                                 |
+| `deps_lint`                   | preflight    | `auto`       | `auto`       |                                | Refuse a malformed deps line.                                                                                                  |
 
 A drive judges every finding its sessions file when it notices it, after each item's result: each follow-up that appeared while the item ran, and each scaffold the backlog gained. Its coverage says whether anything will carry it:
 
@@ -1031,7 +1051,7 @@ Both keys work in the per-user config like every other `[supervise]` key: one `m
 
 `signoff` is what drive's merge hold on an `[operator]` requirement with no signoff reports, and `post_finish_check` decides whether [`[finish] post_check`](#finish) runs at all: `off` skips it, and any other policy runs it after every finish.
 
-`update_open_prs`, `retry_moved_trunk` and `resolve_conflict` change what drive does: see [Updating the other open pull requests](lifecycle.md#updating-the-other-open-pull-requests). `resolve_conflict` also decides the branch update drive makes before each implement session: at `auto` a conflict there goes to that session to resolve, at `supervisor` and `operator` it parks the item for whoever the hand-off names, and at `off` drive makes no branch update at dispatch at all. See [Updating the branch at dispatch](lifecycle.md#updating-the-branch-at-dispatch). For the rest, a policy decides who is told about the park the action owns and who may run the command beside it. The parks each action owns are listed under [`drive --events`](automation.md#drive---events).
+`update_open_prs`, `retry_moved_trunk` and `resolve_conflict` change what drive does: see [Updating the other open pull requests](lifecycle.md#updating-the-other-open-pull-requests). `resolve_conflict` also decides the branch update drive makes before each implement session: at `auto` a conflict there goes to that session to resolve, at `supervisor` and `operator` it parks the item for whoever the hand-off names, and at `off` drive makes no branch update at dispatch at all. See [Updating the branch at dispatch](lifecycle.md#updating-the-branch-at-dispatch). `fix_gate_refusal` decides what follows a send-back drive writes itself, from a merge gate exiting `1` before the pull request opens or from the item's verify command failing on a caught-up tree: at `auto` the item goes back to the head of the queue for another implement session in the same drive, once per item per drive, and a second refusal parks `gate_refused` for the operator; at `supervisor` and `operator` it parks at once and hands off; at `off` it parks with no hand-off. See [Sending a refused branch back](lifecycle.md#sending-a-refused-branch-back). For the rest, a policy decides who is told about the park the action owns and who may run the command beside it. The parks each action owns are listed under [`drive --events`](automation.md#drive---events).
 
 The five preflight and admission keys do change what drive does. Each check emits a `preflight` event, and `drive --dry-run` prints a preflight section naming what each found:
 

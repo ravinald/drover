@@ -110,6 +110,13 @@ reviewer's report, the audit note and the conversation the review happened in
 did not. Read it as current rather than as history, because `request-changes` replaces
 the section on every pass and nothing in it is a finding somebody already
 closed.
+
+When the section opens with the merge gate's or the verify command's output
+rather than a reviewer's, a check failed on the pushed head: reproduce it before
+changing anything. Each failed check is listed with its URL and at most five
+lines its log says failed; where those lines do not name the cause, read the
+whole failed job with `gh run view --log-failed` on that run. A test you broke
+without editing it is still yours.
 {{- end }}
 {{- if .Cleared }}
 

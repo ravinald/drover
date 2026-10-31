@@ -399,6 +399,7 @@ The `[supervise]` keys, each an action drive or a supervisor may take, and the p
 | `merge_drive_pr`              | Merge a pull request drive opened, then finish it.                                        |
 | `merge_protected_paths`       | Merge a pull request that changes a `[drive] protected_paths` file.                       |
 | `rerun_infra_failure`         | Rerun a check that failed on infrastructure.                                              |
+| `fix_gate_refusal`            | Send a branch the merge gate refused over its own diff back to its implementer.           |
 | `report_trunk_red`            | Report a trunk that fails the verify command on its own, and stop dispatching.            |
 | `post_finish_check`           | Run `[finish] post_check` after each finish.                                              |
 | `rerun_lost_review`           | Rerun, once, a review whose session died or was cut.                                      |
