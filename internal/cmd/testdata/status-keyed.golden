@@ -1,0 +1,30 @@
+fixture status  (ledger: ledger.jsonl)
+
+      ID    KIND    PR                     TITLE                                                        STATE
+      ORIGIN                        CREATED       EDITED       EDITOR                 BRANCH
+[>]   B1    bug     unknown (--no-tracker) item 1                                                       READY
+      operator new                  Mar 01 09:21  Mar 01 09:21 new · operator         bug/b1-a-slug-th…line-has-room-for
+[>]   B2    bug     unknown (--no-tracker) item 2                                                       READY
+      claude new                    Mar 02 09:21  Mar 04 10:21 accept · operator
+[>]   B3    bug     unknown (--no-tracker) item 3                                                       READY
+      operator intake #44           2020-01-02    2020-01-02   intake · operator
+[>]   B4    bug     unknown (--no-tracker) item 4                                                       READY
+      operator split of E84         Mar 03 09:21  Mar 03 09:21 split · operator
+[>]   B5    bug     unknown (--no-tracker) item 5                                                       READY
+      D20 review of B104            Mar 04 09:21  Mar 05 09:21 request-changes · D20
+[>]   B6    bug     unknown (--no-tracker) item 6                                                       READY
+      supervisor new                Mar 06 09:21  Mar 06 09:21 new · supervisor
+[>]   B7    bug     unknown (--no-tracker) item 7                                                       READY
+      agent new ← B104              Mar 07 09:21  Mar 07 09:21 new · agent
+[>]   B8    bug     unknown (--no-tracker) item 8                                                       READY
+      unrecorded                   ≤Mar 08 09:21 ~Mar 20 11:05 unrecorded
+[>]   B9    bug     unknown (--no-tracker) item 9                                                       READY
+      operator new                  Mar 09 09:21 ~Mar 20 11:05 by hand
+[>]   F1    feature unknown (--no-tracker) item 10                                                      READY
+      claude split of B1234567890…  Mar 10 09:21  Mar 10 09:21 split · claude
+[x]   F2    feature unknown (--no-tracker) item 11                                                      done · UNAUDITED
+      operator new                  Mar 11 09:21  Mar 11 09:21 new · operator	
+
+1 of 11 intake done
+1 merged unaudited (drover unaudited)
+key: [>] ready  [x] merged
