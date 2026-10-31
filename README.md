@@ -140,6 +140,7 @@ For a person:
 - [Cost](docs/cost.md): where tokens go, what drover bounds, and the patterns outside it that multiply spend: long-lived sessions, polling from a session, parallel drives.
 - [Concepts](docs/concepts.md): the data model, item ids, the audit levels, how a follow-up finds its owner, and why each store is where it is.
 - [Configuration](docs/configuration.md): every `.drover.toml` key.
+- [Example configurations](docs/example-configurations.md): two real projects' setups, anonymized: one whose verify command is its CI, one whose CI runs a browser suite too slow to repeat locally.
 - [Glossary](docs/glossary.md): every term drover prints or reads, one line each.
 - [Releasing](docs/releasing.md): the tag format, what the pipeline stamps into each artifact, and what to check once it has run.
 

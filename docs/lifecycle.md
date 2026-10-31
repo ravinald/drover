@@ -489,7 +489,19 @@ On the path below, drive:
 4. On exit 0, runs `gh pr merge --<method> --match-head-commit <sha>`, so a push arriving after the merge gate read the head refuses rather than merges.
 5. Asks the forge whether the pull request merged, and finishes it as above.
 
-A merge gate that refuses there parks the item `gate_refused` with the pull request open and the merge gate's last lines in the reason; an exit 2 also stops the drive, as it does before the pull request opens. Any other refusal from the forge (a conflict, a branch policy, a review requirement) parks `merge_failed` as before, because the forge saying no to this pull request is not the merge gate's to overrule. A finish the operator's checkout cannot take cleanly is left to the next drive's reconciliation, and the reason says so.
+A merge gate that refuses there parks the item `gate_refused` with the pull request open and the merge gate's last lines in the reason, and sends nothing back, so `fix_gate_refusal` does not apply; an exit 2 also stops the drive, as it does before the pull request opens. Any other refusal from the forge (a conflict, a branch policy, a review requirement) parks `merge_failed` as before, because the forge saying no to this pull request is not the merge gate's to overrule. A finish the operator's checkout cannot take cleanly is left to the next drive's reconciliation, and the reason says so.
+
+### Sending a refused branch back
+
+A merge gate exiting `1` before the pull request opens blames the diff, and a verify command that fails on a caught-up tree while the trunk passes alone does the same. Either way drive writes the output back to the item through `request-changes`, with each `code` check's failure lines and URL, as a send-back of verify's rather than a review round. What happens next is `[supervise] fix_gate_refusal`'s:
+
+- **`auto`** (the default): the item goes back to the head of the queue at its implement stage, keeping its worktree, and the next free slot runs another implement session, then its review, its push and the merge gate again. It takes a new place in the trunk stage's order, because its first turn there is spent. Once per item per drive: a second refusal in the same drive parks `gate_refused` and hands off to the operator, so a check no session can turn green costs one more round rather than one per head. A drive that is stopping parks it instead of requeuing.
+- **`supervisor`** and **`operator`**: it parks `gate_refused` at once, with a `needs_supervisor` or `needs_operator` event naming the action.
+- **`off`**: it parks `gate_refused` with no hand-off, as drive did before the action existed.
+
+An item already at `[review] max_review_rounds` has the send-back itself refused by `request-changes`, so it parks with nothing written and no session started, whatever the policy. The review after the requeued round has to clear the sent-back block with `drover close-changes`, as it would a reviewer's.
+
+The session that gets the item back can fix only what it can reproduce. Where CI runs tests the verify command does not, see [The verify command and CI](configuration.md#verify).
 
 ### Keeping each branch level with the trunk
 
@@ -499,7 +511,7 @@ The merge makes a tree no session tested, and a forge whose CI runs only on pull
 
 - **It passes:** the push and the checks follow, as above.
 - **It fails:** drive runs the same verify command once on origin's trunk alone, in a temporary worktree detached at the merged commit, given `[drive] worktree_links` and `[drive] worktree_setup` like an item's and removed afterwards. The answer is kept for the rest of the drive by trunk commit and verify command, so a second item updated to the same commit does not pay for it again.
-  - **The trunk passes alone:** the failure comes from the branch meeting what the trunk gained. drive pushes the merge commit, so the next run starts from the tree that failed, and sends the item back with the trunk's range (up to 20 commit subjects) and the verify command's output. The item parks `gate_refused` with no pull request opened. Its `changes` row names `verify` as its source, so it is not a round under `[review] max_review_rounds`, which counts a review's send-backs alone; an item already at the cap still has the send-back refused, and the park reason says so.
+  - **The trunk passes alone:** the failure comes from the branch meeting what the trunk gained. drive pushes the merge commit, so the next run starts from the tree that failed, and sends the item back with the trunk's range (up to 20 commit subjects) and the verify command's output. The item goes back to its implementing session as [Sending a refused branch back](#sending-a-refused-branch-back) describes, or parks `gate_refused` with no pull request opened. Its `changes` row names `verify` as its source, so it is not a round under `[review] max_review_rounds`, which counts a review's send-backs alone; an item already at the cap still has the send-back refused, and the park reason says so.
   - **The trunk fails alone:** no item can fix it. The item parks `trunk_red`, nothing is sent back, the merge is undone and not pushed, and the drive stops.
   - **The trunk's worktree will not set up:** the item parks `gate_unrunnable`, and the merge is undone and not pushed.
 - **No verify command applies:** drive says so on stderr and carries on as if it had passed. A project with no `[verify]` has chosen no verify command.

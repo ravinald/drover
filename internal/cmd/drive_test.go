@@ -1050,6 +1050,15 @@ func TestACodexTurnThatFailedReadsAsDied(t *testing.T) {
 // carries both arms of the discriminator. A fixture where every item takes the
 // same branch proves the drive walked a queue and nothing about what it decided
 // per item.
+// parkGateRefusals keeps a send-back of the merge gate's, or of the verify
+// command on a caught-up tree, where it lands: parked gate_refused with the
+// request for changes written, which is what the tests calling it read.
+// fix_gate_refusal's requeue has tests of its own.
+func parkGateRefusals(t *testing.T) {
+	t.Helper()
+	globalConfig(t, "[supervise]\nfix_gate_refusal = \"off\"\n")
+}
+
 func mergeProject(t *testing.T) string {
 	t.Helper()
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
@@ -1502,6 +1511,7 @@ func TestAParkOpensNoPullRequest(t *testing.T) {
 // that says so.
 func TestAGateRefusalLeavesABranchAndNoPullRequest(t *testing.T) {
 	ghLog := mergeProject(t)
+	parkGateRefusals(t)
 	dir, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -4322,6 +4332,8 @@ func TestRecordHeadWritesOnlyForABranchOffTheTrunk(t *testing.T) {
 // DROVER_TEST_PENDING reads and finished after, so a test can see drive wait.
 // DROVER_TEST_GATE_REFUSE_FROM refuses every gate run from that zero-based
 // count on, which lets the first gate pass and the one at the merge refuse.
+// DROVER_TEST_GATE_REFUSE_BELOW refuses that many first runs and passes the
+// rest, a head the next round turns green.
 // DROVER_TEST_GATE_BEHIND makes that many first gate runs exit 4, a head
 // behind the trunk, and DROVER_TEST_GATE_STALE makes that many exit 1 saying
 // so, as a gate that never learned exit 4 does. DROVER_TEST_GATE_ANCESTRY makes every gate run exit 4 when
@@ -4422,6 +4434,11 @@ fi
 if [ -n "${DROVER_TEST_GATE_BEHIND:-}" ] && [ "$n" -lt "$DROVER_TEST_GATE_BEHIND" ]; then
   echo "merge-gate: $1 is behind origin/main" >&2
   exit 4
+fi
+if [ -n "${DROVER_TEST_GATE_REFUSE_BELOW:-}" ] && [ "$n" -lt "$DROVER_TEST_GATE_REFUSE_BELOW" ]; then
+  echo 'checking the head'
+  echo 'ci/test: failure on linux'
+  exit 1
 fi
 if [ -n "${DROVER_TEST_GATE_REFUSE_FROM:-}" ] && [ "$n" -ge "$DROVER_TEST_GATE_REFUSE_FROM" ]; then
   echo 'checking the head'
@@ -4741,6 +4758,7 @@ func TestEveryRowCarriesWhenItEnded(t *testing.T) {
 		// Refused before the pull request, where the item is sent back without
 		// the park closure; at the merge the closure stamps it.
 		{"merge gate refused", outcomeParked, parkGateRefused, func(t *testing.T) {
+			parkGateRefusals(t)
 			t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
 		}},
 		{"uncommitted work", outcomeParked, parkUncommitted, func(t *testing.T) {
@@ -4887,6 +4905,7 @@ func TestACatchUpRerunsTheVerifyCommandTheItemsFrontmatterSelects(t *testing.T) 
 func TestACatchUpTheVerifyCommandFailsGoesBackToTheBranch(t *testing.T) {
 	isolate(t)
 	ghLog := mergeProject(t)
+	parkGateRefusals(t)
 	dir, remote := forge(t, ghLog)
 	moveTrunk(t, remote, "a.txt", "a")
 	t.Setenv("DROVER_TEST_CHECK_REFUSE", "a.txt implemented.txt")
@@ -4896,8 +4915,8 @@ func TestACatchUpTheVerifyCommandFailsGoesBackToTheBranch(t *testing.T) {
 		t.Fatalf("item 1 is %q/%q pr=%d merged=%v (%s), want parked %q with no pull request",
 			got.Outcome, got.Park, got.PR, got.Merged, got.Reason, parkGateRefused)
 	}
-	if got.Rounds != 1 {
-		t.Errorf("rounds = %d, want 1: the request for changes counts as a round", got.Rounds)
+	if got.Rounds != 0 {
+		t.Errorf("rounds = %d, want 0: a request for changes no session ran after is no round", got.Rounds)
 	}
 	git(t, dir, "fetch", "-q", "origin")
 	moved := git(t, dir, "rev-parse", "origin/main")
@@ -4986,6 +5005,7 @@ func TestATrunkThatFailsTheVerifyCommandAloneStopsTheDrive(t *testing.T) {
 func TestTheTrunkAloneIsVerifiedOncePerCommit(t *testing.T) {
 	isolate(t)
 	ghLog := mergeProject(t)
+	parkGateRefusals(t)
 	dir, remote := forge(t, ghLog)
 	write(t, filepath.Join(dir, "work", "02-second.md"),
 		"---\ntitle: Second\ndeps:\n---\n\n1. Do it too. SECOND-PASSES\n")
@@ -5077,6 +5097,7 @@ func TestACatchUpWithNoVerifyCommandSaysSoAndMerges(t *testing.T) {
 func TestARedCatchUpAtTheMergeKeepsThePullRequestOpen(t *testing.T) {
 	isolate(t)
 	ghLog := mergeProject(t)
+	parkGateRefusals(t)
 	dir, remote := forge(t, ghLog)
 	moveTrunkAfter(t, remote, "gh", "pr create*", "a.txt", "a")
 	t.Setenv("DROVER_TEST_CHECK_REFUSE", "a.txt implemented.txt")
@@ -6450,12 +6471,13 @@ func TestAGateExitingOneOnAHeadBehindTheTrunkIsReadAsBehind(t *testing.T) {
 		gateRuns int
 	}{
 		{"behind is caught up and gated again", true, "", "", 0, 0, 2},
-		{"caught up is still sent back", false, "", parkGateRefused, 1, 1, 1},
+		{"caught up is still sent back", false, "", parkGateRefused, 0, 1, 1},
 		{"operator parks with the hand-off", true, "operator", parkGateRefused, 0, 0, 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			isolate(t)
 			ghLog := mergeProject(t)
+			parkGateRefusals(t)
 			dir, remote := forge(t, ghLog)
 			if c.policy != "" {
 				appendConfig(t, dir, "\n[supervise]\nretry_moved_trunk = \""+c.policy+"\"\n")
@@ -8259,4 +8281,245 @@ func TestAMergeReadsTheGateAgainWhenTheBranchMoved(t *testing.T) {
 			}
 		})
 	}
+}
+
+// roundsCloseSentBack makes mergeProject's sessions behave as rounds after a
+// send-back do: each implement run past the first commits something new, and
+// each review clears the sent-back block the way `drover close-changes` does,
+// recording the body row drover would. Without it the second implement run has
+// nothing to commit and the second review leaves the block standing, so the
+// item parks findings_open before reaching the gate again.
+//
+// DROVER_TEST_REVIEW_SENDS_BACK makes that many first reviews send the item
+// back instead, writing the block and the changes row request-changes writes,
+// so a review's round and the gate's can meet in one drive.
+//
+// Call it before moveTrunk: both wrap impl, and this one calls what it wrapped
+// by absolute path so moveTrunk's "$0.orig" lands on it.
+func roundsCloseSentBack(t *testing.T) {
+	t.Helper()
+	state := t.TempDir()
+	for bin, script := range map[string]string{
+		"impl": `n=$(cat '` + state + `/impl' 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > '` + state + `/impl'
+if [ "$n" -gt 1 ]; then
+  echo "round $n" > fixed.txt
+  git add fixed.txt
+  git -c user.name=r -c user.email=r@example.invalid -c commit.gpgsign=false commit -q -m "round $n"
+fi
+exec '%[1]s' "$@"
+`,
+		"rev": `n=$(cat '` + state + `/rev' 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > '` + state + `/rev'
+f="$DROVER_ROOT/work/01-first.md"
+back=""
+[ "$n" -le "${DROVER_TEST_REVIEW_SENDS_BACK:-0}" ] && back=1
+if [ -n "$back" ] || grep -qx '` + prompts.ChangesHeading + `' "$f"; then
+  text='` + prompts.ClearedMark + `'
+  [ -n "$back" ] && text="R1 is unmet: review $n found the handler unchanged."
+  awk -v text="$text" '
+    $0 == "` + prompts.ChangesHeading + `" { print; print ""; print text; print ""; skip = 1; found = 1; next }
+    skip && /^## / { skip = 0 }
+    !skip { print }
+    END { if (!found) { print ""; print "` + prompts.ChangesHeading + `"; print ""; print text } }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  sum=$( (sha256sum 2>/dev/null || shasum -a 256) < "$f" | cut -c1-12)
+  printf '{"id":"1","body":"%%s","date":"2026-09-20"}\n' "$sum" >> "$DROVER_ROOT/ledger.jsonl"
+  [ -n "$back" ] && printf '{"id":"1","changes":"review %%s","date":"2026-09-20"}\n' "$n" >> "$DROVER_ROOT/ledger.jsonl"
+fi
+'%[1]s' "$@"
+exit 0
+`,
+	} {
+		path, err := exec.LookPath(bin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(path, path+".rounds"); err != nil {
+			t.Fatal(err)
+		}
+		stub(t, path, "#!/bin/sh\n"+fmt.Sprintf(script, path+".rounds"))
+	}
+}
+
+// A merge gate that blames the diff sends the item back to its implementing
+// session in the same drive, and a head that round turns green merges there:
+// one drive, two implement sessions, one send-back, and no park.
+func TestAGateRefusalRunsTheImplementerAgainInTheSameDrive(t *testing.T) {
+	ghLog := mergeProject(t)
+	forge(t, ghLog)
+	roundsCloseSentBack(t)
+	t.Setenv("DROVER_TEST_GATE_REFUSE_BELOW", "1")
+	poll := checksPoll
+	checksPoll = time.Millisecond
+	t.Cleanup(func() { checksPoll = poll })
+	before := ledgerCounts(t)
+
+	got, evs := gateDrive(t)
+	if got.Outcome != outcomeMergedByGate || !got.Merged {
+		t.Fatalf("item 1 is %q/%q merged=%v (%s), want merged by the merge gate in this drive",
+			got.Outcome, got.Park, got.Merged, got.Reason)
+	}
+	c := ledgerCounts(t)
+	if n := c.ByStage[ledger.StageImplement]; n != 2 {
+		t.Errorf("%d implement stages, want 2: the send-back runs the implementer once more", n)
+	}
+	if c.VerifySendBacks != before.VerifySendBacks+1 || c.ChangesRequested != before.ChangesRequested {
+		t.Errorf("verify send-backs %d to %d and review rounds %d to %d, want one more and none: a red gate spends no review round",
+			before.VerifySendBacks, c.VerifySendBacks, before.ChangesRequested, c.ChangesRequested)
+	}
+	queued := false
+	for _, e := range evs {
+		if e.Event == evQueued && e.ID == "1" && e.Action == "fix_gate_refusal" && e.Stage == ledger.StageImplement {
+			queued = true
+		}
+		if e.Event == evParked && e.ID == "1" {
+			t.Errorf("item 1 parked on the way (%s: %s), want it requeued", e.Park, e.Reason)
+		}
+	}
+	if !queued {
+		t.Errorf("no queued event naming fix_gate_refusal for item 1 in %+v", evs)
+	}
+}
+
+// A head the next round does not turn green parks: one requeue per item per
+// drive, so a check no session can fix costs one more round, not one per head.
+func TestASecondGateRefusalInOneDriveParks(t *testing.T) {
+	ghLog := mergeProject(t)
+	forge(t, ghLog)
+	roundsCloseSentBack(t)
+	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
+
+	got, evs := gateDrive(t)
+	if got.Park != parkGateRefused || !strings.Contains(got.Reason, "this drive already sent it back once") {
+		t.Fatalf("item 1 parked %q (%s), want gate_refused naming the spent requeue", got.Park, got.Reason)
+	}
+	if got.Rounds != 0 {
+		t.Errorf("rounds = %d, want 0: the second run started a fresh account and no session ran after its park", got.Rounds)
+	}
+	c := ledgerCounts(t)
+	if n := c.ByStage[ledger.StageImplement]; n != 2 {
+		t.Errorf("%d implement stages, want 2", n)
+	}
+	if c.VerifySendBacks != 2 {
+		t.Errorf("%d verify send-backs, want 2: the parked one is written for the next run too", c.VerifySendBacks)
+	}
+	if n := gateOperatorStops(evs); n != 1 {
+		t.Errorf("%d needs_operator for fix_gate_refusal, want 1 once the requeue is spent", n)
+	}
+}
+
+// At operator, a refusal parks at once and hands off with the action named,
+// and no second implement session starts.
+func TestAGateRefusalAtOperatorHandsOff(t *testing.T) {
+	ghLog := mergeProject(t)
+	dir, _ := forge(t, ghLog)
+	appendConfig(t, dir, "\n[supervise]\nfix_gate_refusal = \"operator\"\n")
+	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
+
+	got, evs := gateDrive(t)
+	if got.Park != parkGateRefused || !strings.Contains(got.Reason, "[supervise] fix_gate_refusal is operator") {
+		t.Fatalf("item 1 parked %q (%s), want gate_refused naming the policy", got.Park, got.Reason)
+	}
+	if n := ledgerCounts(t).ByStage[ledger.StageImplement]; n != 1 {
+		t.Errorf("%d implement stages, want 1", n)
+	}
+	if n := gateOperatorStops(evs); n != 1 {
+		t.Errorf("%d needs_operator for fix_gate_refusal, want exactly 1", n)
+	}
+}
+
+// The verify command failing on a caught-up tree is the same send-back and
+// takes the same requeue. The merge it failed on was pushed with the send-back,
+// so the second round starts level with the trunk, and its head goes to the
+// gate and merges in the same drive.
+func TestACatchUpSendBackRunsTheImplementerAgain(t *testing.T) {
+	isolate(t)
+	ghLog := mergeProject(t)
+	_, remote := forge(t, ghLog)
+	roundsCloseSentBack(t)
+	moveTrunk(t, remote, "a.txt", "a")
+	t.Setenv("DROVER_TEST_CHECK_REFUSE", "a.txt implemented.txt")
+	poll := checksPoll
+	checksPoll = time.Millisecond
+	t.Cleanup(func() { checksPoll = poll })
+	before := ledgerCounts(t)
+
+	got := driveAll(t)[0]
+	if got.Outcome != outcomeMergedByGate || !got.Merged {
+		t.Fatalf("item 1 is %q/%q merged=%v (%s), want merged after one requeue", got.Outcome, got.Park, got.Merged, got.Reason)
+	}
+	c := ledgerCounts(t)
+	if n := c.ByStage[ledger.StageImplement]; n != 2 {
+		t.Errorf("%d implement stages, want 2", n)
+	}
+	if c.VerifySendBacks != before.VerifySendBacks+1 {
+		t.Errorf("verify send-backs %d to %d, want one more", before.VerifySendBacks, c.VerifySendBacks)
+	}
+}
+
+// A review's round and the gate's meet in one drive: the review sends the item
+// back, the next round passes review, the gate blames that head, and the round
+// after merges. Three implement sessions and three reviews, each send-back
+// counted where it belongs, and no park on the way.
+func TestAReviewRoundThenAGateRoundMergeInOneDrive(t *testing.T) {
+	ghLog := mergeProject(t)
+	forge(t, ghLog)
+	roundsCloseSentBack(t)
+	t.Setenv("DROVER_TEST_REVIEW_SENDS_BACK", "1")
+	t.Setenv("DROVER_TEST_GATE_REFUSE_BELOW", "1")
+	poll := checksPoll
+	checksPoll = time.Millisecond
+	t.Cleanup(func() { checksPoll = poll })
+	before := ledgerCounts(t)
+
+	got, evs := gateDrive(t)
+	if got.Outcome != outcomeMergedByGate || !got.Merged {
+		t.Fatalf("item 1 is %q/%q merged=%v (%s), want merged in this drive", got.Outcome, got.Park, got.Merged, got.Reason)
+	}
+	c := ledgerCounts(t)
+	if i, r := c.ByStage[ledger.StageImplement], c.ByStage[ledger.StageReview]; i != 3 || r != 3 {
+		t.Errorf("%d implement and %d review stages, want 3 and 3", i, r)
+	}
+	if c.ChangesRequested != before.ChangesRequested+1 || c.VerifySendBacks != before.VerifySendBacks+1 {
+		t.Errorf("review rounds %d to %d and verify send-backs %d to %d, want one more of each",
+			before.ChangesRequested, c.ChangesRequested, before.VerifySendBacks, c.VerifySendBacks)
+	}
+	for _, e := range evs {
+		if e.Event == evParked && e.ID == "1" {
+			t.Errorf("item 1 parked on the way (%s: %s)", e.Park, e.Reason)
+		}
+	}
+}
+
+// A requeue never spends past the review budget: request-changes refuses the
+// gate's send-back of an item whose reviews used every round of
+// max_review_rounds, so it parks with nothing written and no session started.
+func TestAGateRefusalAtTheReviewCapParks(t *testing.T) {
+	ghLog := mergeProject(t)
+	dir, _ := forge(t, ghLog)
+	appendConfig(t, dir, "\n[review]\nmax_review_rounds = 2\n")
+	roundsCloseSentBack(t)
+	t.Setenv("DROVER_TEST_REVIEW_SENDS_BACK", "1")
+	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
+
+	got, evs := gateDrive(t)
+	if got.Park != parkGateRefused || !strings.Contains(got.Reason, "[review] max_review_rounds is 2") {
+		t.Fatalf("item 1 parked %q (%s), want gate_refused naming the spent review budget", got.Park, got.Reason)
+	}
+	if n := ledgerCounts(t).ByStage[ledger.StageImplement]; n != 2 {
+		t.Errorf("%d implement stages, want 2: the review's round, and none for the gate", n)
+	}
+	for _, e := range evs {
+		if e.Event == evQueued && e.ID == "1" && e.Action == "fix_gate_refusal" {
+			t.Errorf("item 1 requeued past the review cap: %+v", e)
+		}
+	}
+}
+
+func gateOperatorStops(evs []DriveEvent) int {
+	n := 0
+	for _, e := range evs {
+		if e.Event == evNeedsOperator && e.ID == "1" && e.Action == "fix_gate_refusal" {
+			n++
+		}
+	}
+	return n
 }

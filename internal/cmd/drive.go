@@ -551,8 +551,10 @@ type DriveItem struct {
 	// work, so the item's own parked event does not emit a second, emptier one.
 	handed bool
 	// requeue is the boundary a quota-refused launch sends the item back to,
-	// at the head of the queue, and refusal the hold that refusal takes. An
-	// item carrying one is not done: the dispatcher queues it again.
+	// at the head of the queue, and refusal the hold that refusal takes. With
+	// no refusal it is the implement stage a send-back of drive's own returns
+	// the item to under fix_gate_refusal. An item carrying one is not done: the
+	// dispatcher queues it again.
 	requeue *lease.Hold
 	refusal *usageStep
 }
@@ -716,8 +718,8 @@ command on it, the one its run was told to pass, before anything is pushed.
 Green, it pushes and waits for the new head's checks. Red, it runs the same
 verify command on the trunk alone: a trunk that passes means the two fail together, so
 the merge is pushed, its output goes back to the branch as a request for changes, and the
-item parks gate_refused; a trunk that fails alone parks trunk_red, pushes
-nothing and stops the drive. A conflict parks trunk_conflict naming the files,
+item goes back to its implementing session as a merge gate refusal does; a
+trunk that fails alone parks trunk_red, pushes nothing and stops the drive. A conflict parks trunk_conflict naming the files,
 and nothing is ever force-pushed.
 
 Before the verify command or the merge gate reads a pushed head, drive waits for its checks and
@@ -726,8 +728,14 @@ from the built-in list or [forge] infra_patterns, a job that ran no step or a
 canceled run, is rerun with gh run rerun --failed up to [forge] reruns times
 per head; trunk, a check that also failed on the trunk's latest completed
 run, parks trunk_red without a request for changes and stops the drive; code goes to the
-merge gate, and a refusal that follows parks gate_refused naming the check and
-the lines its log says failed ([forge] failure_patterns). A head with no check run after [forge] checks_wait is reported
+merge gate, and a refusal that follows sends the item back naming the check and
+the lines its log says failed ([forge] failure_patterns).
+
+A merge gate refusal that blames the diff before the pull request opens is
+written back to the item as a request for changes. Under [supervise]
+fix_gate_refusal at auto the item then goes back to the head of the queue for
+another implement session in the same drive, once per item per drive; a second
+refusal, or any other policy, parks gate_refused. A head with no check run after [forge] checks_wait is reported
 as no workflow ran on this head. Each classification is a ledger row. An infra
 check drive parked rather than reran (rerun_infra_failure below auto) is read
 once more after the queue drains, unless the drive is stopping: a head whose
@@ -1761,10 +1769,23 @@ func (s *session) driveQueued(ctx context.Context, pending []queued, reviewer st
 			}
 			back.hold = d.requeue
 			pending = append([]queued{back}, pending...)
+			if d.refusal == nil {
+				fmt.Fprintf(errOut, "· %s: %s\n", d.ID, d.Reason)
+				events.emit(DriveEvent{Event: evQueued, ID: d.ID, Action: "fix_gate_refusal", Stage: d.requeue.At, Position: 1})
+				continue
+			}
 			fmt.Fprintf(errOut, "· %s: %s; it goes back to the head of the queue at its %s stage\n", d.ID, d.Reason, d.requeue.At)
 			events.emit(DriveEvent{Event: evQueued, ID: d.ID, Action: "usage_admission", Stage: d.requeue.At, Position: 1})
 			s.holdForUsage(sched, []usageStep{*d.refusal})
 			continue
+		}
+		if d.requeue != nil && d.refusal == nil {
+			// A send-back the stop arrived behind: nothing will run it in this
+			// drive, so it parks where the gate left it.
+			d.Outcome, d.Park = outcomeParked, parkGateRefused
+			d.Reason += ", but the drive stopped before it did"
+			s.recordPark(&d, nil, nil)
+			s.announcePark(d)
 		}
 		if err := account(d); err != nil {
 			return err
@@ -4179,13 +4200,13 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 		return *d
 	case code == gateDiff:
 		// The gate blamed the diff, which makes it a finding like any other and
-		// sends it back the way a reviewer's would. It is recorded as verify's
-		// and not a review round, so a red check does not spend the rounds the
-		// item's reviews are owed.
+		// sends it back the way a reviewer's would, to the implementing session
+		// in this drive while fix_gate_refusal allows. It is recorded as
+		// verify's and not a review round, so a red check does not spend the
+		// rounds the item's reviews are owed.
 		if err := s.requestChangesFromVerify(it, ledger.ChangesVerify, noneFirst(checks.none, "The merge gate refused this branch. Its output:"), out, checks.code...); err != nil {
 			return park("gate_refused", noneFirst(checks.none, "the merge gate blamed this diff and the finding could not be written back: "+err.Error()))
 		}
-		d.Rounds++
 		d.Reason = noneFirst(checks.none, "the merge gate blamed this diff; sent back")
 		if len(checks.code) > 0 {
 			// The cause is the check, so the detail is its class: the last
@@ -4193,10 +4214,7 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 			d.Reason = codeReason(checks.code[0]) + "; sent back"
 			d.setDetail(parkDetail{Detail: ledger.ClassCode, Evidence: codeEvidence(checks.code)})
 		}
-		d.Outcome = outcomeParked
-		d.Park = "gate_refused"
-		s.leaveItem(d)
-		return *d
+		return s.sendBackOrPark(it, d)
 	case code == gateBehind:
 		return park(parkGateRefused, behindAgain(d.Branch, trunk, read, out))
 	case code == gateForge:
@@ -4998,11 +5016,54 @@ func (s *session) requestChangesCatchUp(it backlog.Item, d *DriveItem, park func
 		return park(parkGateRefused, "the verify command failed on "+d.Branch+" merged with "+trunk+
 			", which passes it alone, and the finding could not be written back: "+err.Error())
 	}
-	d.Rounds++
-	d.Outcome, d.Park = outcomeParked, parkGateRefused
 	d.Reason = "the verify command failed on " + d.Branch + " merged with " + trunk + "@" + shortSHA(c.row.To) +
 		", which passes it alone; sent back"
+	return s.sendBackOrPark(it, d)
+}
+
+// sendBackOrPark finishes an item whose send-back drive has just written: back
+// to the head of the queue for its implementing session under [supervise]
+// fix_gate_refusal, or parked gate_refused with the reason it was not.
+//
+// Bounded as resolve_conflict is, once per item per drive, so a check no
+// session can turn green parks after one more round rather than spending a
+// session per head; request-changes has already refused the send-back of an
+// item at [review] max_review_rounds before this runs. The requeue goes
+// through the dispatcher rather than round this item's own loop, because the
+// trunk stage has already retired this item's turn and a second entry under the
+// same turn would wait forever.
+func (s *session) sendBackOrPark(it backlog.Item, d *DriveItem) DriveItem {
+	const key = "fix_gate_refusal"
+	p, _ := s.cfg.Policy(key)
+	// who is handed the park: the policy's own answer when it declines the
+	// session, and the operator once the budget is spent, because the
+	// supervising session would be asked to do what drive just declined to.
+	why, who := "", polOperator
+	switch {
+	case p != polAuto:
+		why, who = "[supervise] "+key+" is "+string(p)+", so no session was started", p
+	case s.slot == nil:
+		why = "the drive's queue had drained, so no session was started"
+	case s.drained("its implementing session ran again") != "":
+		why, who = "the drive was stopping, so no session was started", polOff
+	case !s.slot.sched.spendSendBack(d.ID):
+		why = "this drive already sent it back once"
+	}
+	if why == "" {
+		d.Reason += "; its implementing session runs again in this drive"
+		d.requeue = s.requeueAt(it, ledger.StageImplement)
+		return *d
+	}
+	d.Reason += "; " + why
+	d.Outcome, d.Park = outcomeParked, parkGateRefused
 	s.leaveItem(d)
+	// Here rather than through parkAction, which reads a gate_refused park as
+	// fix_gate_refusal's only over a code check: a send-back over a green head
+	// or a caught-up tree is the same hand-off.
+	if who == polSupervisor || who == polOperator {
+		events.handOff(key, who, DriveEvent{ID: d.ID, Reason: d.Reason, PR: d.PR, Branch: d.Branch, Tree: d.Tree})
+		d.handed = true
+	}
 	return *d
 }
 

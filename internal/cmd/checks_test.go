@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -319,11 +320,12 @@ func TestATrunkFailureBehindAForgeTipTheFetchLacksCountsFromTheForgeTip(t *testi
 // fails it: the check is the code's, and the gate reads it.
 func TestAFailureNoTrunkCommitCompletedIsTheCodes(t *testing.T) {
 	checksForge(t, "pending")
+	parkGateRefusals(t)
 	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
 
 	rows := driveAll(t)
-	if got := rows[0]; got.Park != parkGateRefused || got.Rounds != 1 {
-		t.Errorf("item 1 is %s rounds=%d (%s), want gate_refused with one round", got.Park, got.Rounds, got.Reason)
+	if got := rows[0]; got.Park != parkGateRefused || got.Rounds != 0 {
+		t.Errorf("item 1 is %s rounds=%d (%s), want gate_refused with no round run after it", got.Park, got.Rounds, got.Reason)
 	}
 	cs := checkRows(t)
 	if len(cs) != 1 || cs[0].Class != ledger.ClassCode || cs[0].Check != "vuln" {
@@ -337,6 +339,7 @@ func TestAFailureNoTrunkCommitCompletedIsTheCodes(t *testing.T) {
 // drive goes on to the gate rather than stopping.
 func TestAFailureTheTrunkNoLongerRunsIsTheCodes(t *testing.T) {
 	ghLog := checksForge(t, "stale")
+	parkGateRefusals(t)
 	old := git(t, ".", "rev-parse", "main")
 	t.Setenv("DROVER_TEST_TRUNK_OLD", old)
 	for i := range 6 {
@@ -349,8 +352,8 @@ func TestAFailureTheTrunkNoLongerRunsIsTheCodes(t *testing.T) {
 	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
 
 	rows := driveAll(t)
-	if got := rows[0]; got.Park == parkTrunkRed || got.Park != parkGateRefused || got.Rounds != 1 {
-		t.Errorf("item 1 is %s rounds=%d (%s), want gate_refused with one round, never trunk_red", got.Park, got.Rounds, got.Reason)
+	if got := rows[0]; got.Park == parkTrunkRed || got.Park != parkGateRefused || got.Rounds != 0 {
+		t.Errorf("item 1 is %s rounds=%d (%s), want gate_refused with no round run after it, never trunk_red", got.Park, got.Rounds, got.Reason)
 	}
 	cs := checkRows(t)
 	if len(cs) != 1 || cs[0].Class != ledger.ClassCode || cs[0].Check != "vuln" {
@@ -386,12 +389,13 @@ func TestAFailureOnTheTrunksSecondPageOfRunsParksTrunkRed(t *testing.T) {
 // failure on it is the code's: the gate reads it and sends it back.
 func TestAThirdInfraFailureAfterTwoRerunsIsTheCodes(t *testing.T) {
 	ghLog := checksForge(t, "disk")
+	parkGateRefusals(t)
 	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
 
 	rows := driveAll(t)
 	got := rows[0]
-	if got.Park != parkGateRefused || got.Rounds != 1 {
-		t.Errorf("item 1 is %s rounds=%d (%s), want gate_refused with one round", got.Park, got.Rounds, got.Reason)
+	if got.Park != parkGateRefused || got.Rounds != 0 {
+		t.Errorf("item 1 is %s rounds=%d (%s), want gate_refused with no round run after it", got.Park, got.Rounds, got.Reason)
 	}
 	if n := reruns(t, ghLog); n != 2 {
 		t.Errorf("gh run rerun ran %d times, want 2", n)
@@ -438,6 +442,7 @@ func TestAHeadWithNoRunsIsNamedAsSuch(t *testing.T) {
 // rather than on code.
 func TestAHeadWithNoRunsIsNamedAsSuchWhenTheGateBlamesTheDiff(t *testing.T) {
 	checksForge(t, "none")
+	parkGateRefusals(t)
 	gate, err := exec.LookPath("merge-gate")
 	if err != nil {
 		t.Fatal(err)
@@ -523,6 +528,7 @@ func finalRow(t *testing.T, rows []DriveItem, id string) DriveItem {
 // the summary after the queue drains.
 func TestAGateRefusalIsSaidBeforeTheNextItemStarts(t *testing.T) {
 	checksForge(t, "pending")
+	parkGateRefusals(t)
 	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
 
 	rows, stderr, err := driveRowsErr(t)
@@ -533,7 +539,7 @@ func TestAGateRefusalIsSaidBeforeTheNextItemStarts(t *testing.T) {
 	if at < 0 {
 		t.Fatalf("no park line for item 1 on stderr:\n%s", stderr)
 	}
-	if want := "  ! 1 parked gate_refused at " + headOf(t, rows) + ": vuln failed: no infrastructure line in its log, and main does not fail it; sent back"; line != want {
+	if want := "  ! 1 parked gate_refused at " + headOf(t, rows) + ": vuln failed: no infrastructure line in its log, and main does not fail it; sent back; [supervise] fix_gate_refusal is off, so no session was started"; line != want {
 		t.Errorf("park line %q, want %q", line, want)
 	}
 	if banner := strings.Index(stderr, "==> 2 · implement"); banner < 0 || banner < at {
@@ -825,6 +831,7 @@ func TestACodeFailureParkSaysWhatFailed(t *testing.T) {
 		t.Fatal(err)
 	}
 	checksForge(t, "joblog")
+	parkGateRefusals(t)
 	t.Setenv("DROVER_TEST_CHECKS_LOG", logPath)
 	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "0")
 	const line = "internal/cmd/notify.go:28:16: var-declaration: should omit type http.RoundTripper from declaration of var ntfyTransport; it will be inferred from the right-hand side (revive)"
@@ -861,5 +868,48 @@ func TestACodeFailureParkSaysWhatFailed(t *testing.T) {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("sent-back body lacks %q:\n%s", want, body)
 		}
+	}
+}
+
+// A node --test log as a browser shard prints it, cut down from a real one:
+// a suite whose subtest timed out, the suite's own point after it, and the
+// same file retried. The subtest's point is what failed; the suite's repeats
+// that, and the retry repeats both. A flat failure after the suite, at the
+// suite's indent with no subtests, is a leaf of its own.
+func TestFailureLinesReadTAPLeavesOnce(t *testing.T) {
+	stamp := "2026-10-31T11:46:30.9784237Z "
+	var b strings.Builder
+	for range 2 {
+		for _, l := range []string{
+			"    # Subtest: a search opens the form inline",
+			"    not ok 21 - a search opens the form inline",
+			"      ---",
+			"      error: |-",
+			"        locator.fill: Timeout 30000ms exceeded.",
+			"        Call log:",
+			"          - waiting for getByRole('textbox', { name: 'Search', exact: true })",
+			"      ...",
+			"    1..21",
+			"not ok 23 - adding a place",
+			"  ---",
+			"  type: 'suite'",
+			"  error: '1 subtest failed'",
+			"  ...",
+		} {
+			b.WriteString(stamp + l + "\n")
+		}
+	}
+	b.WriteString(stamp + "not ok 24 - a flat test\n")
+	leaf := "not ok 21 - a search opens the form inline"
+
+	s := &session{cfg: &config.Config{}}
+	if got, want := failureLines(b.String(), s.failurePatterns()), []string{leaf, "not ok 24 - a flat test"}; !slices.Equal(got, want) {
+		t.Errorf("built-in patterns read\n%q\nwant\n%q", got, want)
+	}
+	s.cfg.Forge.FailurePatterns = []string{`^(locator|page|frame|browserContext)\.\w+: `, `^- waiting for `}
+	want := []string{leaf, "locator.fill: Timeout 30000ms exceeded.",
+		"- waiting for getByRole('textbox', { name: 'Search', exact: true })", "not ok 24 - a flat test"}
+	if got := failureLines(b.String(), s.failurePatterns()); !slices.Equal(got, want) {
+		t.Errorf("with the Playwright patterns, read\n%q\nwant\n%q", got, want)
 	}
 }
