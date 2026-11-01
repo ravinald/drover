@@ -1,6 +1,8 @@
 {{- /*
-The built-in drafting prompt. A project that wants different doctrine points
-[prompts] draft at its own file.
+The built-in drafting prompt. A project with drafting rules of its own points
+[prompts] draft at a file of {{define}} blocks; context, an empty place for
+project text ahead of the closing instructions, is the one block here.
+drover schema --prompts lists it.
 
 Same data as the prompt, plus: .Posture .StopMarker .Origin .Finding .Siblings
 */ -}}
@@ -75,6 +77,7 @@ a human reads what you proposed and takes the marker out. Until they do,
 `drover run {{ .ID }}` refuses this item and so does `--dry-run`, which is the
 guarantee that nothing you wrote executes unread.
 {{ end }}
+{{- block "context" . }}{{ end }}
 Then:
 - Say what you read to arrive at each requirement, and what you could not
   establish. A requirement you could not ground in the code is a question for

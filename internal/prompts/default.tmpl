@@ -1,6 +1,10 @@
 {{- /*
-The built-in prompt. A project that wants different doctrine points
-[prompts] implement at its own file; this one stays deliberately generic.
+The built-in prompt, deliberately generic. A project with rules of its own
+points [prompts] implement at a file of {{define}} blocks, each replacing the
+{{block}} of the same name here: intro and scope carry defaults, context and
+done are empty places for project text. Everything outside a block is the
+loop's mechanics and no project replaces it. drover schema --prompts lists the
+blocks with their defaults.
 
 Available: .Project .ID .Stem .Slug .Title .Branch .Body .Planned .Meta
            .Deps .Specs .Skills .VerifyCommand .VerifyCommands .FollowUps .RegisterUnreadable
@@ -19,10 +23,10 @@ Helpers:   .Get "key"  .Is "key"  lower upper join trim
                       .Trunk .Commit .Paths, a path carries .Path .Items, an item
                       .ID .Title .Requirements .Unreadable
 */ -}}
-You are executing {{ .ID }}: {{ .Title }}.
+{{ block "intro" . }}You are executing {{ .ID }}: {{ .Title }}.
 {{- if .Specs }}
 Before writing code, read: {{ join .Specs ", " }}.
-{{- end }}
+{{- end }}{{ end }}
 {{- if .MergedDeps }}
 Depends on (already merged): {{ range $i, $d := .MergedDeps }}{{ if $i }} {{ end }}{{ $d.ID }}{{ end }}.
 {{- $weak := false }}{{ range .MergedDeps }}{{ if .Weak }}{{ $weak = true }}{{ end }}{{ end }}
@@ -53,6 +57,7 @@ contract; the codebase is ground truth, not the plan.
 --- {{ .ID }} ---
 {{ .Body }}
 --- END {{ .ID }} ---
+{{- block "context" . }}{{ end }}
 {{- with .Conflict }}
 
 Your first task is a trunk merge. drover merged {{ .Trunk }} at {{ .Commit }}
@@ -240,9 +245,9 @@ Definition of done:
   reported unmet, whatever the code does. The review reads that map first.
 - A test carried in a sent-back section of this item is committed unchanged and
   passes. Rewriting it to pass is not fixing what it found.
-- Smallest diff that does it. Touch no file the requirements do not name or imply.
+{{ block "scope" . }}- Smallest diff that does it. Touch no file the requirements do not name or imply.
   If the work genuinely needs a wider blast radius, say so in your report rather
-  than widening silently.
+  than widening silently.{{ end }}
 - A defect belonging to another item gets filed against that item, not fixed here.
 - A defect your own diff introduced is this item's, whichever item names it, and
   so is a pre-existing one standing between you and a numbered requirement.
@@ -254,6 +259,7 @@ Definition of done:
   reports the behavior somebody wrote a test for, and a delta nobody declared is
   by definition one nobody tested. Neither is "this project never configures
   that": the operator, the filesystem or the next caller may.
+{{- block "done" . }}{{ end }}
 {{- if .VerifyCommand }}
 - The verify command passes before commit: {{ .VerifyCommand }}
   Run it in the foreground and wait for it to exit. Never background the verify command

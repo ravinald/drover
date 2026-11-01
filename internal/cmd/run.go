@@ -76,11 +76,12 @@ preview, and exits 3.`,
 		if err != nil {
 			return err
 		}
-		tmpl, text, err := prompts.Load(s.cfg.Abs(s.cfg.Prompts.Implement), "default", prompts.DefaultTemplate())
+		tmpl, err := loadPrompt(s.cfg, prompts.SlotImplement)
 		if err != nil {
 			return err
 		}
-		body, err := prompts.Render(tmpl, text, data)
+		s.warnPrompt(tmpl)
+		body, err := tmpl.Render(data)
 		if err != nil {
 			return err
 		}

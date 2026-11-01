@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/ravinald/drover/internal/backlog"
+	"github.com/ravinald/drover/internal/gitcmd"
 )
 
 // acceptYes overrides the refusals accept makes about what a body says.
@@ -53,10 +55,25 @@ every path it cites with a line part, and every backticked name that looks like
 a function or type, that the trunk lacks and the waiting item's branch has. The
 accepted item runs from the trunk and cannot change that code, and the item
 waiting on it cannot merge first, so the two would deadlock. accept refuses
-it, names each citation, and changes nothing. --yes overrides that refusal
-and the unfinished-body one, which are the two accept makes about the body's
-content. It never overrides the stop-marker or actor checks, or a deps line
-drover would misread.
+it, names each citation, and changes nothing.
+
+Every path:line the body cites is read against the trunk the way dispatch
+reads it, and a file the trunk lacks or a range past its last line is refused,
+naming each one. While a dependency is still unmerged the same drift is a
+note instead, since the dependency may add the file before this item runs,
+and a citation that dependency's branch already holds is not reported.
+
+An [operator] requirement holds the merge until drover signoff records it, so
+one that can only be met after the merge is refused: one saying so ("after the
+merge", "post-merge", "once merged", "after deploying"), and one running a
+backticked flag whose name the trunk holds nowhere, which only this branch's
+build can run. Meet it before the merge, put an automated check in [finish]
+post_check, or track the post-merge work as its own item.
+
+--yes overrides every refusal accept makes about the body's content: the
+deadlock, an unfinished body, a requirement naming live work, a citation the
+trunk lacks, and an operator step the merge waits on. It never overrides the
+stop-marker or actor checks, or a deps line drover would misread.
 
 Idempotent. An item with no marker is already accepted: that is reported and
 exits 0, because the operator named a state rather than a transition.
@@ -176,11 +193,34 @@ func (s *session) acceptOne(bare string) error {
 			"Open each with %s so a person signs it off, rewrite it so the session can meet it in the repository, "+
 			"or accept anyway: drover accept %s --yes", strings.Join(msgs, "\n"), backlog.OperatorTag, it.ID.Bare())}
 	}
+	if late := s.operatorTiming(kept); len(late) > 0 && !acceptYes {
+		msgs := make([]string, len(late))
+		for i, r := range late {
+			msgs[i] = fmt.Sprintf("R%d %s", r.Num, r.what)
+		}
+		return Refusal{fmt.Errorf("%s\nNothing was accepted. An %s requirement holds the merge until drover signoff records it, "+
+			"so a step that can only happen after the merge is one nobody can sign off, and the item parks awaiting_signoff with every check green.\n"+
+			"Make it a step the operator meets before the merge, move an automated check to [finish] post_check, "+
+			"or track the post-merge work as its own item outside this one's deps chain, or accept anyway: drover accept %s --yes",
+			strings.Join(msgs, "\n"), backlog.OperatorTag, it.ID.Bare())}
+	}
+	drift, waiting := s.acceptDrift(it)
+	if len(drift) > 0 && len(waiting) == 0 && !acceptYes {
+		return Refusal{fmt.Errorf("%s\nNothing was accepted. A session reads each citation as a claim about the trunk, and these are not on %s.\n"+
+			"Correct each one against git show %s:<path>, or accept anyway: drover accept %s --yes",
+			strings.Join(drift, "\n"), s.driftRef(), s.driftRef(), it.ID.Bare())}
+	}
 	if err := s.writeBody(it, "accept", kept); err != nil {
 		return err
 	}
 	fmt.Printf("accepted: %s (stop marker deleted from %s)\n",
 		it.ID.Bare(), rel(s.cfg.Root, it.Path))
+	for _, d := range drift {
+		if len(waiting) > 0 {
+			fmt.Printf("note: %s; it has to exist once %s merges, since %s runs on the trunk that merge leaves\n",
+				d, strings.Join(waiting, " and "), it.ID.Bare())
+		}
+	}
 	for _, dir := range s.citedDirs(strings.Join(kept[bodyStart(kept):], "\n")) {
 		fmt.Printf("note: %s\n", dirNote(it.ID.Bare(), dir))
 	}
@@ -209,6 +249,114 @@ var liveWork = regexp.MustCompile(`(?i)\b(systemctl|tailscale|` +
 	`on the (?:test |dev |staging |live )?(?:guest|host|server|vm|box)\b|test guests?|` +
 	`live (?:host|server|system|run|check)|staging (?:run|host|server|environment)|production (?:host|server|run)|` +
 	`deploy(?:s|ed|ing)? (?:to|on)|dev (?:run|server|host|box|environment)|real (?:host|device|guest))`)
+
+// postMerge is wording that puts a step after the merge.
+var postMerge = regexp.MustCompile(`(?i)\b(after (?:the |this |it )?(?:merge[sd]?|merging|deploy(?:s|ed|ing|ment)?)|post-merge|once (?:it is |this is |it's )?merged)\b`)
+
+// codeSpan is a backticked span, and cliFlag a command-line flag inside one.
+var (
+	codeSpan = regexp.MustCompile("`([^`\n]+)`")
+	cliFlag  = regexp.MustCompile(`(?:^|\s)--?([a-zA-Z][a-zA-Z0-9-]{3,})\b`)
+)
+
+// operatorTiming is each [operator] requirement of the body that cannot be met
+// before the merge: one saying it happens after it, and one running a flag the
+// trunk has nowhere, which only this branch's build can run.
+//
+// An [operator] requirement holds the merge until it is signed off, so both
+// leave the item waiting on a step that waits on the merge. The flag test is a
+// fixed-string grep for the flag's name over the trunk, so it misses a flag
+// whose name the trunk spells in another sense, and a trunk drover cannot read
+// reports nothing.
+func (s *session) operatorTiming(lines []string) []liveHit {
+	body := lines[bodyStart(lines):]
+	blocks := requirementBlocks(body)
+	var out []liveHit
+	for _, r := range (backlog.Item{Body: strings.Join(body, "\n")}).Requirements() {
+		if !r.Operator {
+			continue
+		}
+		text := blocks[r.Num]
+		if text == "" {
+			text = r.Text
+		}
+		if m := postMerge.FindString(text); m != "" {
+			out = append(out, liveHit{r.Num, fmt.Sprintf("says %q", m)})
+			continue
+		}
+		if flag := s.newFlag(text); flag != "" {
+			out = append(out, liveHit{r.Num, fmt.Sprintf("runs %s, which %s does not have anywhere, so only this branch's build can run it", flag, s.driftRef())})
+		}
+	}
+	return out
+}
+
+// resolves reports whether ref names a commit here. A tree with no trunk to
+// read has no evidence about a citation either way.
+func (s *session) resolves(ref string) bool {
+	return gitcmd.Command(s.cfg.Root, "rev-parse", "--verify", "--quiet", ref+"^{commit}").Run() == nil
+}
+
+// newFlag is the first backticked flag in text whose name the trunk does not
+// hold, or empty.
+func (s *session) newFlag(text string) string {
+	ref := s.driftRef()
+	if !s.cfg.Git.On() || !s.resolves(ref) {
+		return ""
+	}
+	for _, span := range codeSpan.FindAllStringSubmatch(text, -1) {
+		for _, m := range cliFlag.FindAllStringSubmatch(span[1], -1) {
+			err := gitcmd.Command(s.cfg.Root, "grep", "-q", "-F", "-e", m[1], ref, "--").Run()
+			var exit *exec.ExitError
+			if errors.As(err, &exit) && exit.ExitCode() == 1 {
+				return strings.TrimSpace(m[0])
+			}
+		}
+	}
+	return ""
+}
+
+// acceptDrift is each citation in it's body the trunk cannot hold, read the
+// way dispatch reads it, and the unmerged dependencies whose merge could
+// supply one. A dependent may cite a file its dependency creates, and that
+// citation comes true before the dependent runs, so with a dependency still
+// open drift is a note rather than a refusal; a citation that dependency's
+// branch already holds is not reported at all.
+func (s *session) acceptDrift(it backlog.Item) (drift, waiting []string) {
+	if !s.cfg.Git.On() || !s.resolves(s.driftRef()) {
+		return nil, nil
+	}
+	var branches []string
+	for _, id := range it.Deps() {
+		if s.done(id) {
+			continue
+		}
+		waiting = append(waiting, id)
+		if d, err := s.item(id); err == nil {
+			if b := s.branchRef(d); b != "" {
+				branches = append(branches, b)
+			}
+		}
+	}
+	held := map[string]bool{}
+	for _, b := range branches {
+		missing := map[string]bool{}
+		for _, d := range s.drifted(it, b) {
+			missing[d.cite] = true
+		}
+		for _, r := range citedRefs(it.Body) {
+			if !missing[r.Text] {
+				held[r.Text] = true
+			}
+		}
+	}
+	for _, d := range s.drifted(it, s.driftRef()) {
+		if !held[d.cite] {
+			drift = append(drift, d.msg)
+		}
+	}
+	return drift, waiting
+}
 
 // liveHit is one requirement liveWork matched, and the words it matched.
 type liveHit struct {
