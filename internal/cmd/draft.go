@@ -74,11 +74,12 @@ Declared: {runners}.`,
 		}
 
 		data := s.draftData(it)
-		tmpl, text, err := prompts.Load(s.cfg.Abs(s.cfg.Prompts.Draft), "draft", prompts.DraftTemplate())
+		tmpl, err := loadPrompt(s.cfg, prompts.SlotDraft)
 		if err != nil {
 			return err
 		}
-		out, err := prompts.Render(tmpl, text, data)
+		s.warnPrompt(tmpl)
+		out, err := tmpl.Render(data)
 		if err != nil {
 			return err
 		}

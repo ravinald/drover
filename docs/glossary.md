@@ -57,7 +57,7 @@ Each command, as typed after `drover`.
 | `t3 discover`           | Prints the T3 Code server's name, version and tool catalog.                                                          |
 | `t3 login`              | Signs drover in to the T3 Code server and writes `[t3] token_file`; `--check` only reports whether it can.           |
 | `t3 run`                | The runner bridge: launches one T3 Code thread with the prompt, follows it to the end and prints a log drover reads. |
-| `t3 thread`             | Launches a thread (`--new`), opens one for a `needs_operator` (`--from-event`), or interrupts one (`--stop`).         
+| `t3 thread`             | Launches a thread (`--new`), opens one for a `needs_operator` (`--from-event`), or interrupts one (`--stop`).        |
 | `touch`                 | Records a hand edit to an accepted item's prose as the operator's.                                                   |
 | `unaccept`              | Restores the stop marker, returning an item to a scaffold.                                                           |
 | `unaudited`             | Lists merged items nobody audited, worst blast radius first.                                                         |
@@ -199,14 +199,14 @@ Drive's reading of one review session, stored as `review_result`.
 
 What one item came to, on drive's end row and in `drive --json` `outcome`.
 
-| Term                 | Meaning                                                                         |
-| -------------------- | ------------------------------------------------------------------------------- |
-| `ready_to_merge`     | Green and reviewed; nothing merged it.                                          |
-| `merged_by_drover`   | drover merged it on the merge gate's word and the forge reported it merged.     |
-| `merged_immediately` | Older drovers only: the forge's auto-merge merged it on the spot.               |
-| `parked`             | Stopped; the park cause says why.                                               |
-| `skipped`            | Not attempted: merged, scaffolded, blocked or broken.                           |
-| `held`               | Kept back by a usage hold until the drive's deadline; nothing parked.           |
+| Term                 | Meaning                                                                     |
+| -------------------- | --------------------------------------------------------------------------- |
+| `ready_to_merge`     | Green and reviewed; nothing merged it.                                      |
+| `merged_by_drover`   | drover merged it on the merge gate's word and the forge reported it merged. |
+| `merged_immediately` | Older drovers only: the forge's auto-merge merged it on the spot.           |
+| `parked`             | Stopped; the park cause says why.                                           |
+| `skipped`            | Not attempted: merged, scaffolded, blocked or broken.                       |
+| `held`               | Kept back by a usage hold until the drive's deadline; nothing parked.       |
 
 ## Stages and events
 
@@ -240,7 +240,7 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `config_changed`   | Event: the `.drover.toml` on disk differs from the one the running drive uses, which it does not apply until a resume. |
 | `reexec_waiting`   | Event: a re-exec has waited past a minute on running items that do not hold.                                           |
 | `usage_warning`    | Event: the account crossed a `[usage]` notify level; sent once per window per reset, and it pauses nothing.            |
-| `thread_opened`    | Event: `t3 thread --from-event` opened a T3 Code thread for an item; carries `thread` and `url`.                         |
+| `thread_opened`    | Event: `t3 thread --from-event` opened a T3 Code thread for an item; carries `thread` and `url`.                       |
 | `exit`             | Event: the drive ended, with a summary of what it merged and what it left undone and why.                              |
 | `exit_undone`      | `[notify]` routing key: an exit that left an item parked, skipped or held.                                             |
 | `held`             | Event on a `[notify]` command's stdin alone: what quiet hours held, sent as the window ends.                           |
@@ -284,7 +284,7 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `NO REQUIREMENTS`     | An accepted item has no numbered requirements.                                        |
 | `PLACEHOLDER`         | An accepted item's body still carries a `<placeholder>`.                              |
 | `HOLD MARKER`         | An accepted item's body still carries an `[intake] hold_markers` line.                |
-| `LIVE REQUIREMENT`    | An accepted requirement names a live host or deploy without `[operator]`.           |
+| `LIVE REQUIREMENT`    | An accepted requirement names a live host or deploy without `[operator]`.             |
 | `BROAD CITATION`      | A scaffold cites a top-level directory, which serializes it under `--jobs`.           |
 | `HAND EDITED`         | An accepted item's body changed outside drover since its last digest.                 |
 | `UNREADABLE`          | A backlog file did not parse.                                                         |
@@ -318,6 +318,8 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `STALE CONFIG`        | `.drover.toml` lacks a key `drover init` would write today.                           |
 | `SUPERVISOR UNSET`    | A project that has driven leaves `supervisor` defaults with no `[supervise]` table.   |
 | `BAD TEMPLATE`        | A `[prompts]` template will not read or render.                                       |
+| `WHOLE TEMPLATE`      | A `[prompts]` file replaces a built-in template whole instead of overriding blocks.   |
+| `STALE OVERRIDE`      | A `[prompts]` block override was written against a default that has since changed.    |
 | `STALE BLOCK`         | A generated agent-instruction block differs from what this binary and config produce. |
 | `STALE POLICY`        | A generated block records a `[supervise]` policy the config does not hold.            |
 | `BAD ADDENDUM`        | The `[agents] addendum` file is missing or would end the generated block early.       |

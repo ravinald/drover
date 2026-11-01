@@ -2679,11 +2679,11 @@ func (s *session) renderPrompt(it backlog.Item) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	name, text, err := prompts.Load(s.cfg.Abs(s.cfg.Prompts.Implement), "default", prompts.DefaultTemplate())
+	tmpl, err := loadPrompt(s.cfg, prompts.SlotImplement)
 	if err != nil {
 		return "", err
 	}
-	return prompts.Render(name, text, data)
+	return tmpl.Render(data)
 }
 
 func (s *session) renderReview(it backlog.Item) (string, error) {
@@ -2691,11 +2691,11 @@ func (s *session) renderReview(it backlog.Item) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	name, text, err := prompts.Load(s.cfg.Abs(s.cfg.Prompts.Review), "review", prompts.ReviewTemplate())
+	tmpl, err := loadPrompt(s.cfg, prompts.SlotReview)
 	if err != nil {
 		return "", err
 	}
-	out, err := prompts.Render(name, text, data)
+	out, err := tmpl.Render(data)
 	if err != nil {
 		return "", err
 	}
@@ -2723,6 +2723,13 @@ func (s *session) driveHeader(w io.Writer, items []backlog.Item, reviewer string
 	fmt.Fprintf(w, "==> runners: implement %s · review %s\n", implementer, reviewer)
 	fmt.Fprintf(w, "==> prompts: implement %s · review %s\n",
 		s.promptPath(s.cfg.Prompts.Implement, "default"), s.promptPath(s.cfg.Prompts.Review, "review"))
+	for _, slot := range []string{prompts.SlotImplement, prompts.SlotReview} {
+		if tmpl, err := loadPrompt(s.cfg, slot); err == nil {
+			for _, warn := range promptWarnings(tmpl, promptFor(s.cfg, slot)) {
+				fmt.Fprintf(w, "  · %s\n", warn)
+			}
+		}
+	}
 
 	bound := "unbounded"
 	if !deadline.IsZero() {

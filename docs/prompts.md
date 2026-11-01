@@ -1,8 +1,8 @@
 # Prompt templates
 
-The prompt is the text an agent is handed. It is a Go `text/template` a project owns, not prose compiled into drover, because every rule it carries (what a bug owes over a feature, how wide a diff may go, what the report must carry) is a property of the project rather than of the tool.
+The prompt is the text an agent is handed. drover builds it from a Go `text/template` in two layers: the built-in template, which carries the loop's mechanics (how to send work back, when to escalate to the operator, what a review records, never to push), and a project's own overrides of the named blocks inside it, which carry the rules that belong to the project (what a bug owes over a feature, which tests to run, the host's conventions).
 
-Point at yours with `[prompts] implement`. Omit it for the built-in, which is deliberately generic. Two more render the same way and from the same data: `[prompts] draft` for the prompt `drover draft` hands an agent drafting an item's requirements, and `[prompts] review` for the one `drover review` hands an agent checking the finished work. Each is documented below by what it adds.
+There are three templates, one per slot, each overridden by its own key: `[prompts] implement` for an implementing run, `[prompts] review` for the prompt `drover review` hands an agent checking the finished work, and `[prompts] draft` for the one `drover draft` hands an agent drafting an item's requirements. Omit a key and the built-in renders alone. [Overriding blocks](#overriding-blocks) says what a file there holds.
 
 Preview before spending a run:
 
@@ -29,12 +29,12 @@ Three commands render a template and they share one data type, so the tables bel
 | `.Planned`            | bool     | False for a namespaced item.                                                                                                                                                                                                                                  |
 | `.Kind`               | string   | The item's frontmatter `kind`, else the kind its namespace maps to in `[ids]`, else empty. Reach it with `with` rather than `if`, since empty is a real answer.                                                                                               |
 | `.Meta`               | map      | The keys present in this item's fence and no others. `drover check` renders against every key `[frontmatter]` declares, so `{{ .Meta.phase }}` passes there and still fails at launch for an item that omits `phase`: read an optional key with `.Get "key"`. |
-| `.Deps`               | []Dep    | `.ID .Title .Done .Unreadable .Level .By .Independent .Weak .Report`, all of them populated by every command. `.Level` is the audit level and `.Report` the path to the dep's saved report                                                                  |
+| `.Deps`               | []Dep    | `.ID .Title .Done .Unreadable .Level .By .Independent .Weak .Report`, all of them populated by every command. `.Level` is the audit level and `.Report` the path to the dep's saved report                                                                    |
 | `.Specs`              | []string | `spec:` tokens resolved against `[paths] specs`.                                                                                                                                                                                                              |
 | `.Skills`             | []Skill  | `.Name`, and `.Path` when vendored.                                                                                                                                                                                                                           |
-| `.VerifyCommand`               | string   | The verify command selected for this item.                                                                                                                                                                                                                    |
-| `.MergeGate`          | string   | `[drive] merge_gate` joined into one line, empty when unset. The built-in review brief asks for the full `.VerifyCommand` only when this is empty.                                                                                                                     |
-| `.VerifyCommands`              | map      | Every verify command, when you want to choose differently.                                                                                                                                                                                                    |
+| `.VerifyCommand`      | string   | The verify command selected for this item.                                                                                                                                                                                                                    |
+| `.MergeGate`          | string   | `[drive] merge_gate` joined into one line, empty when unset. The built-in review brief asks for the full `.VerifyCommand` only when this is empty.                                                                                                            |
+| `.VerifyCommands`     | map      | Every verify command, when you want to choose differently.                                                                                                                                                                                                    |
 | `.FollowUps`          | []Issue  | Open follow-ups, one hop. `.Number .Title .Severity .Owners .Mine .Body .Unavailable`                                                                                                                                                                         |
 | `.RegisterUnreadable` | string   | Why the follow-up list did not answer, empty when it did.                                                                                                                                                                                                     |
 | `.Owned`              | []Issue  | Open issues owned by this item or its deps that are not follow-ups, one hop. `.Number .Title .Labels .Owners .Mine .Body`                                                                                                                                     |
@@ -44,8 +44,8 @@ Three commands render a template and they share one data type, so the tables bel
 | `.Audits`             | int      | Recorded audits.                                                                                                                                                                                                                                              |
 | `.Rounds`             | int      | Times a review has sent it back.                                                                                                                                                                                                                              |
 | `.Repeated`           | bool     | Method: this item has been round the loop before.                                                                                                                                                                                                             |
-| `.Changes`             | string   | Method: what the last review sent back, the heading excluded.                                                                                                                                                                                                 |
-| `.ChangesHeading`      | string   | Method: the heading `drover request-changes` writes under.                                                                                                                                                                                                    |
+| `.Changes`            | string   | Method: what the last review sent back, the heading excluded.                                                                                                                                                                                                 |
+| `.ChangesHeading`     | string   | Method: the heading `drover request-changes` writes under.                                                                                                                                                                                                    |
 | `.Cleared`            | bool     | Method: that section holds a discharged block rather than findings.                                                                                                                                                                                           |
 | `.Guarantees`         | string   | Method: what every pass so far established this code must keep true.                                                                                                                                                                                          |
 | `.GuaranteeHeading`   | string   | Method: the heading `drover invariant` appends under.                                                                                                                                                                                                         |
@@ -102,7 +102,7 @@ A template naming a field that does not exist fails rather than rendering a hole
 | `.Note`             | string        | That audit's note, verbatim.                                                                         |
 | `.AuditDate`        | string        | When it was recorded.                                                                                |
 | `.Closes`           | []Resolution  | The tracker issues the item says it resolves.                                                        |
-| `.MaxReviewRounds`        | int           | `[review] max_review_rounds`, zero when uncapped.                                                    |
+| `.MaxReviewRounds`  | int           | `[review] max_review_rounds`, zero when uncapped.                                                    |
 | `.Modified`         | int           | Source files this branch changed, tests excluded.                                                    |
 | `.Unnamed`          | []string      | Those the item body never mentions.                                                                  |
 | `.Named`            | int           | Method: the complement, so two numbers cannot disagree.                                              |
@@ -146,39 +146,64 @@ A `Resolution` is `.Number .Title .Body .State .Disposition .By .Note .Applied .
 
 `[run] branch` renders from the same data **minus `.FollowUps` and `.RegisterUnreadable`**, and `.Branch` itself is naturally empty there. `.Kind` is available, and is the one field a branch template is likely to want that the frontmatter alone cannot always supply. Those are the only fields read from the tracker, and a branch name that changed the moment `gh` was unreachable would leave `run` creating one name and `finish` hunting for another. A branch template referencing any of them renders it as empty rather than failing.
 
-## Writing one
+## Overriding blocks
 
-Start from the built-in and edit. The parts worth keeping:
+A `[prompts]` file holds `{{define}}` blocks and nothing else. Each one replaces the `{{block}}` of the same name in that slot's built-in template, and every line of the built-in outside a block renders as drover ships it. An upgrade that corrects the loop's instructions reaches every project, whatever it overrides.
 
-**Put preconditions before the body, postconditions after.** A guide the agent must read before writing code does not belong under "definition of done".
+| Slot        | Block     | Default                                                                               |
+| ----------- | --------- | ------------------------------------------------------------------------------------- |
+| `implement` | `intro`   | The opening line naming the item, and the specs to read before writing code.          |
+| `implement` | `context` | Empty. Project text after the item's body: framing, data-handling rules.              |
+| `implement` | `scope`   | The "smallest diff that does it" bullet of the definition of done.                    |
+| `implement` | `done`    | Empty. Project bullets for the definition of done, ahead of the verify command's.     |
+| `review`    | `intro`   | The opening line and the staff-engineer framing.                                      |
+| `review`    | `context` | Empty. Project text after the independence paragraph: the product, the security bar.  |
+| `review`    | `verify`  | The bullet saying whether to re-run the verify command, and how.                      |
+| `review`    | `checks`  | Empty. Project bullets the reviewer checks on every item, after the diff-reading one. |
+| `draft`     | `context` | Empty. Project text ahead of the closing instructions.                                |
 
-**Give `.Body` its own fenced region.** The item text is the contract; an agent needs to see where it starts and stops.
+`drover schema --prompts` prints the same list as JSON with each default's text, so you can start an override from what it replaces:
 
-```text
---- {{ .ID }} ---
-{{ .Body }}
---- END {{ .ID }} ---
+```bash
+drover schema --prompts | jq -r '.[] | select(.slot=="review" and .block=="verify") | .default'
 ```
 
-**Say what is inherited and what to do with it.** A list of issue numbers with no instruction is noise:
+An empty block is an addition: drover puts nothing there, so nothing there can fall behind. Write it as a continuation of what precedes it. In `done` and `checks` that is a bullet list, so open each bullet on a new line and trim the last one:
 
 ```text
-{{- if .FollowUps }}
-Open follow-ups for this item and its direct dependencies. Address them in this
-run, or say in your report why you are carrying one forward.
-{{- range .FollowUps }}
-  - #{{ .Number }} [{{ if .Severity }}{{ .Severity }}{{ else }}-{{ end }}] {{ .Title }}
+{{define "done"}}
+- An edit to api/openapi.yaml runs `make codegen` and commits what it regenerates.
+{{- if .Is "migration" }}
+- A migration takes the next number under backend/migrations and never edits a shipped one.
 {{- end }}
-{{ end }}
+{{- end}}
 ```
 
-**Hand over dependency reports.** A follow-up records what an item left open; a saved report records what it closed by inspection. `.Report` is its path, and a run that cannot see the second re-litigates the finding or regresses the invariant it rested on:
+A block with a default is a replacement, and it opens with the hash of the default it was written against:
 
 ```text
-{{- range .Deps }}{{ if .Report }}
-  - {{ .Report }}
-{{- end }}{{ end }}
+{{define "scope"}}{{/* drover-base: e1c001e5348d */}}- Own only this item's packages; do not touch another item's surface.{{end}}
 ```
+
+`drover check` reports `STALE OVERRIDE` when that default changes, or when a replacement records no hash, and `drover run`, `drover review`, `drover draft` and the `drover drive` header print the same as a warning, so a change to drover's text never passes a project by unseen. `drover check --diff` shows what changed between the default your block recorded and today's:
+
+```text
+==> implement/scope in docs-internal/kickoff.tmpl
+--- e1c001e5348d (the override's base)
++++ 143f7c5bc929 (today's default)
+  - Smallest diff that does it. Touch no file the requirements do not name or imply.
+-   If the work genuinely needs a wider blast radius, say so in your report rather
++   If the work needs a wider blast radius, name each extra file in your report rather
+    than widening silently.
+```
+
+On a terminal a removed line is red and an added one green, and where a line was rewritten rather than replaced, the words that changed are bold and the rest of the line faint. `--color` and `NO_COLOR` decide it as they do everywhere else. Carry what still applies into your block, and record the new hash.
+
+The binary can show the old default because it ships every default each block has had, keyed by hash. A replacement whose hash this build has no record of, or that records none, is named in the `--diff` output with the current hash, rather than skipped.
+
+Two refusals keep a file honest. A `{{define}}` naming a block the built-in does not have fails to render, since its text would never appear. A file holding text outside any `{{define}}` renders that text in place of the whole built-in, which is how a project used to override a template, and `drover check` reports it as `WHOLE TEMPLATE`, and every launch from it warns: none of drover's own instructions reach a session that prompt launches, so the copy keeps every instruction at the version it was copied from.
+
+A few things worth carrying into the blocks you write:
 
 **Vary by kind where it matters.** Read the kind out of `.Meta` rather than expecting drover to know your vocabulary:
 

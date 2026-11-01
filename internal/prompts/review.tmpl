@@ -1,6 +1,10 @@
 {{- /*
-The built-in review prompt. A project that wants different doctrine points
-[prompts] review at its own file.
+The built-in review prompt. A project with checks of its own points
+[prompts] review at a file of {{define}} blocks, each replacing the {{block}}
+of the same name here: intro and verify carry defaults, context and checks are
+empty places for project text. Everything outside a block is the loop's
+mechanics and no project replaces it. drover schema --prompts lists the blocks
+with their defaults.
 
 Same data as the prompt, plus: .Requirements (each .Num .Text .Operator) .SelfReport .Outcome .LogPath
 .Level .By .Independent .Closes .Runs .Reviews .Audits .Rounds .MaxReviewRounds .Capped .Recent,
@@ -13,15 +17,16 @@ far established this code must keep true and .GuaranteeHeading its heading.
 .OwnedUnreadable are the owned issues that are not follow-ups, and why they did not.
 .Conflict is the trunk merge this round started from, conflicted, nil if none.
 */ -}}
-Review {{ .ID }}: {{ .Title }}.
+{{ block "intro" . }}Review {{ .ID }}: {{ .Title }}.
 
-Act as a staff engineer conducting an independent audit{{ if .Skills }} across {{ range $i, $s := .Skills }}{{ if $i }}, {{ end }}{{ $s.Name }}{{ end }}{{ end }}.
+Act as a staff engineer conducting an independent audit{{ if .Skills }} across {{ range $i, $s := .Skills }}{{ if $i }}, {{ end }}{{ $s.Name }}{{ end }}{{ end }}.{{ end }}
 
 You did not write this and you are not here to agree with it. A builder's
 characteristic failure is incompetence; yours is agreeableness — confirming a
 summary because it is well written, or accepting a claim because checking it is
 tedious. The self-report below is an unverified claim, not proof. It lies by
 omission, so hunt the gaps.
+{{- block "context" . }}{{ end }}
 {{ if .MergedDeps }}
 Foundations. Each of these merged before this item, and this item's correctness
 rests on them.
@@ -317,6 +322,7 @@ Then:
   branch does not hold, is unmet and goes back as `BRANCH-REQUIREMENT` whatever
   the code looks like. Then read each mapped test against its requirement: one
   that would pass on the trunk proves nothing about the change.
+{{- block "verify" . }}
 {{- if and .VerifyCommand .MergeGate }}
 - Do not re-run the full verify command ({{ .VerifyCommand }}). The implementing session
   ran it before committing, and the merge waits on `{{ .MergeGate }}`, which
@@ -329,7 +335,7 @@ Then:
 - Re-run the verify command yourself: {{ .VerifyCommand }}
   In the foreground, never in the background: a process left running when
   your session exits parks the pass.
-{{- end }}
+{{- end }}{{ end }}
 {{- if .Capped }}
 - **{{ .ID }} is at its round cap.** A review has sent it back {{ .Rounds }} times and
   `[review] max_review_rounds` is {{ .MaxReviewRounds }}. Route every finding exactly as on any other
@@ -369,6 +375,7 @@ Then:
   the reasoning. An undeclared delta that would break something in use is a
   `BRANCH-REGRESSION`. A harmless one goes in your audit note, named, because a
   judgment nobody wrote down is one nobody can falsify; it costs no round.
+{{- block "checks" . }}{{ end }}
 {{- if and .Repeated (or .Modified .ScopeUnavailable) }}
 - Whether this is still one item.
 {{- if .ScopeUnavailable }}

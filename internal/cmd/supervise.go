@@ -13,7 +13,6 @@ import (
 
 	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/ledger"
-	"github.com/ravinald/drover/internal/prompts"
 	"github.com/ravinald/drover/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -438,9 +437,13 @@ func (s *session) superviseTemplatePath() string {
 // renderSupervise renders the brief from [supervise] template, or the built-in
 // one, the way the implement and review templates resolve.
 func (s *session) renderSupervise(ids []string, runnerName string) (string, error) {
-	name, text, err := prompts.Load(s.cfg.SuperviseTemplate(), "supervise", superviseTemplate)
-	if err != nil {
-		return "", err
+	name, text := "supervise", superviseTemplate
+	if path := s.cfg.SuperviseTemplate(); path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("read prompt template: %w", err)
+		}
+		name, text = path, string(data)
 	}
 	t, err := template.New(name).Option("missingkey=error").Parse(text)
 	if err != nil {

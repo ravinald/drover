@@ -26,7 +26,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var checkJSON bool
+var (
+	checkJSON bool
+	checkDiff bool
+)
 
 // Finding is one validation failure. Kind is the stable token a wrapper keys
 // on; Message is the sentence a human reads. Detail carries the fix where one
@@ -229,6 +232,14 @@ wording, so never match on it.
                       this build does not have, or a .Meta key [frontmatter] does
                       not declare or a .Gates name [verify] does not, so the command
                       that uses it fails
+  WHOLE TEMPLATE      a [prompts] file holds text outside any define block, so it
+                      replaces the built-in template instead of overriding its
+                      blocks, and no instruction drover adds or corrects reaches
+                      the sessions it launches
+  STALE OVERRIDE      a [prompts] file replaces a block whose built-in default has
+                      changed since the override's drover-base comment was written,
+                      or that carries no such comment; drover check --diff shows
+                      how the default changed since the recorded one
   STALE BLOCK         a generated agent-instruction block no longer matches what this
                       binary, this config and the [agents] addendum would produce
   STALE POLICY        a generated block records a [supervise] policy the config no
@@ -293,6 +304,7 @@ every project starts. The label set is one gh call, and it degrades the way
 ORPHANED FOLLOW-UP does: a
 note saying what could not be asked, never a finding.`,
 	Example: `  drover check                      # exit 2 on any finding; this is the CI command
+  drover check --diff               # and how each STALE OVERRIDE's default changed
   drover check --json               # one object, counts included:
     {"ok":false,"bodies":14,"ledger_rows":3,"register_read":true,
      "register_state":"read",
@@ -345,6 +357,11 @@ note saying what could not be asked, never a finding.`,
 			}
 		} else {
 			renderCheck(os.Stdout, rep)
+		}
+		if checkDiff {
+			if s, err := open(); err == nil {
+				s.overrideDiffs(os.Stdout, colorFor(os.Stdout))
+			}
 		}
 
 		if !rep.OK {
@@ -1267,16 +1284,17 @@ func (s *session) addSupervisor(add func(Finding)) {
 // unset key renders a built-in template, which the prompt package's own tests
 // render against the same sample.
 func (s *session) addTemplates(add func(Finding)) {
-	for _, path := range []string{s.cfg.Prompts.Implement, s.cfg.Prompts.Draft, s.cfg.Prompts.Review} {
+	for _, slot := range prompts.Slots {
+		path := promptFor(s.cfg, slot)
 		if path == "" {
 			continue
 		}
 		why := "does not render against this build's prompt"
-		name, text, err := prompts.Load(s.cfg.Abs(path), "", "")
+		tmpl, err := loadPrompt(s.cfg, slot)
 		if err != nil {
 			why = "could not be read"
 		} else {
-			_, err = prompts.Render(name, text, prompts.SampleFor(s.cfg.DeclaredKeys(), s.cfg.Verify))
+			_, err = tmpl.Render(prompts.SampleFor(s.cfg.DeclaredKeys(), s.cfg.Verify))
 		}
 		if err != nil {
 			add(Finding{
@@ -1284,6 +1302,30 @@ func (s *session) addTemplates(add func(Finding)) {
 				Message: path + " " + why,
 				Detail:  err.Error(),
 				Path:    path,
+			})
+			continue
+		}
+		seen := tmpl.Inspect()
+		if seen.Whole {
+			add(Finding{
+				Kind: "WHOLE TEMPLATE",
+				Message: path + " replaces the built-in " + slot + " template whole, so no change drover makes to it reaches this project; " +
+					"keep only {{define}} blocks for the parts this project changes",
+				Detail: "drover schema --prompts lists the blocks a [prompts] " + slot + " file may define",
+				Path:   path,
+			})
+		}
+		for _, b := range seen.Behind {
+			msg := path + " replaces " + slot + "/" + b.Block + " without recording which default it was written against"
+			if b.Recorded != "" {
+				msg = path + " replaces " + slot + "/" + b.Block + ", and the default it was written against (" + b.Recorded + ") has changed"
+			}
+			add(Finding{
+				Kind:    "STALE OVERRIDE",
+				Message: msg,
+				Detail: fmt.Sprintf("drover check --diff shows how the default changed; carry what still applies into the override, "+
+					"then open its define with {{/* drover-base: %s */}}", b.Current),
+				Path: path,
 			})
 		}
 	}
@@ -1729,6 +1771,8 @@ func rel(root, path string) string {
 
 func init() {
 	checkCmd.Flags().BoolVar(&checkJSON, "json", false, "emit the report as JSON")
+	checkCmd.Flags().BoolVar(&checkDiff, "diff", false,
+		"after the report, show how each default a STALE OVERRIDE names changed since the override recorded it")
 	root.AddCommand(checkCmd)
 }
 
@@ -1921,5 +1965,38 @@ func (s *session) addT3(add func(Finding)) {
 		add(Finding{Kind: "BRIDGE VERSION",
 			Message: fmt.Sprintf("the T3 Code server reports %s, and the bridge was tested against %s ([t3] tested_version)", info.Version, s.cfg.T3TestedVersion()),
 			Detail:  "the provider event log usage tracking reads is T3's internal format and may have moved: run one stage, look for usage_unavailable in its log, then set [t3] tested_version"})
+	}
+}
+
+// overrideDiffs writes, for each block an override replaced against a default
+// that has since changed, the change from the recorded default to today's.
+// A base this binary has no record of, or no base at all, is said rather than
+// skipped, so a missing diff is never read as an unchanged default.
+func (s *session) overrideDiffs(w io.Writer, color bool) {
+	for _, slot := range prompts.Slots {
+		tmpl, err := loadPrompt(s.cfg, slot)
+		if err != nil || tmpl.Path == "" {
+			continue
+		}
+		current := map[string]prompts.Block{}
+		for _, b := range prompts.Blocks(slot) {
+			current[b.Name] = b
+		}
+		for _, b := range tmpl.Inspect().Behind {
+			fmt.Fprintf(w, "\n%s %s/%s in %s\n", sgr("==>", pal.Heading, color), slot, b.Block, promptFor(s.cfg, slot))
+			if b.Recorded == "" {
+				fmt.Fprintf(w, "    the override records no drover-base, so there is no earlier default to compare;\n"+
+					"    drover schema --prompts prints today's (%s)\n", b.Current)
+				continue
+			}
+			was, ok := prompts.Earlier(slot, b.Block, b.Recorded)
+			if !ok {
+				fmt.Fprintf(w, "    this build has no record of default %s; drover schema --prompts prints today's (%s)\n",
+					b.Recorded, b.Current)
+				continue
+			}
+			fmt.Fprintf(w, "--- %s (the override's base)\n+++ %s (today's default)\n", b.Recorded, b.Current)
+			fmt.Fprintf(w, "%s", renderDiff(lineDiff(was, current[b.Block].Default), color))
+		}
 	}
 }
