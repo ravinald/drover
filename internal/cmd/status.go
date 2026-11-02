@@ -1158,6 +1158,10 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error, now time.Time
 	// renders to. It names the candidates in the form finish refuses them with.
 	case len(owners) > 1:
 		fmt.Fprintf(w, "\n▸ here: branch %s  (%s — name the id)\n", branch, bareIDs(owners))
+	// The trunk is where drive leaves the checkout, so "no item owns it" there
+	// was the line on nearly every run and said nothing a reader acts on.
+	case branch == s.trunk():
+		said = false
 	default:
 		fmt.Fprintf(w, "\n▸ here: %s\n", describeBranch(branch, index, func(n int) string { return s.registerRefTo(os.Stdout, n) }))
 	}

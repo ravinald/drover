@@ -167,7 +167,7 @@ Each row is one item. The leading glyph is its state:
 | `[?]` | scaffold    | The body still carries its stop marker. The note says which step is next: `scaffold · needs requirements` when no numbered requirement is written, `drafted · N reqs · drover accept <id>` when the list is written and waits on accept. |
 | `[!]` | broken      | The body will not parse.                                                                                                                                                                                                                 |
 
-The second column is a one-character gutter. `▸` marks the item whose branch is checked out, and the same item is named in a `▸ here:` line below the totals. On a terminal that row is also bold green, but color is never the only signal: the glyph and the footer line carry it for a reader who cannot see the color, for a piped or redirected run, and when `NO_COLOR` is set.
+The second column is a one-character gutter. `▸` marks the item whose branch is checked out, and the same item is named in a `▸ here:` line below the totals. On the trunk with no item rendering to it, the line is left out: that is where `drive` leaves the checkout, so the line would say the same nothing on nearly every run. On a terminal that row is also bold green, but color is never the only signal: the glyph and the footer line carry it for a reader who cannot see the color, for a piped or redirected run, and when `NO_COLOR` is set.
 
 Under each row a second line, dim and indented to the id, says where the item came from and who last wrote its body. The glyph already says the state, so the line carries none of it. Its fields sit at fixed widths so a reader coming back after a long gap can scan down one column:
 
@@ -194,7 +194,7 @@ On a terminal the table opens with a header naming each column of both lines, an
 
 `--short` prints the one-line table and nothing else. `--since 3d`, `--since 12h` or `--since 2026-10-20` keeps only the items created or edited at or after then, beside `--sev` and `--all`, an unreadable body included, and the footer counts what it hid as `N rows hidden by --since`. The same three objects are on each item of `status --json` and on `show --json`; see [Automation](automation.md#status---json).
 
-The current item is found by rendering `run.branch` for every item and comparing against `HEAD`, not by parsing the branch name. The template is project-defined and its default renders a planned item to a bare slug carrying no id at all, so there is nothing in the string to parse. Standing on a branch no item renders to, or on one that several render to, leaves the gutter marker off and the footer names the branch alone:
+The current item is found by rendering `run.branch` for every item and comparing against `HEAD`, not by parsing the branch name. The template is project-defined and its default renders a planned item to a bare slug carrying no id at all, so there is nothing in the string to parse. Standing on a branch other than the trunk that no item renders to, or on one that several render to, leaves the gutter marker off and the footer names the branch alone:
 
 ```text
 ▸ here: branch bug/41-login-redirect-loops  #41 Login redirect loops on an expired session  (F2)
