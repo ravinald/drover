@@ -47,6 +47,8 @@ The variable reaches only a session drover started itself. So drover also writes
 | Refuses inside a session        | Why it is not yours                                                                                                                           |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `accept` / `unaccept`           | A run cannot accept its own requirements. A person reads the drafted list and accepts it, which is the one boundary drover does not automate. |
+| `amend` / `touch` / `fold`      | Each changes or vouches for an accepted contract, and a session would be moving the target it is measured against.                            |
+| `live`                          | It runs a check against real hosts, which no session drover launched may reach.                                                               |
 | `finish`                        | The operator merges, so the operator records the merge.                                                                                       |
 | `mark-merged` / `unmark-merged` | The ledger half of the same thing: a merge nobody else witnessed, or a withdrawal contradicting a row somebody already read.                  |
 | `intake <n>`                    | It relabels a live issue on a tracker other people read.                                                                                      |

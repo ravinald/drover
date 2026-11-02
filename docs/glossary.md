@@ -146,7 +146,7 @@ Why drive stopped an item (ledger and `--json` `park`), and the underlying failu
 | `gate_unrunnable`         | The merge gate, the verify command or the numbered-files check would not start.                  |
 | `trunk_conflict`          | Merging the trunk into the branch conflicted.                                                    |
 | `live_busy`               | A live check waited past `[live] wait` for another holding its lock.                             |
-| `live_failed`             | A live check ran and its result could not be recorded or sent back.                              |
+| `live_failed`             | A live check ran and drover could not record or send back its result.                            |
 | `live_unavailable`        | A live check exited 4 or never started: its environment, not the work.                           |
 | `trunk_red`               | The trunk fails the verify command on its own.                                                   |
 | `forge_down`              | The merge gate failed for a reason the diff did not cause, and the drive stopped.                |
