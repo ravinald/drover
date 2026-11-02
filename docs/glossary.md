@@ -12,6 +12,7 @@ Each command, as typed after `drover`.
 | `agents`                | Prints the agent instructions generated from this project's config; `--write` writes them into a file.               |
 | `attach`                | Prints a drive's events from the start and follows them until the drive exits.                                       |
 | `amend`                 | Replaces an accepted, unmerged item's numbered requirements and keeps the old list.                                  |
+| `fold`                  | Moves one accepted item's numbered requirements onto another's list and shelves it.                                  |
 | `audit`                 | Appends an audit row: the audit level, who wrote the code (`--code-by`) and who looked (`--reviewer`).               |
 | `check`                 | Validates the config, the backlog, the ledger and the paths between them; exits 2 on findings.                       |
 | `close-changes`         | Replaces the sent-back section of an item with a closed note, writing no request-changes row.                        |
@@ -287,6 +288,7 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `LIVE REQUIREMENT`    | An accepted requirement names a live host or deploy without `[operator]`.             |
 | `BROAD CITATION`      | A scaffold cites a top-level directory, which serializes it under `--jobs`.           |
 | `HAND EDITED`         | An accepted item's body changed outside drover since its last digest.                 |
+| `BRANCH OVERLAP`      | An unmerged item cites a file another unmerged branch changes, with no deps edge.     |
 | `UNREADABLE`          | A backlog file did not parse.                                                         |
 | `BAD VALUE`           | An item's value fails what `[frontmatter]` declares the key may hold.                 |
 | `BAD RUNNER`          | A `[runners]` entry's argv is one its binary cannot use.                              |

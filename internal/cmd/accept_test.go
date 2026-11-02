@@ -937,3 +937,105 @@ func TestAcceptDryRunIsOpenToALaunchedSession(t *testing.T) {
 		t.Error("accept itself is no longer sealed")
 	}
 }
+
+// branchedProject is a git project on origin whose item 1 is accepted and has a
+// branch changing internal/x.go, and whose item 2 is a scaffold citing that
+// file. deps2 is item 2's deps line and deps1 item 1's.
+func branchedProject(t *testing.T, deps1, deps2 string) *session {
+	t.Helper()
+	s := driveProject(t)
+	dir := s.cfg.Root
+	if err := os.MkdirAll(filepath.Join(dir, "internal"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "internal", "x.go"), "package internal\n")
+	git(t, dir, "add", "internal/x.go")
+	git(t, dir, "commit", "-q", "-m", "x")
+	git(t, dir, "push", "-q", "origin", "main")
+	write(t, filepath.Join(dir, "work", "01-first.md"), "---\ntitle: First\ndeps:"+deps1+"\n---\n\n1. Rewrite `internal/x.go`.\n")
+	write(t, filepath.Join(dir, "work", "02-second.md"), "---\ntitle: Second\ndeps:"+deps2+"\n---\n\n"+
+		"STOP: requirements not yet written\n"+
+		"drover refuses to launch this item while this line is present. Delete it\n"+
+		"once the list below is real.\n\n"+
+		"Act as a maintainer.\n\n1. Extend `internal/x.go`.\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "the two bodies")
+	if err := s.reload(); err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.item("1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch, err := s.branchFor(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "switch", "-q", "-c", branch)
+	write(t, filepath.Join(dir, "internal", "x.go"), "package internal\n\nfunc X() {}\n")
+	git(t, dir, "commit", "-q", "-am", "first's change")
+	git(t, dir, "switch", "-q", "main")
+	t.Chdir(dir)
+	return s
+}
+
+// E86 cited a function B101's branch was rewriting and merged first. accept
+// refuses the pair and names the two orderings; a deps edge either way, or
+// --yes, lets it through.
+func TestAcceptRefusesACitationAnotherBranchIsChanging(t *testing.T) {
+	branchedProject(t, "", "")
+	_, err := acceptID(t, "2")
+	if err == nil || Code(err) != ExitRefused {
+		t.Fatalf("accept = %v, want exit 3", err)
+	}
+	for _, want := range []string{"1's branch", "changes internal/x.go", "add 1 to 2's deps line", "add 2 to 1's", "drover accept 2 --yes"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal lacks %q:\n%v", want, err)
+		}
+	}
+	acceptYes = true
+	if _, err := acceptID(t, "2"); err != nil {
+		t.Errorf("accept --yes = %v", err)
+	}
+}
+
+func TestAcceptPassesAnOverlapADepOrders(t *testing.T) {
+	for _, c := range []struct{ name, deps1, deps2 string }{
+		{"2 waits on 1", "", " 1"},
+		{"1 waits on 2", " 2", ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			branchedProject(t, c.deps1, c.deps2)
+			if _, err := acceptID(t, "2"); err != nil {
+				t.Errorf("accept refused an overlap a deps edge orders: %v", err)
+			}
+		})
+	}
+}
+
+// A branch that will not read is not evidence of an overlap: it is named on
+// stderr and the accept goes ahead.
+func TestAcceptGoesAheadPastABranchThatWillNotRead(t *testing.T) {
+	s := branchedProject(t, "", "")
+	first, _ := s.item("1")
+	branch, _ := s.branchFor(first)
+	dir := s.cfg.Root
+	git(t, dir, "branch", "-q", "-D", branch)
+	git(t, dir, "switch", "-q", "--orphan", branch)
+	if err := os.MkdirAll(filepath.Join(dir, "internal"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(dir, "internal", "x.go"), "package internal\n// unrelated history\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "a branch with no merge base")
+	git(t, dir, "switch", "-q", "main")
+
+	var err error
+	stderr := captureErr(t, func() { _, err = acceptID(t, "2") })
+	if err != nil {
+		t.Fatalf("accept = %v, want it to go ahead", err)
+	}
+	if !strings.Contains(stderr, "1's branch did not read") {
+		t.Errorf("stderr does not name the unreadable branch: %q", stderr)
+	}
+}

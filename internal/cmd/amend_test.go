@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -356,4 +357,87 @@ func TestRequirementSpanEndsAtTheListsEnd(t *testing.T) {
 	if start != 2 || end != 8 {
 		t.Errorf("span = %d..%d, want 2..8: %q", start, end, lines[start:end])
 	}
+}
+
+func foldProject(t *testing.T) string {
+	t.Helper()
+	return shelfProject(t, map[string]string{
+		"F01-keep.md": "---\ntitle: Keep\ndeps:\n---\n\nRequirements:\n\n1. Do the first thing.\n2. Do the second.\n",
+		"F02-fold.md": "---\ntitle: Fold\ndeps:\n---\n\nRequirements:\n\n1. Do the folded thing.\n   It continues here.\n2. Test R1 of F2.\n",
+	}, map[string]string{})
+}
+
+// runFold folds F2 into F1, the pair every fold fixture here builds.
+func runFold(t *testing.T) (string, error) {
+	t.Helper()
+	t.Cleanup(func() { foldInto = "" })
+	var err error
+	out := capture(t, func() { err = execute(t, "fold", "F2", "--into", "F1") })
+	return out, err
+}
+
+func TestFoldAppendsRenumberedRequirementsAndShelvesTheSource(t *testing.T) {
+	dir := foldProject(t)
+	t.Chdir(dir)
+	out, err := runFold(t)
+	if err != nil {
+		t.Fatalf("fold: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "work", "F01-keep.md")) // #nosec G304 -- the fixture's own body
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "1. Do the first thing.\n2. Do the second.\n3. Do the folded thing.\n   It continues here.\n4. Test R1 of F2.\n"
+	if !strings.Contains(string(b), want) {
+		t.Errorf("F1's list is:\n%s\nwant it to end with:\n%s", b, want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "shelved", "F02-fold.md")); err != nil {
+		t.Errorf("F2 was not shelved: %v", err)
+	}
+	if !strings.Contains(out, "4. Test R1 of F2.") {
+		t.Errorf("fold did not print the moved line naming a requirement and an id:\n%s", out)
+	}
+	found := false
+	for _, r := range openIn(t, dir).ledger.Rows {
+		if r.ID == "F1" && r.Amend != nil && r.Amend.Moved == "F2" && r.Amend.From == 2 && r.Amend.To == 4 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no amend row records the fold on F1 with F2 as where the requirements moved from")
+	}
+}
+
+func TestFoldRefusesWhatItCannotMakeOne(t *testing.T) {
+	t.Run("a reversed dependency", func(t *testing.T) {
+		dir := shelfProject(t, map[string]string{
+			"F01-keep.md": "---\ntitle: Keep\ndeps: F2\n---\n\nRequirements:\n\n1. One.\n",
+			"F02-fold.md": "---\ntitle: Fold\ndeps:\n---\n\nRequirements:\n\n1. Two.\n",
+		}, map[string]string{})
+		t.Chdir(dir)
+		if _, err := runFold(t); Code(err) != ExitRefused || !strings.Contains(err.Error(), "has to land first") {
+			t.Errorf("fold = %v, want exit 3 naming the dependency", err)
+		}
+	})
+	t.Run("past fold_max", func(t *testing.T) {
+		dir := foldProject(t)
+		conf := filepath.Join(dir, ".drover.toml")
+		b, _ := os.ReadFile(conf) // #nosec G304 -- the fixture's own config
+		write(t, conf, string(b)+"\n[backlog]\nfold_max = 3\n")
+		t.Chdir(dir)
+		if _, err := runFold(t); Code(err) != ExitRefused || !strings.Contains(err.Error(), "fold_max 3") {
+			t.Errorf("fold = %v, want exit 3 naming fold_max", err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "work", "F02-fold.md")); err != nil {
+			t.Error("a refused fold moved F2")
+		}
+	})
+	t.Run("inside a launched session", func(t *testing.T) {
+		dir := foldProject(t)
+		t.Chdir(dir)
+		t.Setenv(runner.EnvActor, runner.ActorAgent)
+		if _, err := runFold(t); Code(err) != ExitRefused {
+			t.Errorf("fold in a launched session = %v, want exit 3", err)
+		}
+	})
 }

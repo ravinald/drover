@@ -53,6 +53,16 @@ citing a path below it. The note changes nothing and the exit stays 0. A
 paragraph whose first line is <!-- drover: context --> cites nothing for that
 purpose, here or at dispatch, except for its numbered requirement lines.
 
+A body citing a file another unmerged item's branch already changes against
+the trunk, where neither item names the other on its deps line at any depth,
+is refused: the two would run and merge in whatever order the queue reached
+them, and the second would rewrite what the first was written against. The
+refusal names the other item, its branch, each path, and the deps edit for
+each order. A branch holding no commit past the trunk is not compared, and one
+that will not read is named on stderr and compared as changing nothing. A pair
+of unmerged items whose cited line ranges overlap in one file is a note, not a
+refusal: it suggests drover fold.
+
 An item another unmerged item waits on is read against that item's branch:
 every path it cites with a line part, and every backticked name that looks like
 a function or type, that the trunk lacks and the waiting item's branch has. The
@@ -223,6 +233,9 @@ func (s *session) acceptOne(bare string) error {
 			"Correct each one against git show %s:<path>, or accept anyway: drover accept %s --yes",
 			strings.Join(drift, "\n"), s.driftRef(), s.driftRef(), it.ID.Bare())}
 	}
+	if found := s.branchOverlaps(it); len(found) > 0 && !acceptYes {
+		return overlapRefusal(it.ID.Bare(), found)
+	}
 	if acceptDryRun {
 		fmt.Printf("would accept: %s\n", it.ID.Bare())
 		return nil
@@ -240,6 +253,11 @@ func (s *session) acceptOne(bare string) error {
 	}
 	for _, dir := range s.citedDirs(strings.Join(kept[bodyStart(kept):], "\n")) {
 		fmt.Printf("note: %s\n", dirNote(it.ID.Bare(), dir))
+	}
+	for _, r := range s.rangeOverlaps() {
+		if r.A == it.ID.Bare() || r.B == it.ID.Bare() {
+			fmt.Printf("note: %s; drover fold merges two such items into one\n", r)
+		}
 	}
 	if !s.mirroring() {
 		return nil
