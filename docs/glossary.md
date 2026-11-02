@@ -35,6 +35,7 @@ Each command, as typed after `drover`.
 | `intake`                | Turns a tracker issue into a scaffolded item; `intake --list` lists issues it could take in and has not.             |
 | `invariant`             | Appends a property every later pass must keep to the item's `## Invariants` section.                                 |
 | `link`                  | Adds an issue number to the item's `closes` key, so `finish` answers whoever filed it.                               |
+| `live`                  | Runs an item's live check against its branch head and records the result.                                            |
 | `mark-merged`           | Appends the completion row alone, for a merge recorded by hand.                                                      |
 | `new`                   | Writes a scaffolded item with no tracker issue behind it.                                                            |
 | `notify`                | Sends a test event, or a sample of one `--event`, to each `[notify]` destination and prints each answer.             |
@@ -143,6 +144,9 @@ Why drive stopped an item (ledger and `--json` `park`), and the underlying failu
 | `gate_refused`            | The merge gate exited non-zero for this diff.                                                    |
 | `gate_unrunnable`         | The merge gate, the verify command or the numbered-files check would not start.                  |
 | `trunk_conflict`          | Merging the trunk into the branch conflicted.                                                    |
+| `live_busy`               | A live check waited past `[live] wait` for another holding its lock.                             |
+| `live_failed`             | A live check ran and its result could not be recorded or sent back.                              |
+| `live_unavailable`        | A live check exited 4 or never started: its environment, not the work.                           |
 | `trunk_red`               | The trunk fails the verify command on its own.                                                   |
 | `forge_down`              | The merge gate failed for a reason the diff did not cause, and the drive stopped.                |
 | `protected_paths`         | The branch changes a `[drive] protected_paths` file, so the merge waits for a person.            |
@@ -218,6 +222,7 @@ Ledger stage rows, drive event stages, and the events `drive --events`, `attach`
 | `review`           | Ledger and event stage: a review session launched.                                                                     |
 | `interactive`      | `status` usage key: the `by_stage` entry for usage rows no stage launched, a Claude Code session the operator ran.     |
 | `update_branch`    | Event stage: drive merged the trunk into the branch and ran the verify command.                                        |
+| `live`             | Event stage: drive ran the item's live check; `result` is its exit code.                                               |
 | `gate`             | Event stage: the merge gate read the branch head, or a resume reran the verify command.                                |
 | `pr`               | Event stage: drive opened the pull request.                                                                            |
 | `merge`            | Event stage: drive asked the forge to merge.                                                                           |
@@ -459,6 +464,7 @@ The `.drover.toml` sections, with the keys whose names carry drover vocabulary. 
 | `[drive] worktree_links`     | Paths drive symlinks into each item's worktree.                                                                                                                                                         |
 | `[drive] worktree_setup`     | A command drive runs in each new worktree.                                                                                                                                                              |
 | `[finish]`                   | `post_check`, the command run after each finish.                                                                                                                                                        |
+| `[live]`                     | `default`, `wait`, and one `[live.<name>]` check run before the merge.                                                                                                                                  |
 | `[numbered_files]`           | Globs of numbered files that must not share a number.                                                                                                                                                   |
 | `[github]`                   | `repo`, `follow_up_label`, `severity_prefix` and `page_limit`.                                                                                                                                          |
 | `[forge]`                    | How drive reads forge checks: `infra_patterns`, `failure_patterns`, `reruns` and `checks_wait`.                                                                                                         |
