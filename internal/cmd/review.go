@@ -87,11 +87,12 @@ authority that a branch may merge.`,
 		if err != nil {
 			return err
 		}
-		tmpl, text, err := prompts.Load(s.cfg.Abs(s.cfg.Prompts.Review), "review", prompts.ReviewTemplate())
+		tmpl, err := loadPrompt(s.cfg, prompts.SlotReview)
 		if err != nil {
 			return err
 		}
-		out, err := prompts.Render(tmpl, text, data)
+		s.warnPrompt(tmpl)
+		out, err := tmpl.Render(data)
 		if err != nil {
 			return err
 		}

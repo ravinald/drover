@@ -559,15 +559,15 @@ Omitting the section entirely gives you the built-in `claude` runner above.
 
 ## `[prompts]`
 
-| Key         | Meaning                                                                          |
-| ----------- | -------------------------------------------------------------------------------- |
-| `implement` | Path to your own prompt template for an implementing run. Omit for the built-in. |
-| `draft`     | Path to your own drafting prompt. Omit for the built-in.                         |
-| `review`    | Path to your own review prompt. Omit for the built-in.                           |
+| Key         | Meaning                                                                                                         |
+| ----------- | --------------------------------------------------------------------------------------------------------------- |
+| `implement` | Path to a file of `{{define}}` blocks overriding the built-in implementing prompt. Omit for the built-in alone. |
+| `draft`     | The same, for the drafting prompt.                                                                              |
+| `review`    | The same, for the review prompt.                                                                                |
 
-See [Prompt templates](prompts.md).
+See [Overriding blocks](prompts.md#overriding-blocks) for the blocks each slot has and what a file there may hold.
 
-`drover check` renders each template these keys name against a sample prompt in which every field is set, every list holds one element, `.Meta` holds every key `[frontmatter]` declares and `.VerifyCommands` holds every command `[verify]` names, and reports `BAD TEMPLATE` for one that cannot be read or will not render. A field your template names that this build does not have, or a key or verify command the project does not declare, fails there rather than at `drover run`.
+`drover check` renders each template these keys name, layered on its built-in, against a sample prompt in which every field is set, every list holds one element, `.Meta` holds every key `[frontmatter]` declares and `.VerifyCommands` holds every command `[verify]` names, and reports `BAD TEMPLATE` for one that cannot be read or will not render. A field your template names that this build does not have, a key or verify command the project does not declare, or a block the built-in has no slot for, fails there rather than at `drover run`. It reports `WHOLE TEMPLATE` for a file that replaces the built-in instead of overriding its blocks, and `STALE OVERRIDE` for a replaced block whose default changed since the override recorded it.
 
 The drafting prompt is what `drover draft` hands an agent drafting an item's numbered requirements, which is not what a run needs to execute them: the originating issue, `[agents] principles`, the numbered-list contract, the sibling items with their paths, and the body file to write into. It reaches the same data as the implement prompt plus `.Path`, `.Posture`, `.StopMarker`, `.Origin` and `.Siblings`. Whatever it says, `draft` refuses an item whose stop marker is gone and never deletes one. See [the three stages](lifecycle.md#three-stages-three-runners).
 
@@ -803,11 +803,11 @@ For a `code` check, `drive` also reads what failed out of the same job log: up t
 | `^--- FAIL`                     | A failed Go test                                                          |
 | `^FAIL\b`                       | A failed Go test package                                                  |
 | `^\S+:\d+:\d+: .*\(\w[\w-]*\)$` | A golangci-lint finding, its linter named last                            |
-| `^\S+\.\w+:\d+:\d+:`           | A compiler or `go vet` error                                              |
+| `^\S+\.\w+:\d+:\d+:`            | A compiler or `go vet` error                                              |
 | `^Vulnerability #\d+`           | A govulncheck finding                                                     |
-| `^\s*Found in:`                | The module or package version govulncheck found it in                     |
-| `^\s*Fixed in:`                | The version that fixes it                                                 |
-| `^panic:`                      | A Go panic                                                                |
+| `^\s*Found in:`                 | The module or package version govulncheck found it in                     |
+| `^\s*Fixed in:`                 | The version that fixes it                                                 |
+| `^panic:`                       | A Go panic                                                                |
 | `^not ok \d+\b`                 | A failed TAP test point: `node --test`, `tap` and most JavaScript runners |
 
 Each line is kept once, since a runner that retries a failed file prints its failures again. A TAP suite's own `not ok` point, printed one indent out after the subtests it summarizes, is dropped in favor of those subtests, which name what failed. A log matching none of them falls back to the last 5 non-blank lines before its first `make: ***` or `Error:` line. `failure_patterns` adds to the list, so a project whose test runner prints `ERROR <name>` adds `'^ERROR '`; a pattern that does not compile is refused at load. A TAP point names the failing test but not why it failed. For a Playwright suite run under `node --test`, these add the timeout and the selector it waited for, which usually name the cause:

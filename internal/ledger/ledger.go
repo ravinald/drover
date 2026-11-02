@@ -1349,6 +1349,19 @@ func SameCommit(a, b string) bool {
 	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
 }
 
+// Branch is the branch the latest row naming one did for an item: a launch, a
+// pushed head or a pull request. Empty says no row recorded one, which is every
+// item nothing has run, and is not the branch the template would render.
+func (l *Ledger) Branch(id string) string {
+	branch := ""
+	for _, r := range l.Rows {
+		if r.ID == id && r.Branch != "" {
+			branch = r.Branch
+		}
+	}
+	return branch
+}
+
 // PR is the pull request drover last recorded for one item, and the branch it
 // was opened from. A zero says none was recorded, and is not an answer about
 // the forge.

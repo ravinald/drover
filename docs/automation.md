@@ -460,6 +460,8 @@ This is the one list command that emits an object, and the lease is why. It belo
 
 The checked-out item carries `"current": true`.
 
+`branch` is the branch the latest ledger row recorded for the item's work, from an implement or review launch, a pushed head or a pull request, whole however long. It is absent for an item nothing has run, and it is never the name `[run] branch` would render today.
+
 `pr` is the item's pull request, absent when the forge lists none from its branch, the project has no branches, or no remote names a GitHub host. `state` is `open`, `draft`, `merged`, `closed` or `unknown`. `unknown` comes with `error`, which names the read that did not complete (`gh missing`, `not authenticated`, `forge unreachable`, `gh failed`, `no GitHub remote` on a number the ledger recorded, `--no-tracker`) followed by what gh said, so a degraded read says what it could not ask rather than reporting no pull request. `number` is absent only when the read failed and the ledger recorded none. A merged item whose number `open-pr` recorded carries `{"number":236,"state":"merged"}` without the forge being asked. One `gh pr list` call serves the whole array.
 
 ```json
@@ -1528,7 +1530,7 @@ One object, not an array, because the counts are part of the answer.
 }
 ```
 
-`kind` is the stable token to key on: `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BRIDGE SIGNED OUT`, `BRIDGE UNREACHABLE`, `BRIDGE VERSION`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNREVIEWED MERGE`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `SUPERVISOR UNSET`, `BAD TEMPLATE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `SESSION MARKER`, `PLACEHOLDER`, `HOLD MARKER`, `LIVE REQUIREMENT`, `BROAD CITATION` and `HAND EDITED`. `message` is prose and will change wording. `path`, `line` and `id` are present where the finding has one.
+`kind` is the stable token to key on: `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BRIDGE SIGNED OUT`, `BRIDGE UNREACHABLE`, `BRIDGE VERSION`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `SUPERVISOR UNSET`, `BAD TEMPLATE`, `WHOLE TEMPLATE`, `STALE OVERRIDE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `SESSION MARKER`, `PLACEHOLDER`, `HOLD MARKER`, `LIVE REQUIREMENT`, `BROAD CITATION`, `HAND EDITED` and `UNREVIEWED MERGE`. `message` is prose and will change wording. `path`, `line` and `id` are present where the finding has one.
 
 `register_state` is what the follow-up read amounted to, as a token rather than as prose. Only `read` says the count of orphaned rows is the whole answer:
 

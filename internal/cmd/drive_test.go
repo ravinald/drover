@@ -8523,3 +8523,35 @@ func gateOperatorStops(evs []DriveEvent) int {
 	}
 	return n
 }
+
+// Each stage row a drive writes names the branch the session worked on, so
+// status can say where a running item's work is before its first push records
+// a head.
+func TestDriveStageRowsNameTheBranch(t *testing.T) {
+	ghLog := mergeProject(t)
+	forge(t, ghLog)
+	poll := checksPoll
+	checksPoll = time.Millisecond
+	t.Cleanup(func() { checksPoll = poll })
+	driveAll(t, "1")
+
+	l, err := ledger.Load("ledger.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stages := 0
+	for _, r := range l.Rows {
+		if r.ID == "1" && (r.Stage == ledger.StageImplement || r.Stage == ledger.StageReview) {
+			stages++
+			if r.Branch != "first" {
+				t.Errorf("%s stage row names branch %q, want first", r.Stage, r.Branch)
+			}
+		}
+	}
+	if stages < 2 {
+		t.Errorf("%d implement and review stage rows, want at least 2", stages)
+	}
+	if got := l.Branch("1"); got != "first" {
+		t.Errorf("Ledger.Branch(1) = %q, want first", got)
+	}
+}

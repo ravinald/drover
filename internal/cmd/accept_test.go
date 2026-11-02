@@ -775,3 +775,109 @@ func TestAcceptRefusesALiveRequirement(t *testing.T) {
 		})
 	}
 }
+
+// trunkScaffold writes an unaccepted body as item 1 (or the id the file name
+// gives) in a git project whose trunk is on origin, and returns the session.
+func trunkScaffold(t *testing.T, files map[string]string) *session {
+	t.Helper()
+	s := driveProject(t)
+	for name, req := range files {
+		write(t, filepath.Join(s.cfg.Root, "work", name), "---\ntitle: Scaffold\ndeps:"+depsOf(name)+"\n---\n\n"+
+			"STOP: requirements not yet written\n"+
+			"drover refuses to launch this item while this line is present. Delete it\n"+
+			"once the list below is real.\n\n"+
+			"Act as a maintainer.\n\n"+req+"\n")
+	}
+	if err := s.reload(); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(s.cfg.Root)
+	return s
+}
+
+// depsOf reads a dependency off a fixture name written "02-second+1.md".
+func depsOf(name string) string {
+	if _, dep, ok := strings.Cut(strings.TrimSuffix(name, ".md"), "+"); ok {
+		return " " + dep
+	}
+	return ""
+}
+
+func acceptID(t *testing.T, id string) (string, error) {
+	t.Helper()
+	t.Cleanup(func() { acceptYes = false })
+	var err error
+	out := capture(t, func() { err = acceptCmd.RunE(acceptCmd, []string{id}) })
+	return out, err
+}
+
+// A citation the trunk lacks fails at accept, in milliseconds, rather than
+// as a warning a drive prints at dispatch and launches past.
+func TestAcceptRefusesACitationTheTrunkLacks(t *testing.T) {
+	trunkScaffold(t, map[string]string{"01-first.md": "1. Fix `gone/away.go:3` and `go.mod:1-40`."})
+	_, err := acceptID(t, "1")
+	if err == nil || Code(err) != ExitRefused {
+		t.Fatalf("accept = %v, want a refusal", err)
+	}
+	for _, want := range []string{"gone/away.go:3 names a file", "go.mod:1-40 runs past the end of go.mod", "drover accept 1 --yes"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal lacks %q:\n%v", want, err)
+		}
+	}
+	acceptYes = true
+	if _, err := acceptID(t, "1"); err != nil {
+		t.Errorf("accept --yes = %v, want the override to accept", err)
+	}
+}
+
+// A dependent may cite the file its dependency creates: that citation is true
+// by the time the dependent runs, so it is a note while the dependency is open.
+func TestAcceptNotesDriftWhileADependencyIsOpen(t *testing.T) {
+	trunkScaffold(t, map[string]string{
+		"01-first.md":    "1. Add `internal/new.go`.",
+		"02-second+1.md": "1. Call the helper at `internal/new.go:3`.",
+	})
+	out, err := acceptID(t, "2")
+	if err != nil {
+		t.Fatalf("accept refused a citation its open dependency may supply: %v", err)
+	}
+	if !strings.Contains(out, "note: internal/new.go:3 names a file") || !strings.Contains(out, "once 1 merges") {
+		t.Errorf("accept does not note the drift against the open dependency:\n%s", out)
+	}
+}
+
+// An [operator] requirement holds the merge until signoff, so a step that
+// waits on the merge deadlocks the item with every check green.
+func TestAcceptRefusesAnOperatorStepTheMergeWaitsOn(t *testing.T) {
+	cases := []struct {
+		name, req, want string
+	}{
+		{"after the merge", "1. [operator] After the merge, run the backfill in production.", `R1 says "After the merge"`},
+		{"post-merge", "1. [operator] Run the post-merge backfill and record the count.", `R1 says "post-merge"`},
+		{"a flag the trunk lacks", "1. [operator] Run `catalog -merge-shared-gtins -apply` against production.", "R1 runs -merge-shared-gtins"},
+		{"a flag the trunk has", "1. [operator] Run `tool --dry-run` on the staging copy and paste the output.", ""},
+		{"untagged", "1. Add the `-merge-shared-gtins` flag to catalog.", ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := trunkScaffold(t, map[string]string{"01-first.md": c.req})
+			write(t, filepath.Join(s.cfg.Root, "tool.go"), "package main\n\nvar dry = flag.Bool(\"dry-run\", false, \"\")\n")
+			git(t, s.cfg.Root, "add", "tool.go")
+			git(t, s.cfg.Root, "commit", "-q", "-m", "tool")
+			git(t, s.cfg.Root, "push", "-q", "origin", "main")
+			_, err := acceptID(t, "1")
+			if c.want == "" {
+				if err != nil {
+					t.Fatalf("accept refused %q: %v", c.req, err)
+				}
+				return
+			}
+			if err == nil || Code(err) != ExitRefused {
+				t.Fatalf("accept = %v, want a refusal", err)
+			}
+			if !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "[finish] post_check") {
+				t.Errorf("the refusal lacks %q or the way out:\n%v", c.want, err)
+			}
+		})
+	}
+}

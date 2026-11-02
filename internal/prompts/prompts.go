@@ -7,11 +7,8 @@
 package prompts
 
 import (
-	"bytes"
 	_ "embed"
-	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -764,35 +761,14 @@ var funcs = template.FuncMap{
 	"trim":  strings.TrimSpace,
 }
 
-// Render executes text against data. name is used in error messages only.
+// Render executes text against data on its own, with no built-in beneath it.
+// name is used in error messages only.
 func Render(name, text string, data Data) (string, error) {
-	t, err := template.New(name).Funcs(funcs).Option("missingkey=error").Parse(text)
+	t, err := parseText(name, text)
 	if err != nil {
-		return "", fmt.Errorf("parse template %s: %w", name, err)
+		return "", err
 	}
-	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("render template %s: %w", name, err)
-	}
-	// A template that ends mid-thought is a template bug worth catching before
-	// the text reaches an agent that will act on it.
-	out := strings.TrimRight(buf.String(), "\n")
-	if strings.TrimSpace(out) == "" {
-		return "", fmt.Errorf("template %s rendered nothing", name)
-	}
-	return out + "\n", nil
-}
-
-// Load reads a template file, falling back to fallback when path is empty.
-func Load(path, fallbackName, fallback string) (string, string, error) {
-	if path == "" {
-		return fallbackName, fallback, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", "", fmt.Errorf("read prompt template: %w", err)
-	}
-	return path, string(data), nil
+	return execute(name, t, data)
 }
 
 // Sample is a brief with every field populated, for checking a template without

@@ -674,3 +674,83 @@ func TestAnUnreadableRowCarriesProvenance(t *testing.T) {
 		t.Errorf("--since 1d kept the old unreadable row or did not count it:\n%s", got)
 	}
 }
+
+// keyedProject is provenanceProject with one item's branch recorded, as a head
+// row records it, under a name long enough that the screen has to cut it.
+func keyedProject(t *testing.T) string {
+	t.Helper()
+	t.Setenv("COLUMNS", "120")
+	t.Setenv("NO_COLOR", "1")
+	provenanceProject(t)
+	branch := "bug/b1-a-slug-that-runs-well-past-what-the-second-line-has-room-for"
+	f, err := os.OpenFile("ledger.jsonl", os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintf(f, `{"id":"B1","branch":%q,"head":"abc1234","date":"2026-03-01"}`+"\n", branch); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return branch
+}
+
+func onATerminal(t *testing.T) {
+	t.Helper()
+	restore := onTerminal
+	onTerminal = func(*os.File) bool { return true }
+	t.Cleanup(func() { onTerminal = restore })
+}
+
+// On a terminal the table names its columns over both lines, closes each
+// in-flight item's second line with its branch cut in the middle, and keys the
+// markers it printed. DROVER_UPDATE_GOLDEN=1 rewrites the golden.
+func TestStatusOnATerminalIsKeyed(t *testing.T) {
+	branch := keyedProject(t)
+	onATerminal(t)
+	got := statusTable(t, "--all")
+	path := filepath.Join(goldenDir(t), "status-keyed.golden")
+	if os.Getenv("DROVER_UPDATE_GOLDEN") != "" {
+		write(t, path, got)
+	}
+	if want := read(t, path); got != want {
+		t.Errorf("status no longer renders status-keyed.golden:\n--- got\n%s\n--- want\n%s", got, want)
+	}
+	if strings.Contains(got, branch) || !strings.Contains(got, "bug/b1-a-slug") || !strings.Contains(got, "line-has-room-for") {
+		t.Errorf("the branch is not cut in the middle, keeping both ends:\n%s", got)
+	}
+	for _, want := range []string{"ID", "KIND", "TITLE", "STATE", "ORIGIN", "CREATED", "EDITED", "EDITOR", "BRANCH",
+		"key: [>] ready  [x] merged"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the keyed table lacks %q:\n%s", want, got)
+		}
+	}
+}
+
+// --short drops the second line, so its header goes with it; a pipe gets no
+// header and no key at all, which TestStatusSecondLineGolden holds.
+func TestStatusShortKeepsOneHeaderLine(t *testing.T) {
+	keyedProject(t)
+	onATerminal(t)
+	got := statusTable(t, "--short")
+	if !strings.Contains(got, "TITLE") || strings.Contains(got, "ORIGIN") || strings.Contains(got, "BRANCH") {
+		t.Errorf("--short on a terminal should name the first line's columns alone:\n%s", got)
+	}
+}
+
+// --json carries the branch whole, whatever the screen would cut.
+func TestStatusJSONCarriesTheBranch(t *testing.T) {
+	branch := keyedProject(t)
+	var got struct {
+		Items []Row `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(statusTable(t, "--json")), &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range got.Items {
+		if want := map[bool]string{true: branch}[r.ID == "B1"]; r.Branch != want {
+			t.Errorf("item %s carries branch %q, want %q", r.ID, r.Branch, want)
+		}
+	}
+}

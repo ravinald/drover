@@ -205,6 +205,13 @@ func (s *session) launched(it backlog.Item, cmd, stage, name string) (runner.Whe
 	at.Session = runner.NewSession()
 	row := ledger.Row{ID: it.ID.Bare(), Stage: stage, Runner: name, Session: at.Session, Date: ledger.Today(),
 		Conflict: stage == ledger.StageImplement && s.conflict != nil}
+	// The branch as rendered now, which is the one this session works on, so
+	// status names a running item's branch before its first push records a head.
+	if stage != ledger.StageDraft {
+		if b, err := s.branchFor(it); err == nil {
+			row.Branch = b
+		}
+	}
 	if stage == ledger.StageReview {
 		sum, err := bodyDigest(it.Path)
 		if err != nil {
