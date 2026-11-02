@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -275,6 +276,12 @@ nor that it was open. open-pr refuses it until somebody says which: run
 recorded after that pass and its audit makes open-pr read the pass as passed and
 run the merge gate as usual; run ` + "`drover request-changes <id>`" + ` when one is still open.
 
+A branch holding commits after the head the latest passing review read is
+refused too, naming them: a fix made by hand after the review is code no review
+read. A merge from the trunk and a commit whose subject opens with review: are
+left out, being the trunk's and the reviewer's own. A pass recorded before pass
+rows named a head covers no particular head and refuses nothing.
+
 --force opens one on evidence drover could not gather, for a project that
 declares no merge gate, and names in its output what it skipped.
 
@@ -329,6 +336,9 @@ history of one contract across two places.`,
 		if err := s.reviewPassed(it); err != nil {
 			return err
 		}
+		if err := s.headReviewed(it, branch); err != nil {
+			return err
+		}
 		// Before the gate, because the gate asks the forge about a commit and the
 		// forge only knows what has been pushed. Without this a manual proposal
 		// either strands its work, or passes a local gate while the pull request
@@ -372,17 +382,23 @@ history of one contract across two places.`,
 // reading of that later review. Any other stale pass still refuses: nothing has
 // reviewed the branch since, so there is no later review to read.
 func (s *session) reviewPassed(it backlog.Item) error {
-	id := it.ID.Bare()
-	if findings, ok := s.capRefusalStands(id); ok {
-		return Refusal{fmt.Errorf(
-			"the latest review of %s wanted to send work back at [review] max_review_rounds, and the cap refused it: "+
-				"the findings in %s are this item's own and nothing has answered them.\n"+
-				"Decide them first: %s",
-			id, keptFindings(findings), capDecisionNext(id, findings))}
+	if err := s.capRefused(it.ID.Bare()); err != nil {
+		return err
 	}
 	if openPRForce {
 		fmt.Fprintln(errOut, "--force: opening on your judgement, with neither the review_result row nor the merge gate consulted")
 		return nil
+	}
+	return s.reviewPassedTo(errOut, it)
+}
+
+// reviewPassedTo is reviewPassed with no --force, printing whatever the
+// reading has to say to w. drive asks it of a parked item with w discarding,
+// because there it decides where the item resumes rather than refusing.
+func (s *session) reviewPassedTo(w io.Writer, it backlog.Item) error {
+	id := it.ID.Bare()
+	if err := s.capRefused(id); err != nil {
+		return err
 	}
 	// lead names the authority in the fallback's own sentences. aside is empty
 	// unless a drive did speak, and then it opens everything the fallback prints,
@@ -396,7 +412,7 @@ func (s *session) reviewPassed(it backlog.Item) error {
 	// as anything short of passed refuses the branch close-changes just told
 	// the operator open-pr would open.
 	if ok && !stale && token == passStanding && s.ledger.ClearedSincePass(id) {
-		fmt.Fprintf(errOut, "%s: the drive pass read %q on %s, and drover close-changes has discharged the block since; reading it as %q\n",
+		fmt.Fprintf(w, "%s: the drive pass read %q on %s, and drover close-changes has discharged the block since; reading it as %q\n",
 			id, token, date, passPassed)
 		token = passPassed
 	}
@@ -413,7 +429,7 @@ func (s *session) reviewPassed(it backlog.Item) error {
 	case ok:
 		defer func() {
 			if !stale && token == passPassed {
-				fmt.Fprintf(errOut, "%s: a recorded drive pass answered: %s on %s\n", id, token, date)
+				fmt.Fprintf(w, "%s: a recorded drive pass answered: %s on %s\n", id, token, date)
 			}
 		}()
 		switch {
@@ -503,11 +519,39 @@ func (s *session) reviewPassed(it backlog.Item) error {
 				"Send them back with `drover request-changes %s -f <file>`, or --force if the change was not a finding",
 			lead, c.LastBody, passEdited, id)
 	}
-	fmt.Fprintf(errOut,
+	fmt.Fprintf(w,
 		"%s%s; the ledger answered: audit %s --code-by %s, %d changes requested.\n"+
 			"That reading cannot see a review session that died, only what it wrote down.\n",
 		aside, lead, st.Level, st.CodeBy, c.ChangesRequested)
 	return nil
+}
+
+// headReviewed refuses a branch holding commits after the head its latest
+// passing review read, by unreviewedCommits' exclusions. reviewPassed answers
+// whether that review passed; this answers whether it read what would merge.
+// --force opens it anyway and names what it waved through.
+func (s *session) headReviewed(it backlog.Item, branch string) error {
+	id := it.ID.Bare()
+	head, err := revParse(s.cfg.Root, branch)
+	if err != nil {
+		return err
+	}
+	reviewed, commits, err := s.unreviewedSince(id, head)
+	switch {
+	case err != nil:
+		return fmt.Errorf("could not list what %s holds after the head its last passing review read: %w", branch, err)
+	case len(commits) == 0:
+		return nil
+	case openPRForce:
+		fmt.Fprintf(errOut, "--force: opening with %d %s no review read, after %s:\n%s\n",
+			len(commits), plural(len(commits), "commit", "commits"), shortSHA(reviewed), commitList(commits, "  "))
+		return nil
+	}
+	return Refusal{fmt.Errorf(
+		"%s holds %d %s after %s, the head %s's last passing review read, and no review has read %s:\n%s\n"+
+			"An open pull request says a review covered what merges. Review it again with `drover review %s`, or --force",
+		branch, len(commits), plural(len(commits), "commit", "commits"), shortSHA(reviewed), id,
+		plural(len(commits), "it", "them"), commitList(commits, "  "), id)}
 }
 
 // capRefusalStands reports a request for changes the cap refused that nothing
@@ -586,4 +630,20 @@ func openPRLine() string {
 		return "open a pull request for what the merge gate passes, and merge none of them"
 	}
 	return "open a pull request for what the merge gate passes, then ask the forge to merge it"
+}
+
+// capRefused is the refusal for an item whose latest review wanted to send work
+// back at [review] max_review_rounds and was refused: its findings are its own
+// and nothing has answered them. It outranks --force, and drive's merge-path
+// resume asks it too, so neither door opens past findings the cap kept.
+func (s *session) capRefused(id string) error {
+	findings, ok := s.capRefusalStands(id)
+	if !ok {
+		return nil
+	}
+	return Refusal{fmt.Errorf(
+		"the latest review of %s wanted to send work back at [review] max_review_rounds, and the cap refused it: "+
+			"the findings in %s are this item's own and nothing has answered them.\n"+
+			"Decide them first: %s",
+		id, keptFindings(findings), capDecisionNext(id, findings))}
 }

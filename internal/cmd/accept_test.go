@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -879,6 +880,61 @@ func TestAcceptRefusesAnOperatorStepTheMergeWaitsOn(t *testing.T) {
 				t.Errorf("the refusal lacks %q or the way out:\n%v", c.want, err)
 			}
 		})
+	}
+}
+
+func acceptDry(t *testing.T, id string) (string, error) {
+	t.Helper()
+	t.Cleanup(func() { acceptDryRun = false })
+	acceptDryRun = true
+	var err error
+	out := capture(t, func() { err = acceptCmd.RunE(acceptCmd, []string{id}) })
+	return out, err
+}
+
+// The body's author can run every check accept makes, and the run leaves the
+// body and the ledger exactly as they were whichever way it comes out.
+func TestAcceptDryRunChecksAndWritesNothing(t *testing.T) {
+	cases := []struct {
+		name, prose string
+		refused     bool
+	}{
+		{"a placeholder in prose", "Act as a maintainer of <provider>.", true},
+		{"the brace form", "Act as a maintainer of {provider}.", false},
+		{"a usage example", "Act as a maintainer. Run `drover show <id>` first.", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := markerProject(t, map[string]string{"B01-unfinished.md": unfinished(c.prose)})
+			t.Chdir(dir)
+			body := filepath.Join(dir, "work", "B01-unfinished.md")
+			before, _ := os.ReadFile(body)                                     // #nosec G304 -- the fixture's own body
+			ledgerBefore, _ := os.ReadFile(filepath.Join(dir, "ledger.jsonl")) // #nosec G304 -- the fixture's own ledger
+			out, err := acceptDry(t, "B1")
+			if c.refused {
+				if err == nil || Code(err) != ExitRefused || !strings.Contains(err.Error(), "the placeholder <provider>") {
+					t.Fatalf("accept --dry-run = %v, want exit 3 naming the placeholder", err)
+				}
+			} else if err != nil || !strings.Contains(out, "would accept: B1") {
+				t.Fatalf("accept --dry-run = %v, out %q, want would accept: B1", err, out)
+			}
+			after, _ := os.ReadFile(body)                                     // #nosec G304 -- the fixture's own body
+			ledgerAfter, _ := os.ReadFile(filepath.Join(dir, "ledger.jsonl")) // #nosec G304 -- the fixture's own ledger
+			if !bytes.Equal(before, after) || !bytes.Equal(ledgerBefore, ledgerAfter) {
+				t.Error("accept --dry-run changed the body or the ledger")
+			}
+		})
+	}
+}
+
+// A dry run is read-only, so the gate that seals accept from a launched
+// session lets it through.
+func TestAcceptDryRunIsOpenToALaunchedSession(t *testing.T) {
+	if err := gateRefusal("accept --dry-run"); err != nil {
+		t.Errorf("accept --dry-run refused in a session: %v", err)
+	}
+	if err := gateRefusal("accept"); err == nil {
+		t.Error("accept itself is no longer sealed")
 	}
 }
 

@@ -113,6 +113,9 @@ row for it to the ledger, rewrites the deps line of the item split and appends a
 			return Refusal{fmt.Errorf(
 				"%s is empty: a split with no proposal parks an item and tells the operator nothing about what it is deciding", splitFile)}
 		}
+		if err := descriptionHolds(splitFile, proposal, s.cfg.Intake.Holds()); err != nil {
+			return err
+		}
 		if !s.cfg.Known(backlog.KeyDeps) {
 			return Refusal{fmt.Errorf(
 				"this project does not declare %q in [frontmatter], so no item can block on another.\n"+

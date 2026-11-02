@@ -4573,6 +4573,261 @@ func TestADriveMergesOnTheGatesWordAndFinishes(t *testing.T) {
 	}
 }
 
+// parkedAtLimit leaves item 1 as a drive leaves one the cap parked needs_decision: a
+// pushed branch holding the run's commit, the implement and review stage rows,
+// the refused pass and its park. Then a review after the park, as `drover
+// review` writes one once the contract was amended: the amend's body row, the
+// review stage row, and an independent audit. changes is that review's request
+// for changes, "" for a review that passed.
+func parkedAtLimit(t *testing.T, dir, changes string) string {
+	t.Helper()
+	s, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	it, err := s.item("1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	branch, err := s.branchFor(it)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "checkout", "-q", "-b", branch)
+	write(t, filepath.Join(dir, "implemented.txt"), "work\n")
+	git(t, dir, "add", "implemented.txt")
+	git(t, dir, "commit", "-q", "-m", "the run did something")
+	git(t, dir, "push", "-q", "-u", "origin", branch)
+	git(t, dir, "checkout", "-q", "main")
+	body, err := os.ReadFile(it.Path) // #nosec G304 -- the fixture's own item
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []ledger.Row{
+		{ID: "1", Stage: ledger.StageImplement, Runner: "impl", Date: "2026-10-28"},
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Date: "2026-10-28"},
+		{ID: "1", Pass: passNeedsDecision, Date: "2026-10-28"},
+		{ID: "1", Park: passNeedsDecision, Date: "2026-10-28"},
+		ledger.BodyRow("1", bodySum(body), ledger.Author{Cmd: "amend", Actor: "operator"}),
+		{ID: "1", Stage: ledger.StageReview, Runner: "rev", Date: "2026-10-29"},
+		{ID: "1", Level: ledger.LevelReviewed, CodeBy: "agent", Independent: true, Date: "2026-10-29"},
+	}
+	if changes != "" {
+		rows = append(rows, ledger.Row{ID: "1", Changes: changes, Date: "2026-10-29"})
+	}
+	for _, r := range rows {
+		if err := ledger.Append(filepath.Join(dir, "ledger.jsonl"), r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return branch
+}
+
+// launchesOf counts item 1's stage rows from row since on.
+func launchesOf(t *testing.T, since int) (implement, review int) {
+	t.Helper()
+	l, err := ledger.Load("ledger.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range l.Rows[since:] {
+		switch {
+		case r.ID != "1":
+		case r.Stage == ledger.StageImplement:
+			implement++
+		case r.Stage == ledger.StageReview:
+			review++
+		}
+	}
+	return implement, review
+}
+
+func ledgerLen(t *testing.T) int {
+	t.Helper()
+	l, err := ledger.Load("ledger.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(l.Rows)
+}
+
+// A parked item whose later review passed resumes where a passing review
+// sends an item: the catch-up, the gate, the pull request, the merge and the
+// finish, with no session launched. One whose later review sent work back
+// starts at its implementing session as before.
+func TestAParkedItemWhoseLaterReviewPassedResumesAtTheMerge(t *testing.T) {
+	t.Run("merges with no session", func(t *testing.T) {
+		ghLog := mergeProject(t)
+		dir, _ := forge(t, ghLog)
+		t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
+		parkedAtLimit(t, dir, "")
+		since := ledgerLen(t)
+
+		var rows []DriveItem
+		stderr := captureErr(t, func() { rows = driveAll(t, "1") })
+		got := rows[0]
+		if !got.Merged || !got.Finished {
+			t.Fatalf("item 1 is %q merged=%v finished=%v (%s), want merged and finished", got.Outcome, got.Merged, got.Finished, got.Reason)
+		}
+		if impl, rev := launchesOf(t, since); impl != 0 || rev != 0 {
+			t.Errorf("the drive wrote %d implement and %d review stage rows, want none", impl, rev)
+		}
+		if got.Reviews != 0 {
+			t.Errorf("the drive reports %d reviews, want 0", got.Reviews)
+		}
+		if !strings.Contains(stderr, "resuming at the merge path from the review of 2026-10-29 by rev") {
+			t.Errorf("stderr does not name the review the item resumed from:\n%s", stderr)
+		}
+	})
+	t.Run("the dry run names the resume", func(t *testing.T) {
+		ghLog := mergeProject(t)
+		dir, _ := forge(t, ghLog)
+		parkedAtLimit(t, dir, "")
+		out := dryRun(t, "1")
+		if !strings.Contains(out, "resumes at the merge path from the review of 2026-10-29 by rev (audit reviewed --code-by agent") {
+			t.Errorf("the dry run does not name the resume:\n%s", out)
+		}
+	})
+	t.Run("a moved trunk catches up, verifies and merges", func(t *testing.T) {
+		ghLog := mergeProject(t)
+		dir, _ := forge(t, ghLog)
+		t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
+		parkedAtLimit(t, dir, "")
+		write(t, filepath.Join(dir, "sibling.txt"), "a sibling merged\n")
+		git(t, dir, "add", "sibling.txt")
+		git(t, dir, "commit", "-q", "-m", "a sibling's merge")
+		git(t, dir, "push", "-q", "origin", "main")
+		since := ledgerLen(t)
+
+		got := driveAll(t, "1")[0]
+		if !got.Merged || !got.Finished {
+			t.Fatalf("item 1 is %q merged=%v finished=%v (%s), want merged and finished", got.Outcome, got.Merged, got.Finished, got.Reason)
+		}
+		if got.CatchUp == nil || got.CatchUp.Verify != catchUpPassed {
+			t.Errorf("catch-up = %+v, want the trunk merged in and the verify command passing on it", got.CatchUp)
+		}
+		if b, err := os.ReadFile(filepath.Join(dir, "check.log")); err != nil || !strings.Contains(string(b), "default") {
+			t.Errorf("the verify command did not run on the merged tree (%v):\n%s", err, b)
+		}
+		if impl, rev := launchesOf(t, since); impl != 0 || rev != 0 {
+			t.Errorf("the drive wrote %d implement and %d review stage rows, want none", impl, rev)
+		}
+	})
+	t.Run("a conflict is resolve_conflict's, with the worktree kept", func(t *testing.T) {
+		ghLog := mergeProject(t)
+		dir, _ := forge(t, ghLog)
+		parkedAtLimit(t, dir, "")
+		write(t, filepath.Join(dir, "implemented.txt"), "the trunk's own\n")
+		git(t, dir, "add", "implemented.txt")
+		git(t, dir, "commit", "-q", "-m", "a sibling's merge on the same file")
+		git(t, dir, "push", "-q", "origin", "main")
+		since := ledgerLen(t)
+
+		got := driveAll(t, "1")[0]
+		if got.Outcome != outcomeParked || got.Park != parkTrunkConflict {
+			t.Fatalf("item 1 is %q %q (%s), want parked %q", got.Outcome, got.Park, got.Reason, parkTrunkConflict)
+		}
+		if got.Tree == "" {
+			t.Fatal("the park names no worktree, want it kept for whoever resolve_conflict names")
+		}
+		if _, err := os.Stat(got.Tree); err != nil {
+			t.Errorf("the worktree %s is gone: %v", got.Tree, err)
+		}
+		if impl, rev := launchesOf(t, since); impl != 0 || rev != 0 {
+			t.Errorf("the drive wrote %d implement and %d review stage rows, want none", impl, rev)
+		}
+		if merges := mergeCalls(t, ghLog); len(merges) != 0 {
+			t.Errorf("merges = %q, want none", merges)
+		}
+	})
+	// The probe before driveFinish sees a trunk that merges cleanly, and the
+	// trunk moves before driveFinish's own catch-up, which conflicts. That
+	// conflict is resolve_conflict's as much as the probe's would have been.
+	lateTrunk := func(t *testing.T, dir string) {
+		t.Helper()
+		write(t, filepath.Join(dir, "implemented.txt"), "the trunk's own\n")
+		git(t, dir, "add", "implemented.txt")
+		git(t, dir, "commit", "-q", "-m", "a sibling's merge on the same file")
+		hook := filepath.Join(dir, ".git", "hooks", "pre-push")
+		write(t, hook, fmt.Sprintf("#!/bin/sh\nrm %q\ngit -C %q push -q origin main\n", hook, dir))
+		if err := os.Chmod(hook, 0o755); err != nil { // #nosec G302 -- a hook git must execute
+			t.Fatal(err)
+		}
+	}
+	t.Run("a conflict the probe missed is still resolve_conflict's", func(t *testing.T) {
+		ghLog := mergeProject(t)
+		dir, _ := forge(t, ghLog)
+		parkedAtLimit(t, dir, "")
+		lateTrunk(t, dir)
+		since := ledgerLen(t)
+
+		got := driveAll(t, "1")[0]
+		if got.Outcome != outcomeParked || got.Park != parkTrunkConflict {
+			t.Fatalf("item 1 is %q %q (%s), want parked %q", got.Outcome, got.Park, got.Reason, parkTrunkConflict)
+		}
+		if got.Tree == "" {
+			t.Fatal("the park names no worktree, want it kept for whoever resolve_conflict names")
+		}
+		if _, err := os.Stat(got.Tree); err != nil {
+			t.Errorf("the worktree %s is gone: %v", got.Tree, err)
+		}
+		if !strings.Contains(got.Reason, "resolve_conflict") {
+			t.Errorf("the park does not name the policy that holds it: %s", got.Reason)
+		}
+		if impl, rev := launchesOf(t, since); impl != 0 || rev != 0 {
+			t.Errorf("the drive wrote %d implement and %d review stage rows, want none", impl, rev)
+		}
+		if merges := mergeCalls(t, ghLog); len(merges) != 0 {
+			t.Errorf("merges = %q, want none", merges)
+		}
+	})
+	t.Run("at auto, a conflict the probe missed goes to the implementing session", func(t *testing.T) {
+		ghLog := mergeProject(t)
+		dir, _ := forge(t, ghLog)
+		conf, err := os.ReadFile(filepath.Join(dir, ".drover.toml")) // #nosec G304 -- the fixture's own config
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(dir, ".drover.toml"), string(conf)+"\n[supervise]\nresolve_conflict = \"auto\"\n")
+		parkedAtLimit(t, dir, "")
+		lateTrunk(t, dir)
+		since := ledgerLen(t)
+
+		driveAll(t, "1")
+		if impl, _ := launchesOf(t, since); impl == 0 {
+			t.Error("the drive wrote no implement stage row, want the session that resolves the conflict launched")
+		}
+		l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, r := range l.Rows[since:] {
+			if r.ID == "1" && r.ChangesSource == ledger.ChangesTrunkConflict {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("no trunk_conflict send-back was recorded, so the conflict did not take the round resolve_conflict counts")
+		}
+	})
+	t.Run("a later review that sent work back still implements", func(t *testing.T) {
+		ghLog := mergeProject(t)
+		dir, _ := forge(t, ghLog)
+		t.Setenv("DROVER_TEST_AUTO_MERGES", "1")
+		parkedAtLimit(t, dir, "fix the handler")
+		since := ledgerLen(t)
+
+		stderr := captureErr(t, func() { driveAll(t, "1") })
+		if impl, _ := launchesOf(t, since); impl == 0 {
+			t.Errorf("the drive wrote no implement stage row, want the implementing session launched:\n%s", stderr)
+		}
+		if strings.Contains(stderr, "resuming at the merge path") {
+			t.Errorf("a review that sent work back resumed at the merge path:\n%s", stderr)
+		}
+	})
+}
+
 // B lists A in its deps. A merges and finishes in the same drive, so B runs
 // at its turn, whether named after A or appended by --follow, rather than
 // skipping as blocked behind a merge the drive left for later.
