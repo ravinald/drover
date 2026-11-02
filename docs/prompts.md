@@ -179,13 +179,15 @@ An empty block is an addition: drover puts nothing there, so nothing there can f
 {{- end}}
 ```
 
+Both bullets land in the definition of done after drover's own and before the verify command's, and the migration rule renders only for an item that sets `migration: yes`.
+
 A block with a default is a replacement, and it opens with the hash of the default it was written against:
 
 ```text
 {{define "scope"}}{{/* drover-base: e1c001e5348d */}}- Own only this item's packages; do not touch another item's surface.{{end}}
 ```
 
-`drover check` reports `STALE OVERRIDE` when that default changes, or when a replacement records no hash, and `drover run`, `drover review`, `drover draft` and the `drover drive` header print the same as a warning, so a change to drover's text never passes a project by unseen. `drover check --diff` shows what changed between the default your block recorded and today's:
+`drover check` reports `STALE OVERRIDE` when that default changes, or when a replacement records no hash, and `drover run`, `drover review`, `drover draft` and the `drover drive` header print the same as a warning, so no change to drover's text goes unreported. `drover check --diff` shows what changed between the default your block recorded and today's:
 
 ```text
 ==> implement/scope in docs-internal/kickoff.tmpl
@@ -199,11 +201,11 @@ A block with a default is a replacement, and it opens with the hash of the defau
 
 On a terminal a removed line is red and an added one green, and where a line was rewritten rather than replaced, the words that changed are bold and the rest of the line faint. `--color` and `NO_COLOR` decide it as they do everywhere else. Carry what still applies into your block, and record the new hash.
 
-The binary can show the old default because it ships every default each block has had, keyed by hash. A replacement whose hash this build has no record of, or that records none, is named in the `--diff` output with the current hash, rather than skipped.
+The binary can show the old default because it ships every default each block has had, keyed by hash. For a replacement whose hash this build has no record of, or that records none, `--diff` names the block and the current hash rather than skipping it.
 
-Two refusals keep a file honest. A `{{define}}` naming a block the built-in does not have fails to render, since its text would never appear. A file holding text outside any `{{define}}` renders that text in place of the whole built-in, which is how a project used to override a template, and `drover check` reports it as `WHOLE TEMPLATE`, and every launch from it warns: none of drover's own instructions reach a session that prompt launches, so the copy keeps every instruction at the version it was copied from.
+Two refusals keep a file honest. A `{{define}}` naming a block the built-in does not have fails to render, since its text would never appear. A file holding text outside any `{{define}}` renders that text in place of the whole built-in. None of drover's own instructions then reach the sessions it launches, so the copy keeps every instruction at the version it was copied from: `drover check` reports it as `WHOLE TEMPLATE`, and every launch from it warns.
 
-A few things worth carrying into the blocks you write:
+Two habits help in the blocks you write:
 
 **Vary by kind where it matters.** Read the kind out of `.Meta` rather than expecting drover to know your vocabulary:
 

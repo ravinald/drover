@@ -168,12 +168,12 @@ Nothing was run. Bring them level, or pass -I (--ignore-stale) to run drover sta
 
 `drover config --stamp` writes `drover_version` as this binary's release and changes no other line. Run `--diff` first: the stamp says you read what it printed. A patch release never makes a config stale, a build carrying no release version (a plain `go build`) never judges the stamp, and `drover init` writes the stamp into a new config.
 
-The generated agent instructions are compared too, and what happens depends on which binary wrote them. Any root-level markdown file carrying the `drover agents` block is compared, as text, against what this binary renders from this config, so the block goes stale when the binary moves and when the config does. Its header names the version and commit of the binary that rendered it, and a block with no such stamp reads as older than any binary:
+drover compares the generated agent instructions too, and what happens depends on which binary wrote them. It compares any root-level markdown file carrying the `drover agents` block, as text, against what this binary renders from this config, so the block goes stale when the binary moves and when the config does. Its header names the version and commit of the binary that rendered it, and a block with no such stamp reads as older than any binary:
 
-- **Older**, or the same binary with a moved config or addendum: a command that writes (`localWrite` or `outward` in its `Safety:` line) regenerates the block first, as `drover agents --write <file>` does, prints the line naming the file, and runs. A read-only command prints one warning on stderr, changes nothing, and runs.
+- **Older**, or the same binary with a moved config or addendum: a command that writes (`local writes` or `outward-facing` on its `Safety:` line) regenerates the block first, as `drover agents --write <file>` does, prints the line naming the file, and runs. A read-only command prints one warning on stderr, changes nothing, and runs.
 - **Newer**: a command that writes refuses (exit 3) and names installing the newer binary, since regenerating would hand agents the older surface. A read-only command warns and runs.
 
-A build carrying no version of its own cannot place a stamped block, and treats it as newer, naming both remedies. A stale config, a policy change and broken markers refuse every command as before.
+A build carrying no version of its own cannot place a stamped block, and treats it as newer, naming both remedies. A stale config, a policy change and broken markers refuse every command, read-only ones included.
 
 `agents`, `config`, `init`, `init --user`, `schema`, `version`, `help`, `projects` and shell completion never refuse, because they are how a project gets level or they answer without one. Neither does anything inside a session drover launched: the operator decided when they started it, and an agent's `drover audit` refused halfway through a review would lose the review. `-I` (`--ignore-stale`) runs any other command anyway, once.
 
@@ -663,7 +663,7 @@ Exit 0 appends a ledger row `{"id","post_finish","date"}` carrying the first lin
 
 ## `[live]`
 
-A headless session cannot reach the hosts a real client runs on, so an item's numbered requirements close over unit tests and the verify command, and the check that exercises the change for real used to run, at best, as `post_check` after the merge. A live check runs it before the merge instead, where a failure goes back to the item that caused it.
+A headless session cannot reach the hosts a real client runs on, so an item's numbered requirements can only be proven by unit tests and the verify command. A live check exercises the change against a real client before the merge, so a failure goes back to the item that caused it rather than surfacing after the merge as a [`post_check`](#finish) follow-up.
 
 | Key       | Meaning                                                                                                                   |
 | --------- | ------------------------------------------------------------------------------------------------------------------------- |
