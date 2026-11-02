@@ -168,7 +168,12 @@ Nothing was run. Bring them level, or pass -I (--ignore-stale) to run drover sta
 
 `drover config --stamp` writes `drover_version` as this binary's release and changes no other line. Run `--diff` first: the stamp says you read what it printed. A patch release never makes a config stale, a build carrying no release version (a plain `go build`) never judges the stamp, and `drover init` writes the stamp into a new config.
 
-The same refusal covers the generated agent instructions. Any root-level markdown file carrying the `drover agents` block is compared, as text, against what this binary renders from this config, and a difference is named with the `drover agents --write <file>` that brings it level. So the block goes stale when the binary moves and when the config does.
+The generated agent instructions are compared too, and what happens depends on which binary wrote them. Any root-level markdown file carrying the `drover agents` block is compared, as text, against what this binary renders from this config, so the block goes stale when the binary moves and when the config does. Its header names the version and commit of the binary that rendered it, and a block with no such stamp reads as older than any binary:
+
+- **Older**, or the same binary with a moved config or addendum: a command that writes (`localWrite` or `outward` in its `Safety:` line) regenerates the block first, as `drover agents --write <file>` does, prints the line naming the file, and runs. A read-only command prints one warning on stderr, changes nothing, and runs.
+- **Newer**: a command that writes refuses (exit 3) and names installing the newer binary, since regenerating would hand agents the older surface. A read-only command warns and runs.
+
+A build carrying no version of its own cannot place a stamped block, and treats it as newer, naming both remedies. A stale config, a policy change and broken markers refuse every command as before.
 
 `agents`, `config`, `init`, `init --user`, `schema`, `version`, `help`, `projects` and shell completion never refuse, because they are how a project gets level or they answer without one. Neither does anything inside a session drover launched: the operator decided when they started it, and an agent's `drover audit` refused halfway through a review would lose the review. `-I` (`--ignore-stale`) runs any other command anyway, once.
 
@@ -997,9 +1002,10 @@ Under `github` and `none` it refuses with exit 3, naming the backend that is con
 
 ## `[backlog]`
 
-| Key      | Default | Meaning                                                 |
-| -------- | ------- | ------------------------------------------------------- |
-| `mirror` | `none`  | Where accepted items are published: `none` or `github`. |
+| Key        | Default | Meaning                                                                                                                        |
+| ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `mirror`   | `none`  | Where accepted items are published: `none` or `github`.                                                                        |
+| `fold_max` | `12`    | The most numbered requirements `drover fold` may leave on one item. Load refuses a negative one, and `0` reads as the default. |
 
 Under `github`, `accept` opens an issue per accepted item carrying its title and numbered requirements, writes the number into the item's `issue:` key, and keeps a `drover:<state>` label, an open or closed state and blocked-by links in step with the backlog. The file stays the contract and drover never reads the issue back. [The mirror](concepts.md#the-mirror) covers what each command writes and how `drover check` reports a write that did not go through.
 
@@ -1323,4 +1329,4 @@ The first drover command run in a project appends one line to `projects.jsonl`, 
 
 `drover projects` reads it, folds to the newest row per root, and marks a root that is gone. `status --all-projects`, `drives --all` and `drive --pause --all` read it as their list of projects; nothing inside a project reads it, and it is an audit trail, not configuration. It exists so that "what is drover driving on this machine" has an answer that does not depend on remembering, and so that a change to the config vocabulary has a list of trees to migrate.
 
-A row whose root is gone stays in the file. Removing it would erase the record that drover was pointed at that tree, which is the one fact the file holds. `drover projects --forget <root>` takes a root off every list by appending a tombstone row instead. A command run in a session drover launched never registers. A root under the OS temp directory does, and `status --all-projects` counts it as scratch rather than showing it; a git worktree of a registered project is shown through that project. See [`projects --json`](automation.md#projects---json).
+A row whose root is gone stays in the file. Removing it would erase the record that drover was pointed at that tree, which is the one fact the file holds. `drover projects --forget <root>` takes a root off every list by appending a tombstone row instead. A command run in a session drover launched never registers. Neither does a root under the OS temp directory, and `drover projects --prune` tombstones the temp roots an older registry still lists, along with every root whose `.drover.toml` is gone; a git worktree of a registered project is shown through that project. See [`projects --json`](automation.md#projects---json).

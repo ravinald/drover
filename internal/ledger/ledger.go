@@ -35,6 +35,20 @@ type Row struct {
 	ID           string `json:"id"`
 	Merged       *bool  `json:"merged,omitempty"`
 	MergedRunner string `json:"implementer,omitempty"`
+	// MergedHead, ReviewedHead and Unreviewed ride the completion row finish
+	// writes: the head the merged pull request carried, the head the item's
+	// latest passing review read, and each commit between the two that no
+	// review read, as "<short hash> <subject>". A completion row written before
+	// finish recorded them carries none, which reads as nothing known rather
+	// than nothing unreviewed.
+	//
+	// The three alone, with Merged unset, are a merge evidence row: finish
+	// adding them to a completion mark-merged wrote without them. It is not a
+	// second completion row, which would move the finish time and blank the
+	// report path State folds from the latest one.
+	MergedHead   string   `json:"merged_head,omitempty"`
+	ReviewedHead string   `json:"reviewed_head,omitempty"`
+	Unreviewed   []string `json:"unreviewed,omitempty"`
 	// Stage and Runner are the third shape: one row per launch, written by run
 	// and review from the runner drover itself resolved. Agent above is an
 	// operator's attribution and can be typed; this is an observation.
@@ -128,6 +142,11 @@ type Row struct {
 	// It folds last-row-wins, unlike Changes above: "did the last review pass"
 	// has one current answer, and an older result is not evidence about the
 	// branch that exists now.
+	//
+	// Head on a pass row is the branch head the review read, and on an audit
+	// row the head the auditor names. Neither carries Branch, which is what
+	// keeps Heads from reading either as a push. A row without one covers no
+	// particular head.
 	Pass string `json:"review_result,omitempty"`
 	// Refused is a request for changes the cap turned away. Without it the refusal would
 	// write nothing: a review at the cap that wants to send work back records
@@ -1277,6 +1296,62 @@ func (l *Ledger) Heads(branch string) []string {
 		}
 	}
 	return out
+}
+
+// UnreviewedMerge is the merged head and the commits on it no review read,
+// from the item's standing completion row or the merge evidence row after it,
+// or empty when there are none. An audit at reviewed or verified appended after
+// that and naming the merged head clears it: somebody read the code that
+// shipped. A claimed level does not, because it is the author's word and not a
+// review.
+func (l *Ledger) UnreviewedMerge(id string) (head string, commits []string) {
+	merged := false
+	for _, r := range l.Rows {
+		switch {
+		case r.ID != id:
+		case r.Merged != nil:
+			merged = *r.Merged
+			head, commits = r.MergedHead, r.Unreviewed
+			if !merged {
+				head, commits = "", nil
+			}
+		case r.MergedHead != "" && merged:
+			head, commits = r.MergedHead, r.Unreviewed
+		case (r.Level == LevelReviewed || r.Level == LevelVerified) && SameCommit(r.Head, head):
+			commits = nil
+		}
+	}
+	if len(commits) == 0 {
+		return "", nil
+	}
+	return head, commits
+}
+
+// MergeEvidence reports whether the item's standing completion carries the
+// heads finish compares, on the completion row itself or on a merge evidence
+// row after it. A completion mark-merged wrote carries none until a finish adds
+// them, which is the one case this answers false for a merged item.
+func (l *Ledger) MergeEvidence(id string) bool {
+	found := false
+	for _, r := range l.Rows {
+		switch {
+		case r.ID != id:
+		case r.Merged != nil:
+			found = *r.Merged && r.MergedHead != ""
+		case r.MergedHead != "":
+			found = true
+		}
+	}
+	return found
+}
+
+// SameCommit reports whether a and b name one commit, either abbreviated. Seven
+// hex digits is git's own shortest default, so anything shorter matches nothing.
+func SameCommit(a, b string) bool {
+	if len(a) < 7 || len(b) < 7 {
+		return false
+	}
+	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
 }
 
 // Branch is the branch the latest row naming one did for an item: a launch, a

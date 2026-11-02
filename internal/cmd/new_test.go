@@ -511,3 +511,28 @@ func TestNewFoundInRefusesAnUnmergedItem(t *testing.T) {
 		t.Errorf("scaffolded %d bodies against the merged item, want 1", len(bodies))
 	}
 }
+
+// A placeholder in the description is refused where the author still holds
+// it, rather than at accept after the scaffold exists.
+func TestNewRefusesAPlaceholderInTheDescription(t *testing.T) {
+	dir := newProject(t)
+	t.Cleanup(func() { newFile = "" })
+	newFile = filepath.Join(t.TempDir(), "finding.md")
+	write(t, newFile, "The <provider> client retries forever.\n")
+	var err error
+	capture(t, func() { err = execute(t, "new", "bug", "client retries forever") })
+	if err == nil || Code(err) != ExitRefused {
+		t.Fatalf("new = %v, want exit 3", err)
+	}
+	if !strings.Contains(err.Error(), "finding.md:1 carries the placeholder <provider>; write it {provider}") {
+		t.Errorf("the refusal does not name the line and the brace form:\n%v", err)
+	}
+	if bodies, _ := filepath.Glob(filepath.Join(dir, "work", "B*.md")); len(bodies) != 0 {
+		t.Errorf("new wrote %v, want nothing", bodies)
+	}
+
+	_, body := newFiled(t, dir, "client retries forever", "", "Run `drover show <id>` against the {provider} client.\n")
+	if !strings.Contains(body, "{provider} client") {
+		t.Errorf("a usage example and a brace name were refused or lost:\n%s", body)
+	}
+}

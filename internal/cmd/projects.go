@@ -18,6 +18,7 @@ import (
 var (
 	projectsJSON, projectsAll bool
 	projectsForget            string
+	projectsPrune, pruneDry   bool
 )
 
 // enroll appends a row for the project cfg names unless the registry already
@@ -25,12 +26,13 @@ var (
 // initialized before the registry existed is recorded the first time anything
 // runs in it, and a repeat command appends nothing. A session drover launched is
 // running in a project the operator's own command already recorded, usually from
-// a drive worktree, so it never registers. A tree under the temp directory does:
-// the host-wide views leave it out when they read, which is where the decision
-// that it is scratch belongs. A failure is a lost line in an audit trail and
-// never a reason to refuse the command.
+// a drive worktree, so it never registers. Neither does a tree under the temp
+// directory: a test fixture or a scratch reproduction is gone within the day,
+// and registering it filled the file with roots every later read had to walk
+// and discard. A failure is a lost line in an audit trail and never a reason to
+// refuse the command.
 func enroll(cfg *config.Config) {
-	if runner.Launched() {
+	if runner.Launched() || underTemp(cfg.Root) {
 		return
 	}
 	reg := projects.Path(config.GlobalPath())
@@ -168,27 +170,77 @@ func forget(path, root string) error {
 	if r, err := filepath.EvalSymlinks(root); err == nil {
 		names[r] = true
 	}
-	var last *projects.Row
-	for i := range rows {
-		if names[rows[i].Root] {
-			last = &rows[i]
+	// Each spelling the registry holds is a root of its own to every reader,
+	// so a tree registered once through a symlink and once resolved needs a
+	// tombstone per spelling, or the one left standing is still listed.
+	var named []projects.Row
+	for _, r := range projects.Fold(rows) {
+		if names[r.Root] {
+			named = append(named, r)
 		}
 	}
-	if last == nil {
+	if len(named) == 0 {
 		return Refusal{fmt.Errorf("the registry (%s) never named %s: drover projects --all lists every root it holds", path, root)}
 	}
-	if last.Forgotten {
-		fmt.Printf("%s is already forgotten\n", root)
-		return nil
+	wrote := false
+	for _, r := range named {
+		if r.Forgotten {
+			continue
+		}
+		if err := tombstone(path, r); err != nil {
+			return err
+		}
+		fmt.Printf("forgot %s (%s): its rows stay in %s, and the next drover command run there registers it again\n",
+			r.Project, r.Root, path)
+		wrote = true
 	}
-	if err := projects.Append(path, projects.Row{
-		Project: last.Project, Root: last.Root, Repo: last.Repo,
+	if !wrote {
+		fmt.Printf("%s is already forgotten\n", root)
+	}
+	return nil
+}
+
+// tombstone appends the row that takes r's root off every list.
+func tombstone(path string, r projects.Row) error {
+	return projects.Append(path, projects.Row{
+		Project: r.Project, Root: r.Root, Repo: r.Repo,
 		Registered: time.Now().Format("2006-01-02"), Forgotten: true,
-	}); err != nil {
+	})
+}
+
+// prune tombstones every listed root that is under the temp directory or holds
+// no .drover.toml any more. A root still holding a config outside the temp
+// directory is never touched, whatever else is wrong with it: that is a
+// project, and forgetting one is --forget's, named root by root.
+func prune(path string, dry bool) error {
+	rows, err := projects.Read(path)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("forgot %s (%s): its rows stay in %s, and the next drover command run there registers it again\n",
-		last.Project, last.Root, path)
+	n := 0
+	for _, r := range projects.Latest(rows) {
+		why := ""
+		switch {
+		case underTemp(r.Root):
+			why = "under the temp directory"
+		case stale(r.Root):
+			why = "no " + config.FileName + " there"
+		default:
+			continue
+		}
+		n++
+		if dry {
+			fmt.Printf("would forget %s (%s): %s\n", r.Project, r.Root, why)
+			continue
+		}
+		if err := tombstone(path, r); err != nil {
+			return err
+		}
+		fmt.Printf("forgot %s (%s): %s\n", r.Project, r.Root, why)
+	}
+	if n == 0 {
+		fmt.Println("nothing to prune: every listed root holds a project outside the temp directory")
+	}
 	return nil
 }
 
@@ -217,9 +269,9 @@ registers the project it runs in the first time it runs there, so a project
 initialized before the registry existed appears after its next status, check or
 drive; a repeat command appends nothing. drover init registers too. A command a
 session drover launched runs (DROVER_ACTOR set) never registers: its root is a
-drive worktree, and the operator's own command already recorded the project. A
-root under the OS temp directory registers like any other and is listed here;
-status --all-projects counts it as scratch rather than giving it a row. A git
+drive worktree, and the operator's own command already recorded the project.
+Nor does a root under the OS temp directory: a fixture or a scratch
+reproduction is gone within the day, so it never reaches the file. A git
 worktree of a registered project records that project as its parent, and the
 host-wide views show it through the parent.
 
@@ -234,13 +286,22 @@ record that drover was pointed at that tree, which is the fact the file holds.
 --forget <root> takes a root off every list by appending a tombstone row
 (forgotten: true and today's date). It appends rather than deletes: the earlier
 rows stay, --all still shows the root marked forgotten, and the next command run
-in a forgotten project that still exists registers it again. --forget with a root
-the registry never named exits 3.
+in a forgotten project that still exists registers it again. A root the
+registry holds under two spellings, as typed through a symlink and resolved, is
+tombstoned under each, one line per tombstone. --forget with a root the
+registry never named exits 3.
+
+--prune tombstones every listed root under the OS temp directory or with no
+.drover.toml left in it, the rows a registry kept from before temp roots
+stopped registering and the trees since deleted, printing one line for each.
+--prune --dry-run prints the same lines and appends nothing. A root that still
+holds a .drover.toml outside the temp directory is never pruned.
 
 It needs no project, so it answers from anywhere.`,
 	Example: `  drover projects                   # what this machine drives, newest registration per root
   drover projects --all             # forgotten roots too, marked
   drover projects --forget /tmp/repro   # appends a tombstone; the rows stay
+  drover projects --prune --dry-run # the temp and deleted roots --prune would forget
   drover projects --json            # an array, one object per project:
     [{"project":"webapp","root":"/home/me/src/webapp",
       "repo":"me/webapp","registered":"2026-08-28","present":true}]
@@ -251,9 +312,12 @@ It needs no project, so it answers from anywhere.`,
 	Args: cobra.NoArgs,
 	RunE: func(_ *cobra.Command, _ []string) error {
 		path := projects.Path(config.GlobalPath())
-		if projectsForget != "" {
+		if projectsForget != "" || projectsPrune {
 			if path == "" {
 				return Refusal{fmt.Errorf("no registry: this machine has no home directory to keep one in")}
+			}
+			if projectsPrune {
+				return prune(path, pruneDry)
 			}
 			return forget(path, projectsForget)
 		}
@@ -336,6 +400,10 @@ func init() {
 	projectsCmd.Flags().BoolVar(&projectsJSON, "json", false, "emit rows as JSON")
 	projectsCmd.Flags().BoolVar(&projectsAll, "all", false, "include forgotten roots, marked")
 	projectsCmd.Flags().StringVar(&projectsForget, "forget", "", "append a tombstone for this `root`, taking it off every list")
+	projectsCmd.Flags().BoolVar(&projectsPrune, "prune", false,
+		"append a tombstone for every listed root under the temp directory or with no .drover.toml left")
+	projectsCmd.Flags().BoolVar(&pruneDry, "dry-run", false, "with --prune, print what it would forget and append nothing")
+	projectsCmd.MarkFlagsMutuallyExclusive("forget", "prune")
 	projectsCmd.MarkFlagsMutuallyExclusive("forget", "all")
 	projectsCmd.MarkFlagsMutuallyExclusive("forget", "json")
 	root.AddCommand(projectsCmd)

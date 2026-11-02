@@ -32,6 +32,10 @@ type UnauditedRow struct {
 	// FollowUpsKnown is false when the register could not be read. A zero and an
 	// unanswered question rank the same item very differently.
 	FollowUpsKnown bool `json:"follow_ups_known"`
+	// Unreviewed is the commits check reports as UNREVIEWED MERGE, as
+	// "<short hash> <subject>". An item carrying any is listed whatever its
+	// audit level: the level was recorded against a head that did not merge.
+	Unreviewed []string `json:"unreviewed,omitempty"`
 }
 
 var unauditedCmd = &cobra.Command{
@@ -39,6 +43,10 @@ var unauditedCmd = &cobra.Command{
 	Short: "Merged items nobody has inspected, worst blast radius first.",
 	Long: `A completion record says an item merged. It says nothing about whether anyone
 checked it, so this ranks the ones nobody did by how much rests on them.
+
+An item that merged holding commits no review read, check's UNREVIEWED MERGE,
+is listed with those commits under it, audited or not, until an audit names the
+merged head.
 
 Ties break on the severity of what an item already admits it left open. When the
 follow-up list is unreachable the follow-up columns print "?" and never "0".`,
@@ -80,6 +88,10 @@ follow-up list is unreachable the follow-up columns print "?" and never "0".`,
 				totalFollowUps += r.FollowUps
 			}
 			fmt.Printf("%10d  %s  %-5s %s\n", r.Blast, cav, r.ID, trunc(r.Title, width))
+			if len(r.Unreviewed) > 0 {
+				fmt.Printf("%35s merged with %d %s no review read:\n%s\n", "", len(r.Unreviewed),
+					plural(len(r.Unreviewed), "commit", "commits"), commitList(r.Unreviewed, strings.Repeat(" ", 38)))
+			}
 		}
 
 		fmt.Println()
@@ -108,12 +120,14 @@ func (s *session) unauditedRows() ([]UnauditedRow, gh.Index) {
 
 	var rows []UnauditedRow
 	for _, it := range s.backlog.Items {
-		st := s.ledger.State(it.ID.Bare())
-		if !st.Merged || st.Audited() {
+		id := it.ID.Bare()
+		st := s.ledger.State(id)
+		_, unreviewed := s.ledger.UnreviewedMerge(id)
+		if !st.Merged || (st.Audited() && len(unreviewed) == 0) {
 			continue
 		}
-		id := it.ID.Bare()
-		r := UnauditedRow{ID: id, Title: it.Title(), Blast: g.BlastRadius(id), FollowUpsKnown: index.OK}
+		r := UnauditedRow{ID: id, Title: it.Title(), Blast: g.BlastRadius(id), FollowUpsKnown: index.OK,
+			Unreviewed: unreviewed}
 		if index.OK {
 			for _, is := range index.For(id) {
 				r.bucket(is.Severity)

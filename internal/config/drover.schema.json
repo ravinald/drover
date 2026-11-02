@@ -662,6 +662,12 @@
           "enum": ["none", "github"],
           "default": "none",
           "description": "github publishes each accepted item as an issue: its title, its numbered requirements, a drover:<state> label and blocked-by links for its deps. Publishing makes item text public wherever the tracker is; leave it at none for a backlog that must stay private. Per-project only: the per-user config may not set it, and github needs issue declared in [frontmatter]."
+        },
+        "fold_max": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 12,
+          "description": "The most numbered requirements drover fold may leave on the item it folds into. A fold past it refuses with exit 3 and writes nothing."
         }
       }
     },

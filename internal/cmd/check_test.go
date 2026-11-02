@@ -1352,3 +1352,53 @@ func TestAListFormDepOnNothingStaysDanglingUnderItsStrippedID(t *testing.T) {
 		t.Errorf("MISSING DEP = %+v, want one naming 9", got)
 	}
 }
+
+func TestCheckReportsABranchOverlapBetweenAcceptedItems(t *testing.T) {
+	s := branchedProject(t, "", "")
+	acceptYes = true
+	if _, err := acceptID(t, "2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.reload(); err != nil {
+		t.Fatal(err)
+	}
+	got := findings(s.checkReport(), "BRANCH OVERLAP")
+	if len(got) != 1 || !strings.Contains(got[0].Message, "2 cites internal/x.go, which 1's branch") {
+		t.Fatalf("BRANCH OVERLAP findings = %+v, want one naming both items", got)
+	}
+}
+
+func rangeProject(t *testing.T, bodies map[string]string) *session {
+	t.Helper()
+	return openIn(t, shelfProject(t, bodies, map[string]string{}))
+}
+
+func TestRangeOverlapsPairItemsCitingTheSameLines(t *testing.T) {
+	s := rangeProject(t, map[string]string{
+		"F01-a.md": "---\ntitle: A\ndeps:\n---\n\n1. Fix `internal/h.go:10-20`.\n",
+		"F02-b.md": "---\ntitle: B\ndeps:\n---\n\n1. Fix `internal/h.go:18-30`.\n2. Test it.\n",
+		"F03-c.md": "---\ntitle: C\ndeps:\n---\n\n1. Fix `internal/h.go:40-50`.\n",
+		"F04-d.md": "---\ntitle: D\ndeps:\n---\n\n1. Fix `internal/other.go:1-5`.\n",
+		"F05-e.md": "---\ntitle: E\ndeps:\n---\n\n1. Fix `internal/more.go:1-5`.\n",
+		"F06-f.md": "---\ntitle: F\ndeps:\n---\n\n1. Fix `internal/rest.go:1-5`.\n",
+	})
+	got := s.rangeOverlaps()
+	if len(got) != 1 || got[0].A != "F1" || got[0].B != "F2" || got[0].Combined != 3 || got[0].Ordered {
+		t.Fatalf("overlaps = %+v, want F1 and F2 only, 3 requirements, unordered", got)
+	}
+	if rep := s.checkReport(); len(rep.Overlaps) != 1 || len(findings(rep, "BRANCH OVERLAP")) != 0 {
+		t.Errorf("check carries %+v, want the one overlap as advisory and no finding", rep.Overlaps)
+	}
+}
+
+// A file nearly every item cites says nothing about which two belong together.
+func TestRangeOverlapsIgnoreAFileMostItemsCite(t *testing.T) {
+	s := rangeProject(t, map[string]string{
+		"F01-a.md": "---\ntitle: A\ndeps:\n---\n\n1. Fix `go.mod:1-3`.\n",
+		"F02-b.md": "---\ntitle: B\ndeps:\n---\n\n1. Fix `go.mod:2-4`.\n",
+		"F03-c.md": "---\ntitle: C\ndeps:\n---\n\n1. Fix `go.mod:1-9`.\n",
+	})
+	if got := s.rangeOverlaps(); len(got) != 0 {
+		t.Errorf("overlaps = %+v, want none: every item cites go.mod", got)
+	}
+}
