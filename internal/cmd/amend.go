@@ -107,52 +107,9 @@ drover launched, supervisor included.`,
 			}
 		}
 
-		raw, err := os.ReadFile(it.Path)
-		if err != nil {
+		if err := s.replaceList(it, list, want, reason, moved); err != nil {
 			return err
 		}
-		head, body, err := splitFrontmatter(string(raw))
-		if err != nil {
-			return fmt.Errorf("%s: %w", it.Path, err)
-		}
-		lines := strings.Split(body, "\n")
-		start, end, err := requirementSpan(lines)
-		if err != nil {
-			return Refusal{fmt.Errorf("%s: %w", rel(s.cfg.Root, it.Path), err)}
-		}
-		replaced := strings.Join(lines[start:end], "\n")
-		if strings.TrimSpace(replaced) == list {
-			return Refusal{fmt.Errorf("%s already holds that list: nothing to amend", it.ID.Bare())}
-		}
-		out := append([]string{}, lines[:start]...)
-		out = append(out, strings.Split(list, "\n")...)
-		out = append(out, lines[end:]...)
-		next := strings.Join(out, "\n")
-		before := len(it.Requirements())
-		if after := len(backlog.Item{Body: next}.Requirements()); after != want {
-			return Refusal{fmt.Errorf("refusing to write: the file holds %d requirements and the body would carry %d", want, after)}
-		}
-
-		// Kept before the body is written: a body amended whose replaced list
-		// was lost is the one outcome with no record of what the contract was.
-		keptAt, err := s.keepAmendment(it, replaced, reason, moved, before, want)
-		if err != nil {
-			return fmt.Errorf("keep the replaced list: %w", err)
-		}
-		written := []byte(head + next)
-		if err := os.WriteFile(it.Path, written, 0o600); err != nil {
-			return fmt.Errorf("write %s: %w", it.Path, err)
-		}
-		if err := s.wroteBody(it.ID.Bare(), "amend", written); err != nil {
-			return err
-		}
-		keptRel := rel(s.cfg.Root, keptAt)
-		if err := s.record(ledger.Row{ID: it.ID.Bare(), Note: reason, Date: ledger.Today(),
-			Amend: &ledger.Amendment{From: before, To: want, Moved: moved, Kept: keptRel}}); err != nil {
-			return err
-		}
-		fmt.Printf("amended %s -> %s (%d requirement(s), was %d)\n", it.ID.Bare(), rel(s.cfg.Root, it.Path), want, before)
-		fmt.Printf("replaced list kept: %s\n", keptRel)
 		if moved != "" {
 			if s.amendedWith(moved, it.ID.Bare()) {
 				fmt.Printf("%s already records the other half of this move.\n", moved)
@@ -387,4 +344,58 @@ func init() {
 		"the other item, when a requirement moved between two; amend that one too")
 	touchCmd.Flags().StringVar(&touchReason, "reason", "", "what the hand edit changed (required)")
 	root.AddCommand(amendCmd, touchCmd)
+}
+
+// replaceList is amend's write: it swaps the body's numbered list for list,
+// which holds want requirements, keeps the list it replaced, and records the
+// body and amend rows. moved names the item a requirement moved to or from.
+// fold writes through it too, so a fold leaves the rows an amend --moved does.
+func (s *session) replaceList(it backlog.Item, list string, want int, reason, moved string) error {
+	raw, err := os.ReadFile(it.Path)
+	if err != nil {
+		return err
+	}
+	head, body, err := splitFrontmatter(string(raw))
+	if err != nil {
+		return fmt.Errorf("%s: %w", it.Path, err)
+	}
+	lines := strings.Split(body, "\n")
+	start, end, err := requirementSpan(lines)
+	if err != nil {
+		return Refusal{fmt.Errorf("%s: %w", rel(s.cfg.Root, it.Path), err)}
+	}
+	replaced := strings.Join(lines[start:end], "\n")
+	if strings.TrimSpace(replaced) == list {
+		return Refusal{fmt.Errorf("%s already holds that list: nothing to amend", it.ID.Bare())}
+	}
+	out := append([]string{}, lines[:start]...)
+	out = append(out, strings.Split(list, "\n")...)
+	out = append(out, lines[end:]...)
+	next := strings.Join(out, "\n")
+	before := len(it.Requirements())
+	if after := len(backlog.Item{Body: next}.Requirements()); after != want {
+		return Refusal{fmt.Errorf("refusing to write: the file holds %d requirements and the body would carry %d", want, after)}
+	}
+
+	// Kept before the body is written: a body amended whose replaced list
+	// was lost is the one outcome with no record of what the contract was.
+	keptAt, err := s.keepAmendment(it, replaced, reason, moved, before, want)
+	if err != nil {
+		return fmt.Errorf("keep the replaced list: %w", err)
+	}
+	written := []byte(head + next)
+	if err := os.WriteFile(it.Path, written, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", it.Path, err)
+	}
+	if err := s.wroteBody(it.ID.Bare(), "amend", written); err != nil {
+		return err
+	}
+	keptRel := rel(s.cfg.Root, keptAt)
+	if err := s.record(ledger.Row{ID: it.ID.Bare(), Note: reason, Date: ledger.Today(),
+		Amend: &ledger.Amendment{From: before, To: want, Moved: moved, Kept: keptRel}}); err != nil {
+		return err
+	}
+	fmt.Printf("amended %s -> %s (%d requirement(s), was %d)\n", it.ID.Bare(), rel(s.cfg.Root, it.Path), want, before)
+	fmt.Printf("replaced list kept: %s\n", keptRel)
+	return nil
 }

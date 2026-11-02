@@ -287,6 +287,7 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `LIVE REQUIREMENT`    | An accepted requirement names a live host or deploy without `[operator]`.             |
 | `BROAD CITATION`      | A scaffold cites a top-level directory, which serializes it under `--jobs`.           |
 | `HAND EDITED`         | An accepted item's body changed outside drover since its last digest.                 |
+| `BRANCH OVERLAP`      | An unmerged item cites a file another unmerged branch changes, with no deps edge.     |
 | `UNREADABLE`          | A backlog file did not parse.                                                         |
 | `BAD VALUE`           | An item's value fails what `[frontmatter]` declares the key may hold.                 |
 | `BAD RUNNER`          | A `[runners]` entry's argv is one its binary cannot use.                              |

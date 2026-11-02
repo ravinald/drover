@@ -54,6 +54,9 @@ type CheckReport struct {
 	// validates it has to say what it validated.
 	Config   []string  `json:"config"`
 	Findings []Finding `json:"findings"`
+	// Overlaps is each pair of unmerged items citing overlapping lines of one
+	// file. Advisory: it is never a finding and never moves ok or the exit code.
+	Overlaps []rangeOverlap `json:"overlaps,omitempty"`
 	// Stopped is why this report is less than the whole validation, empty when
 	// it ran whole. A config this build cannot load stops every check that
 	// reads one, so bodies and ledger_rows are zero because nothing was read
@@ -164,6 +167,9 @@ wording, so never match on it.
   HAND EDITED         an accepted, unmerged item whose body changed since drover last
                       recorded its digest, outside any live session; record it with
                       amend (requirements) or touch (prose) before driving it
+  BRANCH OVERLAP      an accepted, unmerged item cites a file another accepted,
+                      unmerged item's branch changes, and no deps edge orders the
+                      two; it names the deps edit for each order
   NO DISPOSITION      a merged item's closes key names an issue nobody judged, so
                       finish wrote nothing to the tracker and whoever filed it got
                       silence
@@ -512,6 +518,9 @@ func renderCheck(w io.Writer, rep CheckReport) {
 		if f.Detail != "" {
 			fmt.Fprintf(w, "%s%s\n", strings.Repeat(" ", findingWidth+1), f.Detail)
 		}
+	}
+	for _, o := range rep.Overlaps {
+		fmt.Fprintf(w, "%s %s\n", sgr("note:", pal.Warn, tint), o)
 	}
 	if rep.RegisterNote != "" {
 		fmt.Fprintf(w, "%s %s\n", sgr("note:", pal.Warn, tint), rep.RegisterNote)
@@ -1034,9 +1043,37 @@ func (s *session) checkReport() CheckReport {
 	s.addRegister(&rep)
 	s.addMirror(&rep, add)
 	s.addInstructions(add)
+	s.addBranchOverlaps(add)
+	rep.Overlaps = s.rangeOverlaps()
 
 	rep.OK = len(rep.Findings) == 0
 	return rep
+}
+
+// addBranchOverlaps reports each accepted, unmerged item citing a file another
+// accepted, unmerged item's branch changes, with no deps edge between them:
+// the pair accept refuses, found here for items accepted before it did.
+func (s *session) addBranchOverlaps(add func(Finding)) {
+	for _, it := range s.backlog.Items {
+		if s.done(it.ID.Bare()) || s.isScaffold(it) {
+			continue
+		}
+		for _, o := range s.branchOverlaps(it) {
+			other, err := s.item(o.Other)
+			if err != nil || s.isScaffold(other) {
+				continue
+			}
+			add(Finding{
+				Kind: "BRANCH OVERLAP",
+				Message: fmt.Sprintf("%s cites %s, which %s's branch %s changes, and no deps edge orders the two",
+					it.ID.Bare(), strings.Join(o.Paths, ", "), o.Other, o.Branch),
+				Detail: fmt.Sprintf("add %s to %s's deps line to run %s first, or %s to %s's to run %s first",
+					o.Other, it.ID.Bare(), o.Other, it.ID.Bare(), o.Other, it.ID.Bare()),
+				Path: rel(s.cfg.Root, it.Path),
+				ID:   it.ID.Bare(),
+			})
+		}
+	}
 }
 
 // addMirror compares the backlog with the issues it is mirrored to, under

@@ -969,9 +969,10 @@ Under `github` and `none` it refuses with exit 3, naming the backend that is con
 
 ## `[backlog]`
 
-| Key      | Default | Meaning                                                 |
-| -------- | ------- | ------------------------------------------------------- |
-| `mirror` | `none`  | Where accepted items are published: `none` or `github`. |
+| Key        | Default | Meaning                                                                                                                        |
+| ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `mirror`   | `none`  | Where accepted items are published: `none` or `github`.                                                                        |
+| `fold_max` | `12`    | The most numbered requirements `drover fold` may leave on one item. Load refuses a negative one, and `0` reads as the default. |
 
 Under `github`, `accept` opens an issue per accepted item carrying its title and numbered requirements, writes the number into the item's `issue:` key, and keeps a `drover:<state>` label, an open or closed state and blocked-by links in step with the backlog. The file stays the contract and drover never reads the issue back. [The mirror](concepts.md#the-mirror) covers what each command writes and how `drover check` reports a write that did not go through.
 

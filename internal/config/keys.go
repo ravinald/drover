@@ -64,6 +64,7 @@ func Keys() []Key {
 var resolved = map[string]string{
 	"register.backend":        strconv.Quote(BackendGitHub),
 	"backlog.mirror":          strconv.Quote(MirrorNone),
+	"backlog.fold_max":        strconv.Itoa(DefaultFoldMax),
 	"ids.allocator":           strconv.Quote(AllocatorLocal),
 	"ids.remote":              strconv.Quote("origin"),
 	"forge.reruns":            strconv.Itoa(DefaultReruns),

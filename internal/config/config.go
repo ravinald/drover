@@ -995,6 +995,21 @@ type Backlog struct {
 	// Off by default because turning it on publishes item text: a project whose
 	// backlog lives in a private overlay would leak it the day it upgraded.
 	Mirror string `toml:"mirror"`
+	// FoldMax caps the requirements `drover fold` may leave on one item. Zero
+	// resolves to DefaultFoldMax. A cap because folding is cheap and a contract
+	// past a dozen requirements is one no single run or review holds in view.
+	FoldMax int `toml:"fold_max"`
+}
+
+// DefaultFoldMax is [backlog] fold_max when nothing declares it.
+const DefaultFoldMax = 12
+
+// BacklogFoldMax resolves [backlog] fold_max.
+func (c *Config) BacklogFoldMax() int {
+	if c.Backlog.FoldMax > 0 {
+		return c.Backlog.FoldMax
+	}
+	return DefaultFoldMax
 }
 
 // BacklogMirror resolves the mirror target, none when nothing declares one.
@@ -1456,6 +1471,9 @@ func (c *Config) validate(path string) error {
 	}
 	if c.IDs.PlannedMax < 0 {
 		return fmt.Errorf("%s: ids.planned_max must be 0 (unbounded) or positive", path)
+	}
+	if c.Backlog.FoldMax < 0 {
+		return fmt.Errorf("%s: backlog.fold_max must be positive, the most requirements drover fold leaves on one item; leave it out for %d", path, DefaultFoldMax)
 	}
 	if c.Review.MaxReviewRounds < 0 {
 		return fmt.Errorf("%s: review.max_review_rounds must be 0 (no cap) or positive", path)
