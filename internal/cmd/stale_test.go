@@ -157,7 +157,7 @@ func TestStampRefusesADevBuild(t *testing.T) {
 
 // levelProject is a fixture whose config is stamped at ver's release, so the
 // only thing that can be stale is the generated block.
-func levelProject(t *testing.T, ver string) (*session, string) {
+func levelProject(t *testing.T, ver string) string {
 	t.Helper()
 	asRelease(t, ver)
 	s := staleProject(t)
@@ -175,7 +175,7 @@ func levelProject(t *testing.T, ver string) (*session, string) {
 			t.Fatal(err)
 		}
 	})
-	return s, host
+	return host
 }
 
 // restamp rewrites the block's header to name stamp, or the header from before
@@ -213,7 +213,7 @@ func TestAnOlderBlockWarnsAReadAndIsRegeneratedByAWrite(t *testing.T) {
 		{"unstamped", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			_, host := levelProject(t, "v0.8.0-5-gaaaaaaa")
+			host := levelProject(t, "v0.8.0-5-gaaaaaaa")
 			before := restamp(t, host, c.stamp)
 
 			var err error
@@ -240,7 +240,7 @@ func TestAnOlderBlockWarnsAReadAndIsRegeneratedByAWrite(t *testing.T) {
 // A block a newer binary wrote is refused to a write, which would hand agents
 // the older surface, and read past with a warning.
 func TestANewerBlockRefusesAWriteAndWarnsARead(t *testing.T) {
-	_, host := levelProject(t, "v0.8.0-5-gaaaaaaa")
+	host := levelProject(t, "v0.8.0-5-gaaaaaaa")
 	before := restamp(t, host, "v0.9.0")
 
 	_, err := runNewBug(t)
