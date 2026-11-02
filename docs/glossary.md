@@ -12,6 +12,7 @@ Each command, as typed after `drover`.
 | `agents`                | Prints the agent instructions generated from this project's config; `--write` writes them into a file.               |
 | `attach`                | Prints a drive's events from the start and follows them until the drive exits.                                       |
 | `amend`                 | Replaces an accepted, unmerged item's numbered requirements and keeps the old list.                                  |
+| `fold`                  | Moves one accepted item's numbered requirements onto another's list and shelves it.                                  |
 | `audit`                 | Appends an audit row: the audit level, who wrote the code (`--code-by`) and who looked (`--reviewer`).               |
 | `check`                 | Validates the config, the backlog, the ledger and the paths between them; exits 2 on findings.                       |
 | `close-changes`         | Replaces the sent-back section of an item with a closed note, writing no request-changes row.                        |
