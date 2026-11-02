@@ -367,18 +367,19 @@ func foldProject(t *testing.T) string {
 	}, map[string]string{})
 }
 
-func runFold(t *testing.T, from, into string) (string, error) {
+// runFold folds F2 into F1, the pair every fold fixture here builds.
+func runFold(t *testing.T) (string, error) {
 	t.Helper()
 	t.Cleanup(func() { foldInto = "" })
 	var err error
-	out := capture(t, func() { err = execute(t, "fold", from, "--into", into) })
+	out := capture(t, func() { err = execute(t, "fold", "F2", "--into", "F1") })
 	return out, err
 }
 
 func TestFoldAppendsRenumberedRequirementsAndShelvesTheSource(t *testing.T) {
 	dir := foldProject(t)
 	t.Chdir(dir)
-	out, err := runFold(t, "F2", "F1")
+	out, err := runFold(t)
 	if err != nil {
 		t.Fatalf("fold: %v", err)
 	}
@@ -414,7 +415,7 @@ func TestFoldRefusesWhatItCannotMakeOne(t *testing.T) {
 			"F02-fold.md": "---\ntitle: Fold\ndeps:\n---\n\nRequirements:\n\n1. Two.\n",
 		}, map[string]string{})
 		t.Chdir(dir)
-		if _, err := runFold(t, "F2", "F1"); Code(err) != ExitRefused || !strings.Contains(err.Error(), "has to land first") {
+		if _, err := runFold(t); Code(err) != ExitRefused || !strings.Contains(err.Error(), "has to land first") {
 			t.Errorf("fold = %v, want exit 3 naming the dependency", err)
 		}
 	})
@@ -424,7 +425,7 @@ func TestFoldRefusesWhatItCannotMakeOne(t *testing.T) {
 		b, _ := os.ReadFile(conf) // #nosec G304 -- the fixture's own config
 		write(t, conf, string(b)+"\n[backlog]\nfold_max = 3\n")
 		t.Chdir(dir)
-		if _, err := runFold(t, "F2", "F1"); Code(err) != ExitRefused || !strings.Contains(err.Error(), "fold_max 3") {
+		if _, err := runFold(t); Code(err) != ExitRefused || !strings.Contains(err.Error(), "fold_max 3") {
 			t.Errorf("fold = %v, want exit 3 naming fold_max", err)
 		}
 		if _, err := os.Stat(filepath.Join(dir, "work", "F02-fold.md")); err != nil {
@@ -435,7 +436,7 @@ func TestFoldRefusesWhatItCannotMakeOne(t *testing.T) {
 		dir := foldProject(t)
 		t.Chdir(dir)
 		t.Setenv(runner.EnvActor, runner.ActorAgent)
-		if _, err := runFold(t, "F2", "F1"); Code(err) != ExitRefused {
+		if _, err := runFold(t); Code(err) != ExitRefused {
 			t.Errorf("fold in a launched session = %v, want exit 3", err)
 		}
 	})
