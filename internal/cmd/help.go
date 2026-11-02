@@ -146,7 +146,7 @@ var classified = map[string]classification{
 		reach:  "launches a session when given a runner"},
 	"accept": {group: groupRun, class: localWrite, who: operator,
 		because: "a run cannot accept its own requirements",
-		effect:  "Deletes one line from the item's body under {backlog} and appends one body row to {ledger} carrying the digest of what it wrote. Reads the trunk and the branch of each unmerged item waiting on it through git first, and without --yes refuses a body citing what only such a branch has. Under [backlog] mirror = \"github\" it publishes the item: opens an issue carrying its title, requirements, state label and blocked-by links and writes the number into the item's issue key with a second body row, or rewrites the issue it already names from the file, and relabels and links the issues of its direct dependents. A mirror write that fails is reported and the exit stays 0, except an opened issue whose number will not write back to the body, which fails the accept." + linkRead},
+		effect:  "--dry-run reads only. Otherwise deletes one line from the item's body under {backlog} and appends one body row to {ledger} carrying the digest of what it wrote. Reads the trunk and the branch of each unmerged item waiting on it through git first, and without --yes refuses a body citing what only such a branch has. Under [backlog] mirror = \"github\" it publishes the item: opens an issue carrying its title, requirements, state label and blocked-by links and writes the number into the item's issue key with a second body row, or rewrites the issue it already names from the file, and relabels and links the issues of its direct dependents. A mirror write that fails is reported and the exit stays 0, except an opened issue whose number will not write back to the body, which fails the accept." + linkRead},
 	"unaccept": {group: groupRun, class: localWrite, who: operator,
 		because: "returning an accepted contract to a scaffold un-decides what a person decided",
 		effect:  "Restores one line at the top of the item's body under {backlog}, and appends one body row to {ledger} carrying the digest of what it wrote. Reads {ledger} to refuse a merged item. Under [backlog] mirror = \"github\" it relabels the item's issue drover:draft, reopens it if closed, and relabels the issues of its direct dependents." + mirrorKept},
@@ -231,7 +231,7 @@ var classified = map[string]classification{
 // command's default. They live beside the classification so that --help and the
 // safety table `drover agents` generates cannot disagree about what writes.
 var escalations = map[safety][]string{
-	readOnly:   {"run --dry-run", "intake --list", "usage --dry-run"},
+	readOnly:   {"run --dry-run", "intake --list", "usage --dry-run", "accept --dry-run"},
 	outward:    {"drive --detach", "drive --stop"},
 	localWrite: {"report --save", "agents --write", "config --stamp", "skills --from", "skills --prune", "status -o", "status --render"},
 }

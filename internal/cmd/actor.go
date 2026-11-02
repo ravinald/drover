@@ -126,7 +126,9 @@ func gateRefusal(name string) error {
 	if runner.Supervising() {
 		return superviseGate(name)
 	}
-	if name == "intake --list" {
+	// The read-only forms of a sealed command: each writes nothing a person
+	// has to vouch for, so a session may run it.
+	if name == "intake --list" || name == "accept --dry-run" {
 		return nil
 	}
 	top, _, _ := strings.Cut(name, " ")

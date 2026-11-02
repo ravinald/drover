@@ -247,6 +247,9 @@ func (s *session) newDescription() (string, error) {
 		return "", Refusal{fmt.Errorf(
 			"%s carries the stop marker %q: the scaffold already has one, and a second would survive accept deleting the first", newFile, marker)}
 	}
+	if err := descriptionHolds(newFile, text, s.cfg.Intake.Holds()); err != nil {
+		return "", err
+	}
 	return trimBlankLines(text), nil
 }
 

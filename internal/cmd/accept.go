@@ -17,7 +17,10 @@ import (
 )
 
 // acceptYes overrides the refusals accept makes about what a body says.
-var acceptYes bool
+var (
+	acceptYes    bool
+	acceptDryRun bool
+)
 
 var acceptCmd = &cobra.Command{
 	Use:   "accept <id>...",
@@ -75,6 +78,12 @@ deadlock, an unfinished body, a requirement naming live work, a citation the
 trunk lacks, and an operator step the merge waits on. It never overrides the
 stop-marker or actor checks, or a deps line drover would misread.
 
+--dry-run runs every one of those checks and writes nothing: it prints
+"would accept: <id>" for an item that passes, and for one that fails prints
+what accept would refuse with and exits 3. It writes nothing a person has to
+vouch for, so whoever wrote the body can run it, a session drover launched
+included.
+
 Idempotent. An item with no marker is already accepted: that is reported and
 exits 0, because the operator named a state rather than a transition.
 
@@ -95,6 +104,7 @@ the last line lists the ids that were not accepted.`,
   drover accept B45 B46 E28         # each in turn; a bad id is named and skipped
   drover accept B59 --yes           # past the deadlock refusal, having read it
   drover accept B60 --yes           # past a placeholder or hold line, having read it
+  drover accept B61 --dry-run       # every check, nothing written: would accept: B61
 
   The three steps around it:
 
@@ -156,6 +166,9 @@ func (s *session) acceptOne(bare string) error {
 	if at < 0 {
 		fmt.Printf("already accepted: %s carries no stop marker (%s)\n",
 			it.ID.Bare(), rel(s.cfg.Root, it.Path))
+		if acceptDryRun {
+			return nil
+		}
 		return s.publish(it)
 	}
 	if found, waiters := s.deadlocksOf(it); len(found) > 0 && !acceptYes {
@@ -209,6 +222,10 @@ func (s *session) acceptOne(bare string) error {
 		return Refusal{fmt.Errorf("%s\nNothing was accepted. A session reads each citation as a claim about the trunk, and these are not on %s.\n"+
 			"Correct each one against git show %s:<path>, or accept anyway: drover accept %s --yes",
 			strings.Join(drift, "\n"), s.driftRef(), s.driftRef(), it.ID.Bare())}
+	}
+	if acceptDryRun {
+		fmt.Printf("would accept: %s\n", it.ID.Bare())
+		return nil
 	}
 	if err := s.writeBody(it, "accept", kept); err != nil {
 		return err
@@ -576,6 +593,29 @@ func bodyHolds(lines []string, markers []string) []bodyHold {
 	return out
 }
 
+// descriptionHolds refuses a description new or split was handed that bodyHolds
+// would refuse at accept: the body it lands in is the author's, and finding the
+// placeholder at accept sends the item back to whoever wrote it, a step later
+// and after the scaffold exists. Each placeholder is named with the brace form
+// accept never reads as one.
+func descriptionHolds(source, text string, markers []string) error {
+	holds := bodyHolds(strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n"), markers)
+	if len(holds) == 0 {
+		return nil
+	}
+	msgs := make([]string, len(holds))
+	for i, h := range holds {
+		msgs[i] = fmt.Sprintf("%s:%d carries %s", source, h.line, h.what)
+		if !h.marker {
+			name := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(h.what, "the placeholder "), "<"), ">")
+			msgs[i] += "; write it {" + name + "}"
+		}
+	}
+	return Refusal{fmt.Errorf("%s\nNothing was written. accept would refuse the body this description lands in, so it is refused here, "+
+		"where the author still has it open: fill in or remove each line above.\n"+
+		"A variable part is written in braces, {name}, which is never read as a placeholder", strings.Join(msgs, "\n"))}
+}
+
 // withoutExampleSpans blanks every inline code span on line whose content
 // holds a space or cites markup, leaving the rest as written. A span opens on a run of
 // backticks and closes on the next run of the same length; an unclosed run is
@@ -756,6 +796,8 @@ func bodyStart(lines []string) int {
 }
 
 func init() {
+	acceptCmd.Flags().BoolVar(&acceptDryRun, "dry-run", false,
+		"run every check accept makes before it writes, and write nothing; a session drover launched may run it")
 	acceptCmd.Flags().BoolVar(&acceptYes, "yes", false,
 		"accept past a refusal about the body's content (a placeholder, a hold line, a citation only a waiting item's branch has); never past the stop-marker or actor checks")
 	root.AddCommand(acceptCmd, unacceptCmd)
