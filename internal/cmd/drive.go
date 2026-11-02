@@ -550,6 +550,10 @@ type DriveItem struct {
 	// handed is a park whose hand-off drive already emitted, carrying where to
 	// work, so the item's own parked event does not emit a second, emptier one.
 	handed bool
+	// reroute is a merge-path resume whose catch-up conflicted where the probe
+	// before it saw a clean merge: the trunk moved between the two. The resume
+	// takes it to resolve_conflict rather than parking it with nobody named.
+	reroute bool
 	// requeue is the boundary a quota-refused launch sends the item back to,
 	// at the head of the queue, and refusal the hold that refusal takes. With
 	// no refusal it is the implement stage a send-back of drive's own returns
@@ -2185,7 +2189,13 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 		} else if out, again, stop := regated(adopt(stageCatchUp)); stop {
 			return out
 		} else if !again {
-			return s.inTrunkStage(it, func() DriveItem { return s.driveFinish(ctx, it, &d, park, deadline) }, park)
+			s.mergeResuming = true
+			out := s.inTrunkStage(it, func() DriveItem { return s.driveFinish(ctx, it, &d, park, deadline) }, park)
+			s.mergeResuming = false
+			if !out.reroute {
+				return out
+			}
+			return s.rerouteConflict(it, &d, park, out.Reason)
 		}
 	}
 	for {
@@ -2357,6 +2367,29 @@ func (s *session) resumeConflict(d *DriveItem, park func(cause, why string) Driv
 		return DriveItem{}, false
 	}
 	return s.dispatchCatchUp(d, park)
+}
+
+// rerouteConflict takes a conflict driveFinish's own catch-up found on a
+// merge-path resume to resolve_conflict, which the probe before it could not,
+// because the trunk moved between the two. driveFinish ran inside the item's
+// turn at the trunk stage and that turn is spent, so a session cannot start
+// from here: at auto the item goes back to the head of the queue at its
+// implement stage, where the catch-up before that session meets the conflict
+// again and counts it under resolve_conflict's own budget and round limit.
+// Under any other policy, dispatchCatchUp holds the worktree and names who
+// resolves it.
+func (s *session) rerouteConflict(it backlog.Item, d *DriveItem, park func(cause, why string) DriveItem, why string) DriveItem {
+	d.reroute = false
+	if p, _ := s.cfg.Policy("resolve_conflict"); p == polAuto {
+		d.Outcome, d.Park = "", ""
+		d.Reason = why + "; its implementing session resolves it in this drive"
+		d.requeue = s.requeueAt(it, ledger.StageImplement)
+		return *d
+	}
+	if out, stop := s.dispatchCatchUp(d, park); stop {
+		return out
+	}
+	return park(parkTrunkConflict, why)
 }
 
 // reviewHead is the round --review-only and a lost review's rerun start at:
@@ -5081,6 +5114,9 @@ func (s *session) routeCatchUp(it backlog.Item, d *DriveItem, park func(cause, w
 	case p == parkTrunkRed:
 		d.stop = errTrunkRed
 		return park(p, why), true
+	case p == parkTrunkConflict && s.mergeResuming:
+		d.reroute, d.Reason = true, why
+		return *d, true
 	case p == parkTrunkConflict:
 		d.setDetail(conflictDetail(s.cfg.Root, c.conflicts))
 		return park(p, why), true

@@ -4740,6 +4740,77 @@ func TestAParkedItemWhoseLaterReviewPassedResumesAtTheMerge(t *testing.T) {
 			t.Errorf("merges = %q, want none", merges)
 		}
 	})
+	// The probe before driveFinish sees a trunk that merges cleanly, and the
+	// trunk moves before driveFinish's own catch-up, which conflicts. That
+	// conflict is resolve_conflict's as much as the probe's would have been.
+	lateTrunk := func(t *testing.T, dir string) {
+		t.Helper()
+		write(t, filepath.Join(dir, "implemented.txt"), "the trunk's own\n")
+		git(t, dir, "add", "implemented.txt")
+		git(t, dir, "commit", "-q", "-m", "a sibling's merge on the same file")
+		hook := filepath.Join(dir, ".git", "hooks", "pre-push")
+		write(t, hook, fmt.Sprintf("#!/bin/sh\nrm %q\ngit -C %q push -q origin main\n", hook, dir))
+		if err := os.Chmod(hook, 0o755); err != nil { // #nosec G302 -- a hook git must execute
+			t.Fatal(err)
+		}
+	}
+	t.Run("a conflict the probe missed is still resolve_conflict's", func(t *testing.T) {
+		ghLog := mergeProject(t)
+		dir, _ := forge(t, ghLog)
+		parkedAtLimit(t, dir, "")
+		lateTrunk(t, dir)
+		since := ledgerLen(t)
+
+		got := driveAll(t, "1")[0]
+		if got.Outcome != outcomeParked || got.Park != parkTrunkConflict {
+			t.Fatalf("item 1 is %q %q (%s), want parked %q", got.Outcome, got.Park, got.Reason, parkTrunkConflict)
+		}
+		if got.Tree == "" {
+			t.Fatal("the park names no worktree, want it kept for whoever resolve_conflict names")
+		}
+		if _, err := os.Stat(got.Tree); err != nil {
+			t.Errorf("the worktree %s is gone: %v", got.Tree, err)
+		}
+		if !strings.Contains(got.Reason, "resolve_conflict") {
+			t.Errorf("the park does not name the policy that holds it: %s", got.Reason)
+		}
+		if impl, rev := launchesOf(t, since); impl != 0 || rev != 0 {
+			t.Errorf("the drive wrote %d implement and %d review stage rows, want none", impl, rev)
+		}
+		if merges := mergeCalls(t, ghLog); len(merges) != 0 {
+			t.Errorf("merges = %q, want none", merges)
+		}
+	})
+	t.Run("at auto, a conflict the probe missed goes to the implementing session", func(t *testing.T) {
+		ghLog := mergeProject(t)
+		dir, _ := forge(t, ghLog)
+		conf, err := os.ReadFile(filepath.Join(dir, ".drover.toml")) // #nosec G304 -- the fixture's own config
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(dir, ".drover.toml"), string(conf)+"\n[supervise]\nresolve_conflict = \"auto\"\n")
+		parkedAtLimit(t, dir, "")
+		lateTrunk(t, dir)
+		since := ledgerLen(t)
+
+		driveAll(t, "1")
+		if impl, _ := launchesOf(t, since); impl == 0 {
+			t.Error("the drive wrote no implement stage row, want the session that resolves the conflict launched")
+		}
+		l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, r := range l.Rows[since:] {
+			if r.ID == "1" && r.ChangesSource == ledger.ChangesTrunkConflict {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("no trunk_conflict send-back was recorded, so the conflict did not take the round resolve_conflict counts")
+		}
+	})
 	t.Run("a later review that sent work back still implements", func(t *testing.T) {
 		ghLog := mergeProject(t)
 		dir, _ := forge(t, ghLog)
