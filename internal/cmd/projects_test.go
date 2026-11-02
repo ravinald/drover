@@ -35,7 +35,7 @@ func outsideTempDir(t *testing.T) string {
 
 func resetProjectsFlags(t *testing.T) {
 	reset := func() {
-		projectsJSON, projectsAll, projectsForget = false, false, ""
+		projectsJSON, projectsAll, projectsForget, projectsPrune, pruneDry = false, false, "", false, false
 		projectsCmd.Flags().VisitAll(func(f *pflag.Flag) { f.Changed = false })
 	}
 	reset()
@@ -67,12 +67,11 @@ func projectsJSONRows(t *testing.T, args ...string) []ProjectRow {
 	return got
 }
 
-// The fixture sits under the OS temp directory, and it registers anyway: what is
-// scratch is decided where the index reads the registry, not where it is written.
 func TestAProjectCommandRegistersItsProjectOnce(t *testing.T) {
 	stubPATH(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	s := fixture(t, "")
+	outsideTempDir(t)
 	t.Chdir(s.cfg.Root)
 
 	runStatus(t)
@@ -332,5 +331,100 @@ func TestProjectsTableHeaderSaysFinished(t *testing.T) {
 	sample := strings.Join(strings.Fields("PROJECT "+strings.SplitN(after, "\n", 2)[0]), " ")
 	if sample != got {
 		t.Errorf("docs/automation.md sample header %q, printer writes %q", sample, got)
+	}
+}
+
+// A fixture or a scratch reproduction under the temp directory is gone within
+// the day, so a command run there leaves the registry as it found it.
+func TestAProjectUnderTheTempDirectoryRegistersNothing(t *testing.T) {
+	stubPATH(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s := fixture(t, "")
+	t.Chdir(s.cfg.Root)
+	runStatus(t)
+	if rows := registryRows(t); len(rows) != 0 {
+		t.Errorf("a project under the temp directory registered %+v, want nothing", rows)
+	}
+}
+
+// A root registered once through a symlink and once resolved is two roots to
+// every reader, so forgetting it tombstones both.
+func TestForgetTombstonesEverySpellingOfARoot(t *testing.T) {
+	stubPATH(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s := fixture(t, "")
+	outsideTempDir(t)
+	root := resolved(s.cfg.Root)
+	link := filepath.Join(filepath.Dir(root), "linked")
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	reg := projects.Path(config.GlobalPath())
+	for _, r := range []string{link, root} {
+		if err := projects.Append(reg, projects.Row{Project: "example", Root: r}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(t.TempDir())
+	resetProjectsFlags(t)
+	out := capture(t, func() {
+		if err := execute(t, "projects", "--forget", link); err != nil {
+			t.Fatalf("projects --forget: %v", err)
+		}
+	})
+	if n := strings.Count(out, "forgot example"); n != 2 {
+		t.Errorf("--forget printed %d tombstones, want 2:\n%s", n, out)
+	}
+	if got := projectsJSONRows(t); len(got) != 0 {
+		t.Errorf("projects lists %+v after --forget, want neither spelling", got)
+	}
+}
+
+// --prune forgets what is scratch or gone and nothing that is still a project;
+// --dry-run says the same and writes nothing.
+func TestPruneForgetsTempAndGoneRootsOnly(t *testing.T) {
+	stubPATH(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	s := fixture(t, "")
+	tmp := outsideTempDir(t)
+	live := s.cfg.Root
+	gone := filepath.Join(filepath.Dir(live), "deleted-project")
+	scratch := filepath.Join(tmp, "scratch")
+	if err := os.MkdirAll(scratch, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(scratch, config.FileName), "project = \"scratch\"\n")
+	reg := projects.Path(config.GlobalPath())
+	for _, r := range []projects.Row{
+		{Project: "example", Root: live}, {Project: "deleted", Root: gone}, {Project: "scratch", Root: scratch},
+	} {
+		if err := projects.Append(reg, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(t.TempDir())
+
+	resetProjectsFlags(t)
+	before := len(registryRows(t))
+	out := capture(t, func() {
+		if err := execute(t, "projects", "--prune", "--dry-run"); err != nil {
+			t.Fatalf("projects --prune --dry-run: %v", err)
+		}
+	})
+	if len(registryRows(t)) != before || strings.Count(out, "would forget") != 2 {
+		t.Fatalf("--dry-run wrote rows or named the wrong roots:\n%s", out)
+	}
+
+	resetProjectsFlags(t)
+	out = capture(t, func() {
+		if err := execute(t, "projects", "--prune"); err != nil {
+			t.Fatalf("projects --prune: %v", err)
+		}
+	})
+	if !strings.Contains(out, "deleted ("+gone+")") || !strings.Contains(out, "scratch ("+scratch+")") || strings.Contains(out, "("+live+")") {
+		t.Errorf("--prune forgot the wrong roots:\n%s", out)
+	}
+	if got := projectsJSONRows(t); len(got) != 1 || got[0].Root != live {
+		t.Errorf("projects lists %+v after --prune, want only the live project", got)
 	}
 }

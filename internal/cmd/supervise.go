@@ -260,6 +260,9 @@ func invocation(c *cobra.Command) string {
 	if f := c.Flags().Lookup("list"); name == "intake" && f != nil && f.Value.String() == "true" {
 		return "intake --list"
 	}
+	if f := c.Flags().Lookup("dry-run"); name == "accept" && f != nil && f.Value.String() == "true" {
+		return "accept --dry-run"
+	}
 	return name
 }
 

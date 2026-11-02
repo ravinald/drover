@@ -351,9 +351,13 @@ func TestPrintTableMarksHereAndNamesTheBranch(t *testing.T) {
 			footer: "▸ here: B1  Alone  (branch b01-alone)",
 		},
 		{
-			name:   "no item owns the branch",
+			name:   "the trunk prints no here line",
 			branch: "main",
-			footer: "▸ here: branch main  (no item owns it)",
+		},
+		{
+			name:   "no item owns a branch off the trunk",
+			branch: "stray",
+			footer: "▸ here: branch stray  (no item owns it)",
 		},
 		{
 			name:   "several items own the branch",
@@ -365,7 +369,10 @@ func TestPrintTableMarksHereAndNamesTheBranch(t *testing.T) {
 			onBranch(t, s, c.branch)
 			var buf bytes.Buffer
 			s.printTable(&buf, s.rows(), nil, time.Now())
-			want := table(c.marked) + "\n" + c.footer + "\n"
+			want := table(c.marked)
+			if c.footer != "" {
+				want += "\n" + c.footer + "\n"
+			}
 			if got := buf.String(); got != want {
 				t.Errorf("printTable wrote:\n%s\nwant:\n%s", got, want)
 			}

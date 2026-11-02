@@ -106,7 +106,7 @@ var classified = map[string]classification{
 	"init": {group: groupSetup, class: localWrite, who: either,
 		effect: "Writes .drover.toml and the directories it names, in the working directory, and in a git work tree appends .drover/ to .gitignore unless a line there already names it or the marker. Refuses if one is already there. --user writes the per-user config under $XDG_CONFIG_HOME/drover, or ~/.config/drover, instead, refuses if one is already there, and touches no project. init supervise appends a [supervise] table to .drover.toml when it has none, and otherwise prints one."},
 	"projects": {group: groupSetup, class: readOnly, who: either,
-		effect: "Reads the per-user registry beside the global config. Needs no project."},
+		effect: "Reads the per-user registry beside the global config. Needs no project. --forget and --prune append tombstone rows to that registry and delete nothing; --prune --dry-run reads only."},
 	"schema": {group: groupSetup, class: readOnly, who: either,
 		effect: "Prints to stdout. Needs no project, so it answers in a tree with no config; --frontmatter is the exception and reads the project's own."},
 	"agents": {group: groupSetup, class: readOnly, who: either,
@@ -146,7 +146,7 @@ var classified = map[string]classification{
 		reach:  "launches a session when given a runner"},
 	"accept": {group: groupRun, class: localWrite, who: operator,
 		because: "a run cannot accept its own requirements",
-		effect:  "Deletes one line from the item's body under {backlog} and appends one body row to {ledger} carrying the digest of what it wrote. Reads the trunk and the branch of each unmerged item waiting on it through git first, and without --yes refuses a body citing what only such a branch has. Under [backlog] mirror = \"github\" it publishes the item: opens an issue carrying its title, requirements, state label and blocked-by links and writes the number into the item's issue key with a second body row, or rewrites the issue it already names from the file, and relabels and links the issues of its direct dependents. A mirror write that fails is reported and the exit stays 0, except an opened issue whose number will not write back to the body, which fails the accept." + linkRead},
+		effect:  "--dry-run reads only. Otherwise deletes one line from the item's body under {backlog} and appends one body row to {ledger} carrying the digest of what it wrote. Reads the trunk and the branch of each unmerged item waiting on it through git first, and without --yes refuses a body citing what only such a branch has. Under [backlog] mirror = \"github\" it publishes the item: opens an issue carrying its title, requirements, state label and blocked-by links and writes the number into the item's issue key with a second body row, or rewrites the issue it already names from the file, and relabels and links the issues of its direct dependents. A mirror write that fails is reported and the exit stays 0, except an opened issue whose number will not write back to the body, which fails the accept." + linkRead},
 	"unaccept": {group: groupRun, class: localWrite, who: operator,
 		because: "returning an accepted contract to a scaffold un-decides what a person decided",
 		effect:  "Restores one line at the top of the item's body under {backlog}, and appends one body row to {ledger} carrying the digest of what it wrote. Reads {ledger} to refuse a merged item. Under [backlog] mirror = \"github\" it relabels the item's issue drover:draft, reopens it if closed, and relabels the issues of its direct dependents." + mirrorKept},
@@ -231,9 +231,9 @@ var classified = map[string]classification{
 // command's default. They live beside the classification so that --help and the
 // safety table `drover agents` generates cannot disagree about what writes.
 var escalations = map[safety][]string{
-	readOnly:   {"run --dry-run", "intake --list", "usage --dry-run"},
+	readOnly:   {"run --dry-run", "intake --list", "usage --dry-run", "accept --dry-run"},
 	outward:    {"drive --detach", "drive --stop"},
-	localWrite: {"report --save", "agents --write", "config --stamp", "skills --from", "skills --prune", "status -o", "status --render"},
+	localWrite: {"report --save", "agents --write", "config --stamp", "skills --from", "skills --prune", "status -o", "status --render", "projects --prune"},
 }
 
 // label is how a class is named to a reader deciding whether to call something.
@@ -508,8 +508,14 @@ func expand(c *cobra.Command, vars map[string]string) {
 		name = p.Name()
 	}
 	if k, ok := classified[name]; ok {
-		c.Long = strings.TrimRight(c.Long, "\n") + "\n\n" +
-			wrap(fmt.Sprintf("Safety: %s. %s", k.class, substitute(k.effect, vars)), 78)
+		safety := fmt.Sprintf("Safety: %s. %s", k.class, substitute(k.effect, vars))
+		// Every writing command that the stale check reaches repairs an older
+		// block before it runs, which is a write of its own a reader of this
+		// line is owed.
+		if k.class != readOnly && !staleExempt[name] {
+			safety += " Before it runs, it regenerates a generated agent-instruction block an older drover wrote, as agents --write does, and names the file."
+		}
+		c.Long = strings.TrimRight(c.Long, "\n") + "\n\n" + wrap(safety, 78)
 		if k.who == operator {
 			c.Long += "\n\n" + wrap(fmt.Sprintf(
 				"Actor: operator. Refuses inside a session drover launched, because %s. "+
