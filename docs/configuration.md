@@ -168,7 +168,12 @@ Nothing was run. Bring them level, or pass -I (--ignore-stale) to run drover sta
 
 `drover config --stamp` writes `drover_version` as this binary's release and changes no other line. Run `--diff` first: the stamp says you read what it printed. A patch release never makes a config stale, a build carrying no release version (a plain `go build`) never judges the stamp, and `drover init` writes the stamp into a new config.
 
-The same refusal covers the generated agent instructions. Any root-level markdown file carrying the `drover agents` block is compared, as text, against what this binary renders from this config, and a difference is named with the `drover agents --write <file>` that brings it level. So the block goes stale when the binary moves and when the config does.
+The generated agent instructions are compared too, and what happens depends on which binary wrote them. Any root-level markdown file carrying the `drover agents` block is compared, as text, against what this binary renders from this config, so the block goes stale when the binary moves and when the config does. Its header names the version and commit of the binary that rendered it, and a block with no such stamp reads as older than any binary:
+
+- **Older**, or the same binary with a moved config or addendum: a command that writes (`localWrite` or `outward` in its `Safety:` line) regenerates the block first, as `drover agents --write <file>` does, prints the line naming the file, and runs. A read-only command prints one warning on stderr, changes nothing, and runs.
+- **Newer**: a command that writes refuses (exit 3) and names installing the newer binary, since regenerating would hand agents the older surface. A read-only command warns and runs.
+
+A build carrying no version of its own cannot place a stamped block, and treats it as newer, naming both remedies. A stale config, a policy change and broken markers refuse every command as before.
 
 `agents`, `config`, `init`, `init --user`, `schema`, `version`, `help`, `projects` and shell completion never refuse, because they are how a project gets level or they answer without one. Neither does anything inside a session drover launched: the operator decided when they started it, and an agent's `drover audit` refused halfway through a review would lose the review. `-I` (`--ignore-stale`) runs any other command anyway, once.
 

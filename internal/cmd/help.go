@@ -508,8 +508,14 @@ func expand(c *cobra.Command, vars map[string]string) {
 		name = p.Name()
 	}
 	if k, ok := classified[name]; ok {
-		c.Long = strings.TrimRight(c.Long, "\n") + "\n\n" +
-			wrap(fmt.Sprintf("Safety: %s. %s", k.class, substitute(k.effect, vars)), 78)
+		safety := fmt.Sprintf("Safety: %s. %s", k.class, substitute(k.effect, vars))
+		// Every writing command that the stale check reaches repairs an older
+		// block before it runs, which is a write of its own a reader of this
+		// line is owed.
+		if k.class != readOnly && !staleExempt[name] {
+			safety += " Before it runs, it regenerates a generated agent-instruction block an older drover wrote, as agents --write does, and names the file."
+		}
+		c.Long = strings.TrimRight(c.Long, "\n") + "\n\n" + wrap(safety, 78)
 		if k.who == operator {
 			c.Long += "\n\n" + wrap(fmt.Sprintf(
 				"Actor: operator. Refuses inside a session drover launched, because %s. "+
