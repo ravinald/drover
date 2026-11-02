@@ -106,7 +106,7 @@ var classified = map[string]classification{
 	"init": {group: groupSetup, class: localWrite, who: either,
 		effect: "Writes .drover.toml and the directories it names, in the working directory, and in a git work tree appends .drover/ to .gitignore unless a line there already names it or the marker. Refuses if one is already there. --user writes the per-user config under $XDG_CONFIG_HOME/drover, or ~/.config/drover, instead, refuses if one is already there, and touches no project. init supervise appends a [supervise] table to .drover.toml when it has none, and otherwise prints one."},
 	"projects": {group: groupSetup, class: readOnly, who: either,
-		effect: "Reads the per-user registry beside the global config. Needs no project."},
+		effect: "Reads the per-user registry beside the global config. Needs no project. --forget and --prune append tombstone rows to that registry and delete nothing; --prune --dry-run reads only."},
 	"schema": {group: groupSetup, class: readOnly, who: either,
 		effect: "Prints to stdout. Needs no project, so it answers in a tree with no config; --frontmatter is the exception and reads the project's own."},
 	"agents": {group: groupSetup, class: readOnly, who: either,
@@ -233,7 +233,7 @@ var classified = map[string]classification{
 var escalations = map[safety][]string{
 	readOnly:   {"run --dry-run", "intake --list", "usage --dry-run", "accept --dry-run"},
 	outward:    {"drive --detach", "drive --stop"},
-	localWrite: {"report --save", "agents --write", "config --stamp", "skills --from", "skills --prune", "status -o", "status --render"},
+	localWrite: {"report --save", "agents --write", "config --stamp", "skills --from", "skills --prune", "status -o", "status --render", "projects --prune"},
 }
 
 // label is how a class is named to a reader deciding whether to call something.
