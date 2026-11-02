@@ -388,6 +388,8 @@ func TestB113ReviewSupervisorPreflight(t *testing.T) {
 // asked, and logs every call to the file it returns.
 func supervisorBeforeMerge(t *testing.T, after func(dir, branch string)) (dir, reviewed, log string) {
 	t.Helper()
+	// The stub merge commits, and a runner with no git identity refuses to.
+	identify(t)
 	dir, reviewed, head := reviewedThenMoved(t, noProject+permissiveTable, after)
 	git(t, dir, "reset", "-q", "--hard", "HEAD^")
 	branch := ""
