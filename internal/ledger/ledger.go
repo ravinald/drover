@@ -189,13 +189,13 @@ type Row struct {
 	// is what makes it this shape. It is the only drive outcome the ledger
 	// keeps, because "parked" is what status would otherwise print as ran, and
 	// the operator reading that has to open session logs to learn the cause.
-	Park   string `json:"park,omitempty"`
+	Park string `json:"park,omitempty"`
 	// Live is one live check run against a branch head: which check, the head
 	// it ran on, its exit code and the first line of its output. A result
 	// counts only for the head it names, so a later commit needs a new run.
-	Live *LiveRun `json:"live,omitempty"`
-	Detail string `json:"detail,omitempty"`
-	Log    string `json:"log,omitempty"`
+	Live   *LiveRun `json:"live,omitempty"`
+	Detail string   `json:"detail,omitempty"`
+	Log    string   `json:"log,omitempty"`
 	// Body is a 12-hex digest of the item file's exact bytes, frontmatter
 	// included. It is evidence of what the body held when drover last had a hand
 	// in it: the review stage row carries the body as the session launched, and
