@@ -654,7 +654,35 @@ post_finish_check = "auto"
 
 Exit 0 appends a ledger row `{"id","post_finish","date"}` carrying the first line of what the command printed. Any other exit, including a binary that is not on `PATH`, files a follow-up owned by the item in the project's [follow-up list](#register) with the command's last 40 lines in its body, and emits `needs_operator` for `post_finish_check`, which reaches each [`[notify]`](#notify) destination routing it. Neither undoes the merge or changes `finish`'s exit status. Nothing bounds how long it runs, as nothing bounds `[drive] merge_gate`.
 
-`post_check` is executed, like `merge_gate` and `worktree_setup`: see the paragraph closing [`[drive]`](#drive). A first element that is empty is a load error.
+`post_check` is executed, like `merge_gate` and `worktree_setup`: see the paragraph closing [`[drive]`](#drive). A first element that is empty is a load error. It does not run for an item that names a [live check](#live): that item was checked against a real client before it merged, and a failure there went back to its branch.
+
+## `[live]`
+
+A headless session cannot reach the hosts a real client runs on, so an item's numbered requirements close over unit tests and the verify command, and the check that exercises the change for real used to run, at best, as `post_check` after the merge. A live check runs it before the merge instead, where a failure goes back to the item that caused it.
+
+| Key       | Meaning                                                                                                                   |
+| --------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `default` | The check an item runs when it sets no `live` key. Unset, an item with no key runs none.                                  |
+| `wait`    | How long a check waits for another holding its lock before the item parks `live_busy`, as a duration. Default `30m`.      |
+| _name_    | A `[live.<name>]` table: one check, with `argv` (required, run from the project root) and `lock` (optional, a lock name). |
+
+```toml
+[live]
+default = "dnf"
+
+[live.dnf]
+argv = ["scripts/live-dnf.sh"]
+lock = "test-guests"
+
+[frontmatter]
+optional = ["live"]   # so an item can name another check, or live: none
+```
+
+`drover drive` runs an item's check after its review passes and before [`[drive] merge_gate`](#drive), in the stage that serializes the steps touching the trunk. drover runs the argv itself, never a session, with `DROVER_ITEM`, `DROVER_BRANCH` and `DROVER_SHA` (the branch head) set. Exit `0` lets the merge proceed. Exit `4` says the environment is unavailable, hosts down or credentials expired: the item parks `live_unavailable` for the operator with the output, and nothing goes back. Any other exit sends the output back to the branch through `request-changes`, under a heading naming the check, and counts against [`[review] max_review_rounds`](#review).
+
+Two checks naming one `lock` never run at once on this host, across drives and projects: the lock is a file under `$XDG_STATE_HOME/drover/locks/`, held for the run. An item's `live` key, declared in [`[frontmatter]`](#frontmatter), names another check or `none` to opt out of `default`. A name no `[live.<name>]` table declares refuses the run rather than merging unchecked, and `default` naming one is a load error.
+
+Each run appends one ledger row, `{"id","live":{"check","head","exit","line"},"date"}`, and `drover live <id>` runs the same check by hand on the branch head and records the same row. `drover open-pr` and a supervisor's `drover finish` refuse a head whose item names a check with no passing row on that head.
 
 ## `[numbered_files]`
 

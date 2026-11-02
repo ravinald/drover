@@ -195,6 +195,10 @@ var classified = map[string]classification{
 		effect: "Appends one disposition row to {ledger}, for one issue the item's closes key names. --link widens that key first, reading the tracker the way link does and recording the body digest link records. Writes to no tracker: finish applies what this records." + linkRead},
 
 	// Landing
+	"live": {group: groupRun, class: outward, who: operator,
+		because: "it runs a check against real hosts, which no session drover launched may reach",
+		effect:  "Runs the [live] check the item names, or [live] default, from the project root against the head its branch points at, holding the check's lock under $XDG_STATE_HOME/drover/locks for the run, and appends one row to {ledger} naming the check, the head, the exit code and the first line of output. Exits as the check did.",
+		reach:   "runs a live check against real hosts"},
 	"open-pr": {group: groupFinish, class: outward, who: operator,
 		because: "an open pull request is the claim that a branch may merge, and no session makes that claim about its own work",
 		effect:  "Runs [drive] merge_gate, reads the recorded review pass from {ledger}, and opens one pull request at the forge through gh when both passed. Opens none for a branch that came back or parked, reports the one already open rather than a second, and closes no issue: the body references what the closes key names and finish acts on the dispositions. Appends one row to {ledger} naming the pull request it opened or found, unless the latest one already does." + linkRead,

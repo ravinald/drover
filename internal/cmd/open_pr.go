@@ -329,6 +329,15 @@ history of one contract across two places.`,
 		if err := s.reviewPassed(it); err != nil {
 			return err
 		}
+		if !openPRForce {
+			head, err := revParse(s.cfg.Root, branch)
+			if err != nil {
+				return err
+			}
+			if err := s.liveGate(it, head); err != nil {
+				return err
+			}
+		}
 		// Before the gate, because the gate asks the forge about a commit and the
 		// forge only knows what has been pushed. Without this a manual proposal
 		// either strands its work, or passes a local gate while the pull request

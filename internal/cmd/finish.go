@@ -145,6 +145,15 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 			if err := s.supervisorMayFinishDenied(id); err != nil {
 				return err
 			}
+			// The supervisor merged at the forge before this runs, so this is the
+			// last place its merge can be refused for a head no live check passed.
+			if ref := s.branchRef(it); ref != "" {
+				if head, err := revParse(s.cfg.Root, ref); err == nil {
+					if err := s.liveGate(it, head); err != nil {
+						return err
+					}
+				}
+			}
 		}
 		trunk := s.trunk()
 
@@ -865,6 +874,12 @@ func (s *session) finishUnlinked(it backlog.Item, owned []gh.Issue) {
 func (s *session) postFinish(it backlog.Item, trunk string) {
 	argv := s.cfg.Finish.After
 	if len(argv) == 0 {
+		return
+	}
+	// An item that names a live check was checked against a real client before
+	// it merged, and a failure there went back to it; the post-merge check is
+	// for the items that had none.
+	if name, _, err := s.liveCheckFor(it); err == nil && name != "" {
 		return
 	}
 	id := it.ID.Bare()

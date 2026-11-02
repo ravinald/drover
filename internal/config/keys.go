@@ -93,6 +93,7 @@ var resolved = map[string]string{
 // still sits in Default, because Keys answers what the struct holds; a report
 // that prints one of these prints it commented.
 var unset = map[string]string{
+	"live":                "no live check",
 	"usage.weekly_budget": "no budget",
 	"t3.url":              "no T3 Code server",
 	"t3.project":          "the drover project's own name",

@@ -391,6 +391,41 @@
         }
       }
     },
+    "live": {
+      "type": "object",
+      "description": "Checks drive runs against a branch head after its review passes and before [drive] merge_gate, for what a headless session cannot reach: a real client, a live host. Exit 0 lets the merge proceed, 4 parks the item live_unavailable, anything else sends the output back to the branch.",
+      "properties": {
+        "default": {
+          "type": "string",
+          "description": "The check an item that sets no live key runs. An item opts out with live: none."
+        },
+        "wait": {
+          "type": "string",
+          "default": "30m",
+          "pattern": "^[0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h)([0-9]+(\\.[0-9]+)?(ns|us|ms|s|m|h))*$",
+          "description": "How long a check waits for another holding its lock before the item parks live_busy."
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["argv"],
+        "description": "[live.<name>]: one check, named the way a [verify] command is.",
+        "properties": {
+          "argv": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "description": "Run from the project root with DROVER_ITEM, DROVER_BRANCH and DROVER_SHA (the branch head) in its environment."
+          },
+          "lock": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "description": "Two checks naming the same lock never run at once on this host, across drives and projects."
+          }
+        }
+      }
+    },
     "finish": {
       "type": "object",
       "additionalProperties": false,
