@@ -188,7 +188,7 @@ drover check
 
 Exit 0 clean, exit 2 on findings, exit 1 if it could not run the validation at all. Put it in CI; run it after any rename.
 
-Findings are `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BRIDGE SIGNED OUT`, `BRIDGE UNREACHABLE`, `BRIDGE VERSION`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `SUPERVISOR UNSET`, `BAD TEMPLATE`, `WHOLE TEMPLATE`, `STALE OVERRIDE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `SESSION MARKER`, `PLACEHOLDER`, `HOLD MARKER`, `LIVE REQUIREMENT`, `BROAD CITATION` and `HAND EDITED`. [Concepts](concepts.md#validation) says what each means.
+Findings are `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BRIDGE SIGNED OUT`, `BRIDGE UNREACHABLE`, `BRIDGE VERSION`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `SUPERVISOR UNSET`, `BAD TEMPLATE`, `WHOLE TEMPLATE`, `STALE OVERRIDE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `SESSION MARKER`, `PLACEHOLDER`, `HOLD MARKER`, `LIVE REQUIREMENT`, `BROAD CITATION`, `HAND EDITED` and `UNREVIEWED MERGE`. [Concepts](concepts.md#validation) says what each means.
 
 Then see where the item sits:
 
@@ -621,6 +621,25 @@ drover finish 2
 ```
 
 An issue nobody judged is named and skipped, never guessed at. The applied rows make a second `finish` a no-op, and a tracker that cannot be reached costs the tracker write rather than the finish. `drover check` reports `NO DISPOSITION` for anything still unanswered after the merge. The full model, and why the pull request's own `Closes #N` keywords are not enough, is in [issue dispositions](concepts.md#issue-dispositions).
+
+### Commits merged after the last review
+
+A review pass row names the branch head the review read, and `finish` compares it with the head the merged pull request carried. Every commit between the two is one no review read, typically a fix made by hand after a drive parked the item and merged through `gh`. `finish` still records the merge, lists those commits, and writes both heads and the list onto the completion row:
+
+```text
+drover finish 7
+  ✓ feat/7-retry is merged (PR #41)
+  ! 1 commit merged after the last passing review read 3f2a9c1d0b7e, and no review read it:
+      cd8e813 fix the retry bound
+      drover check reports UNREVIEWED MERGE until drover review 7 reads 9b1e44a20c3d and an audit names it:
+      drover audit 7 reviewed --head 9b1e44a20c3d5f6a7b8c9d0e1f2a3b4c5d6e7f80 --code-by <who> [--reviewer <name>] "<what you read>"
+```
+
+A merge from the trunk and a commit whose subject opens with `review:` are left out: the first is the trunk's code, the second the reviewer's own. A merge counts as the trunk's when every commit it brought in lies on the trunk's first-parent history, here or at origin. Any other merge is listed itself, since a merge can carry a change of its own, and a side branch merged into the item keeps its commits on the list. The baseline is the latest review that passed by the reading `open-pr` applies: a pass row reading `passed`, or a review with no request for changes, no sent-back block standing, and an audit at `reviewed` or `verified` that names a head. For the latest review the block is read from the item file as `open-pr` reads it; for an earlier one the ledger answers, and a request for changes stands until `close-changes` or a passing drive review clears it. A review that sent work back leaves the earlier passing head standing, whatever level its audit recorded. `drover check` reports `UNREVIEWED MERGE` for the item, and `drover unaudited` lists it with the commits, until an audit at `reviewed` or `verified` names the merged head with `--head`. A `claimed` audit does not clear it, being the author's word. An item finished before pass rows named a head carries none and is never reported.
+
+The same comparison runs before the merge. `open-pr` refuses a branch holding such commits, naming them and `drover review <id>`, and `--force` opens it anyway and prints what it waved through. Under `merge_drive_pr` a supervising session merges by running `finish`, which compares the head of the pull request the forge holds open before it merges anything, refuses one holding such commits with the same list and `drover review <id>`, and otherwise merges it bound to that head with `--match-head-commit`. The policy covers what drive's review read and nothing more.
+
+A completion `mark-merged` wrote carries no heads. A `finish` after it appends one row holding the merged head, the reviewed head and the commits between them, which `check` reads as it reads a completion row's own, and a second `finish` adds nothing. A comparison `finish` could not make, a head no clone or forge can supply being the usual cause, prints why and records nothing, so `check` stays silent on that item rather than reporting it clean.
 
 ### What finish says about the follow-up list
 
