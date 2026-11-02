@@ -60,6 +60,7 @@ type Config struct {
 	Git         Git                    `toml:"git"`
 	Loop        Loop                   `toml:"drive"`
 	Finish      Finish                 `toml:"finish"`
+	Live        Live                   `toml:"live"`
 	Sequences   map[string]string      `toml:"numbered_files"`
 	GitHub      GitHub                 `toml:"github"`
 	Forge       Forge                  `toml:"forge"`
@@ -1515,6 +1516,9 @@ func (c *Config) validate(path string) error {
 		return fmt.Errorf("%s: drive.max_load is %g: give a load average above 0, or leave it unset for the CPU count", path, c.Loop.MaxLoad)
 	}
 	if err := c.validateForge(path); err != nil {
+		return err
+	}
+	if err := c.validateLive(path); err != nil {
 		return err
 	}
 	if err := c.validateUsage(path); err != nil {

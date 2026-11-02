@@ -4290,6 +4290,9 @@ func (s *session) driveFinish(ctx context.Context, it backlog.Item, d *DriveItem
 	if out, stop := s.sequenceHold(it, d, park, trunk); stop {
 		return out
 	}
+	if out, stop := s.driveLive(ctx, it, d, park); stop {
+		return out
+	}
 	var checks settled
 	if len(s.cfg.Loop.MergeGate) > 0 {
 		head, err := revParse(s.cfg.Root, d.Branch)

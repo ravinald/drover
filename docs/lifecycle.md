@@ -468,6 +468,8 @@ drover signoff F5 6 "ssh dev-guest-1 'systemctl is-active webapp' printed active
 
 ### A check after finish
 
+Between the review and the merge, an item whose project declares a [live check](configuration.md#live) runs it against its branch head: exit `0` goes on to the merge gate, `4` parks the item `live_unavailable` for the operator, and anything else sends the output back to the branch as a finding. `drover live <id>` runs it by hand, and `open-pr` refuses a head no run of it passed on.
+
 `[finish] post_check` is an argv run after every finish, by `drover finish` or by a drive finishing what it merged, while [`[supervise] post_finish_check`](configuration.md#supervise) is above `off` (its default). It runs from the project root with `DROVER_ITEM`, `DROVER_PR` (empty where no pull request was recorded) and `DROVER_SHA` (origin's trunk after the merge) in its environment. This is where a project puts a check somebody would otherwise run by hand: `ssh dev ... psql` against `schema_migrations`, or build, deploy and exercise on a dev server.
 
 | Exit     | drover does                                                                                                    |

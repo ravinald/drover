@@ -43,6 +43,10 @@ const (
 	// [run] runner_key: a project chooses which kinds exist through [ids]
 	// namespaces, never what the key naming one is called.
 	KeyKind = "kind"
+	// KeyLive names the [live] check an item runs before its merge, or none.
+	// A project declares it in [frontmatter] to let an item choose; without
+	// it every item runs [live] default.
+	KeyLive = "live"
 )
 
 // ReadKeys is that set, for the generated defaults to be checked against. A

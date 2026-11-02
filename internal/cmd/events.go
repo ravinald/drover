@@ -72,6 +72,7 @@ const (
 	stagePR      = "pr"
 	stageMerge   = "merge"
 	stageFinish  = "finish"
+	stageLive    = "live"
 )
 
 // DriveEvent is one line of `drive --events`. Event is always set, which is how

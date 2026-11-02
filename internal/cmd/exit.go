@@ -38,10 +38,23 @@ type Findings struct{ Err error }
 func (f Findings) Error() string { return f.Err.Error() }
 func (f Findings) Unwrap() error { return f.Err }
 
+// ExitWith is an error carrying a code of its own, for a command whose exit is
+// another program's: drover live exits as the check it ran did.
+type ExitWith struct {
+	Code int
+	Err  error
+}
+
+func (e ExitWith) Error() string { return e.Err.Error() }
+func (e ExitWith) Unwrap() error { return e.Err }
+
 // Code maps an error from Execute to the process exit code.
 func Code(err error) int {
 	if err == nil {
 		return 0
+	}
+	if e, ok := errors.AsType[ExitWith](err); ok {
+		return e.Code
 	}
 	if _, ok := errors.AsType[Findings](err); ok {
 		return ExitFindings

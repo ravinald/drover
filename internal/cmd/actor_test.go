@@ -21,7 +21,7 @@ import (
 // wrote the branch is the one actor who cannot make it.
 // amend and touch seal for accept's reason: each changes or vouches for an
 // accepted contract, which is what a session is measured against.
-var sealedSet = []string{"accept", "unaccept", "signoff", "intake", "finish", "mark-merged", "unmark-merged", "drive", "open-pr", "supervise", "amend", "touch", "fold"}
+var sealedSet = []string{"accept", "unaccept", "signoff", "intake", "finish", "mark-merged", "unmark-merged", "drive", "open-pr", "supervise", "amend", "touch", "fold", "live"}
 
 // Deliberately open, each for a reason recorded in actor.go. `audit` is the one
 // that matters: a review session is legitimately independent of the session that

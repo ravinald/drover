@@ -181,6 +181,9 @@ type Show struct {
 	// means no drive recorded one.
 	Pass      string `json:"review_result,omitempty"`
 	PassStale bool   `json:"review_result_stale,omitempty"`
+	// Live is the latest live check result, stale when it ran on a head the
+	// branch has since moved past.
+	Live *LiveReport `json:"live,omitempty"`
 	// Parked is the drive park standing on the item, as status reads it:
 	// absent once anything launched the item again.
 	Parked *ShowPark `json:"parked,omitempty"`
@@ -410,6 +413,7 @@ the same text as body.`,
 		sh.Capped = sh.MaxReviewRounds > 0 && sh.Rounds >= sh.MaxReviewRounds
 		sh.VerifySendBacks, sh.ConflictSendBacks, sh.NumberedSendBacks = c.VerifySendBacks, c.ConflictSendBacks, c.NumberedSendBacks
 		sh.Pass, _, sh.PassStale, _ = s.ledger.Pass(id)
+		sh.Live = s.liveReport(it)
 		if pk, ok := s.ledger.Parked(id); ok {
 			sh.Parked = &ShowPark{Park: pk.Park, Detail: pk.Detail, Evidence: pk.Evidence, Log: pk.Log, Date: pk.Date}
 		}

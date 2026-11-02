@@ -71,6 +71,9 @@ type Row struct {
 	// `open-pr` reads the ledger instead and says so.
 	Pass      string `json:"review_result,omitempty"`
 	PassStale bool   `json:"review_result_stale,omitempty"`
+	// Live is the latest live check result, stale when it ran on a head the
+	// branch has since moved past.
+	Live *LiveReport `json:"live,omitempty"`
 	// Park and Detail are the drive park standing on the item: the cause and
 	// why the session or push under it failed. Absent once anything launched
 	// the item again, so a present park is the reason a ran item is waiting.
@@ -744,6 +747,7 @@ func (s *session) rows() []Row {
 			Capped:      s.cfg.Review.MaxReviewRounds > 0 && c.ChangesRequested >= s.cfg.Review.MaxReviewRounds,
 			Pass:        pass,
 			PassStale:   stale,
+			Live:        s.liveReport(it),
 			Implementer: st.Implementer,
 			Reviewer:    st.Reviewer,
 			Planned:     it.ID.Planned(),

@@ -147,6 +147,20 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 			if err := s.supervisorMayFinishDenied(id); err != nil {
 				return err
 			}
+			// The live check is a claim about the head that merges, so it is asked
+			// of the head this finish is about to merge, or of the branch head a
+			// merge already took.
+			head := open
+			if head == "" {
+				if ref := s.branchRef(it); ref != "" {
+					head, _ = revParse(s.cfg.Root, ref)
+				}
+			}
+			if head != "" {
+				if err := s.liveGate(it, head); err != nil {
+					return err
+				}
+			}
 			// The merge is finish's under a supervisor, so the comparison above
 			// refuses before anything merges, and --match-head-commit binds the
 			// merge to the head it compared. Drive's reconciliation records what
@@ -1168,6 +1182,12 @@ func (s *session) finishUnlinked(it backlog.Item, owned []gh.Issue) {
 func (s *session) postFinish(it backlog.Item, trunk string) {
 	argv := s.cfg.Finish.After
 	if len(argv) == 0 {
+		return
+	}
+	// An item that names a live check was checked against a real client before
+	// it merged, and a failure there went back to it; the post-merge check is
+	// for the items that had none.
+	if name, _, err := s.liveCheckFor(it); err == nil && name != "" {
 		return
 	}
 	id := it.ID.Bare()

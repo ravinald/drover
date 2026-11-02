@@ -208,9 +208,13 @@ type Row struct {
 	// is what makes it this shape. It is the only drive outcome the ledger
 	// keeps, because "parked" is what status would otherwise print as ran, and
 	// the operator reading that has to open session logs to learn the cause.
-	Park   string `json:"park,omitempty"`
-	Detail string `json:"detail,omitempty"`
-	Log    string `json:"log,omitempty"`
+	Park string `json:"park,omitempty"`
+	// Live is one live check run against a branch head: which check, the head
+	// it ran on, its exit code and the first line of its output. A result
+	// counts only for the head it names, so a later commit needs a new run.
+	Live   *LiveRun `json:"live,omitempty"`
+	Detail string   `json:"detail,omitempty"`
+	Log    string   `json:"log,omitempty"`
 	// Body is a 12-hex digest of the item file's exact bytes, frontmatter
 	// included. It is evidence of what the body held when drover last had a hand
 	// in it: the review stage row carries the body as the session launched, and
@@ -835,6 +839,7 @@ const (
 	ChangesVerify        = "verify"         // drive, on a verify command or merge gate the branch failed
 	ChangesTrunkConflict = "trunk_conflict" // drive, on a trunk merge that conflicted and a session resolves
 	ChangesNumberedFiles = "numbered_files" // drive, on [numbered_files] the branch clashes with or sorts below
+	ChangesLive          = "live"           // drive, on a live check the branch failed; a review round, since it is a finding about the work
 )
 
 // Where a usage row's counts were read from.
@@ -1142,7 +1147,7 @@ func (l *Ledger) Counts(id string) Counts {
 			c.ConflictSendBacks++
 		case r.ChangesSource == ChangesNumberedFiles:
 			c.NumberedSendBacks++
-		case r.ChangesSource == "", r.ChangesSource == ChangesReview:
+		case r.ChangesSource == "", r.ChangesSource == ChangesReview, r.ChangesSource == ChangesLive:
 			c.ChangesRequested++
 			c.RepeatedChanges = last != "" && r.Changes == last
 			c.StillOpenReqs = shared(prevStillOpen, r.StillOpen)
@@ -1624,3 +1629,41 @@ func (r Row) At() (time.Time, bool) {
 
 // Today is the date stamp rows carry.
 func Today() string { return time.Now().Format("2006-01-02") }
+
+// LiveRun is a live check's result on one head.
+type LiveRun struct {
+	Check string `json:"check"`
+	Head  string `json:"head"`
+	Exit  int    `json:"exit"`
+	Line  string `json:"line,omitempty"`
+}
+
+// LatestLive is the newest live row for id, nil when none was recorded.
+func (l *Ledger) LatestLive(id string) *LiveRun {
+	var last *LiveRun
+	for _, r := range l.Rows {
+		if r.ID == id && r.Live != nil {
+			last = r.Live
+		}
+	}
+	return last
+}
+
+// LivePassed reports whether check exited 0 on head for id, by any row.
+func (l *Ledger) LivePassed(id, check, head string) bool {
+	for _, r := range l.Rows {
+		if r.ID == id && r.Live != nil && r.Live.Check == check && r.Live.Exit == 0 && sameHead(r.Live.Head, head) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameHead reports whether a and b name one commit, either abbreviated to git's
+// shortest default of seven digits or more.
+func sameHead(a, b string) bool {
+	if len(a) < 7 || len(b) < 7 {
+		return false
+	}
+	return strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
+}
