@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -381,17 +382,23 @@ history of one contract across two places.`,
 // reading of that later review. Any other stale pass still refuses: nothing has
 // reviewed the branch since, so there is no later review to read.
 func (s *session) reviewPassed(it backlog.Item) error {
-	id := it.ID.Bare()
-	if findings, ok := s.capRefusalStands(id); ok {
-		return Refusal{fmt.Errorf(
-			"the latest review of %s wanted to send work back at [review] max_review_rounds, and the cap refused it: "+
-				"the findings in %s are this item's own and nothing has answered them.\n"+
-				"Decide them first: %s",
-			id, keptFindings(findings), capDecisionNext(id, findings))}
+	if err := s.capRefused(it.ID.Bare()); err != nil {
+		return err
 	}
 	if openPRForce {
 		fmt.Fprintln(errOut, "--force: opening on your judgement, with neither the review_result row nor the merge gate consulted")
 		return nil
+	}
+	return s.reviewPassedTo(errOut, it)
+}
+
+// reviewPassedTo is reviewPassed with no --force, printing whatever the
+// reading has to say to w. drive asks it of a parked item with w discarding,
+// because there it decides where the item resumes rather than refusing.
+func (s *session) reviewPassedTo(w io.Writer, it backlog.Item) error {
+	id := it.ID.Bare()
+	if err := s.capRefused(id); err != nil {
+		return err
 	}
 	// lead names the authority in the fallback's own sentences. aside is empty
 	// unless a drive did speak, and then it opens everything the fallback prints,
@@ -405,7 +412,7 @@ func (s *session) reviewPassed(it backlog.Item) error {
 	// as anything short of passed refuses the branch close-changes just told
 	// the operator open-pr would open.
 	if ok && !stale && token == passStanding && s.ledger.ClearedSincePass(id) {
-		fmt.Fprintf(errOut, "%s: the drive pass read %q on %s, and drover close-changes has discharged the block since; reading it as %q\n",
+		fmt.Fprintf(w, "%s: the drive pass read %q on %s, and drover close-changes has discharged the block since; reading it as %q\n",
 			id, token, date, passPassed)
 		token = passPassed
 	}
@@ -422,7 +429,7 @@ func (s *session) reviewPassed(it backlog.Item) error {
 	case ok:
 		defer func() {
 			if !stale && token == passPassed {
-				fmt.Fprintf(errOut, "%s: a recorded drive pass answered: %s on %s\n", id, token, date)
+				fmt.Fprintf(w, "%s: a recorded drive pass answered: %s on %s\n", id, token, date)
 			}
 		}()
 		switch {
@@ -512,7 +519,7 @@ func (s *session) reviewPassed(it backlog.Item) error {
 				"Send them back with `drover request-changes %s -f <file>`, or --force if the change was not a finding",
 			lead, c.LastBody, passEdited, id)
 	}
-	fmt.Fprintf(errOut,
+	fmt.Fprintf(w,
 		"%s%s; the ledger answered: audit %s --code-by %s, %d changes requested.\n"+
 			"That reading cannot see a review session that died, only what it wrote down.\n",
 		aside, lead, st.Level, st.CodeBy, c.ChangesRequested)
@@ -623,4 +630,20 @@ func openPRLine() string {
 		return "open a pull request for what the merge gate passes, and merge none of them"
 	}
 	return "open a pull request for what the merge gate passes, then ask the forge to merge it"
+}
+
+// capRefused is the refusal for an item whose latest review wanted to send work
+// back at [review] max_review_rounds and was refused: its findings are its own
+// and nothing has answered them. It outranks --force, and drive's merge-path
+// resume asks it too, so neither door opens past findings the cap kept.
+func (s *session) capRefused(id string) error {
+	findings, ok := s.capRefusalStands(id)
+	if !ok {
+		return nil
+	}
+	return Refusal{fmt.Errorf(
+		"the latest review of %s wanted to send work back at [review] max_review_rounds, and the cap refused it: "+
+			"the findings in %s are this item's own and nothing has answered them.\n"+
+			"Decide them first: %s",
+		id, keptFindings(findings), capDecisionNext(id, findings))}
 }

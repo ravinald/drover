@@ -60,6 +60,9 @@ type session struct {
 	// the round in hand, nil when the round started clean. The round's prompt,
 	// its implement stage row and its review all read it.
 	conflict *prompts.Conflict
+	// mergeResuming is true while a merge-path resume runs driveFinish, the one
+	// stretch where a catch-up conflict goes to resolve_conflict instead of a park.
+	mergeResuming bool
 }
 
 // location is the zone status reports times in.

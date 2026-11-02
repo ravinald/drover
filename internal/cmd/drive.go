@@ -550,6 +550,10 @@ type DriveItem struct {
 	// handed is a park whose hand-off drive already emitted, carrying where to
 	// work, so the item's own parked event does not emit a second, emptier one.
 	handed bool
+	// reroute is a merge-path resume whose catch-up conflicted where the probe
+	// before it saw a clean merge: the trunk moved between the two. The resume
+	// takes it to resolve_conflict rather than parking it with nobody named.
+	reroute bool
 	// requeue is the boundary a quota-refused launch sends the item back to,
 	// at the head of the queue, and refusal the hold that refusal takes. With
 	// no refusal it is the implement stage a send-back of drive's own returns
@@ -674,6 +678,15 @@ branch parks push_failed (push_hook) for the operator: drover never pushes with
 --review-only <id> skips that item's implement run and reviews its branch as it
 stands, then runs the merge gate, opens the pull request and merges it as a
 clean pass would. It is how a lost review is rerun by hand.
+
+A parked item whose latest review passed after the park, read the way open-pr
+reads it (an audit, no request for changes, no sent-back block standing in the
+body), re-enters at the merge path rather than at its implement run: catch-up
+with the trunk, the verify command on a merged tree, the merge gate, the pull
+request, the merge and the finish, with no session launched. A catch-up that
+would conflict goes to [supervise] resolve_conflict, with the worktree kept. Any
+other latest review, a request for changes or a needs_decision with no amend
+since, drives as before. --dry-run names the review an item resumes from.
 
 --dry-run resolves the same queue under the same merge gate, so an item it
 reports as skipped is one the run skips and the count is what the run would
@@ -2163,12 +2176,36 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 	if land {
 		return s.inTrunkStage(it, func() DriveItem { return s.driveFinish(ctx, it, &d, park, deadline) }, park)
 	}
+	// resolving is a merge-path resume whose catch-up left a conflict for the
+	// first round's session, which that round must not catch up over again.
+	resolving := false
+	if from := s.mergeResume(it); from != "" && s.resumeAt == nil && !reviewOnly {
+		fmt.Fprintf(errOut, "  · %s: resuming at the merge path from %s\n", d.ID, from)
+		if out, stop := s.resumeConflict(&d, park); stop {
+			return out
+		}
+		if s.conflict != nil {
+			resolving = true
+		} else if out, again, stop := regated(adopt(stageCatchUp)); stop {
+			return out
+		} else if !again {
+			s.mergeResuming = true
+			out := s.inTrunkStage(it, func() DriveItem { return s.driveFinish(ctx, it, &d, park, deadline) }, park)
+			s.mergeResuming = false
+			if !out.reroute {
+				return out
+			}
+			return s.rerouteConflict(it, &d, park, out.Reason)
+		}
+	}
 	for {
 		if !reviewOnly {
 			adopt(ledger.StageImplement)
 		}
-		s.conflict = nil
-		if !reviewOnly || catchUpReview {
+		if !resolving {
+			s.conflict = nil
+		}
+		if (!reviewOnly || catchUpReview) && !resolving {
 			if out, stop := s.dispatchCatchUp(&d, park); stop {
 				return out
 			}
@@ -2178,7 +2215,7 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 				reviewOnly = false
 			}
 		}
-		catchUpReview = false
+		catchUpReview, resolving = false, false
 		banner := launchInfo{
 			ID: d.ID, Branch: d.Branch, Round: d.Rounds + 1,
 			Item: rel(s.cfg.Root, it.Path),
@@ -2286,6 +2323,77 @@ func (s *session) driveItem(ctx context.Context, it backlog.Item, reviewer strin
 			return park(v, passSentence(v, ledger.StageReview, rp, "the review", reviewer, oc.LogPath))
 		}
 	}
+}
+
+// mergeResume names the review an item resumes at the merge path from, or ""
+// when it starts at its implementing session as any other. A re-drive of a
+// parked item otherwise spends a run and a review on a branch a later review
+// already passed, and only open-pr would read that pass. It is read the way
+// open-pr reads it, so the two cannot disagree about what a review said.
+func (s *session) mergeResume(it backlog.Item) string {
+	if s.reviewPassedTo(io.Discard, it) != nil {
+		return ""
+	}
+	id := it.ID.Bare()
+	if token, date, stale, ok := s.ledger.Pass(id); ok && !stale {
+		return fmt.Sprintf("the drive's review pass of %s (%s)", date, token)
+	}
+	window, _ := s.sinceLastReview(id)
+	at := ledger.Row{}
+	for _, r := range s.ledger.Rows {
+		if r.ID == id && r.Stage == ledger.StageReview {
+			at = r
+		}
+	}
+	st := latestAudit(window)
+	return fmt.Sprintf("the review of %s by %s (audit %s --code-by %s, no changes requested)",
+		at.Date, blank(at.Runner), st.Level, blank(st.CodeBy))
+}
+
+// resumeConflict takes a merge-path resume's conflict with the trunk to
+// [supervise] resolve_conflict, as a conflict on an open drive pull request
+// goes: the catch-up after a review aborts a conflicted merge and parks with
+// nobody named to resolve it, and a resume has no session of its own that
+// could. merge-tree finds it without touching the worktree, so a branch that
+// merges cleanly reaches driveFinish's catch-up and its verify command
+// untouched. A git too old for merge-tree leaves the conflict to that catch-up.
+func (s *session) resumeConflict(d *DriveItem, park func(cause, why string) DriveItem) (DriveItem, bool) {
+	if !s.cfg.Git.On() {
+		return DriveItem{}, false
+	}
+	trunk := s.trunk()
+	release := s.holdTrunk()
+	if err := gitAt(s.cfg.Root, "fetch", "--quiet", "origin", trunk); err != nil {
+		fmt.Fprintf(errOut, "  · %s: %s not fetched, so the conflict check reads the last one fetched: %v\n", d.ID, trunk, err)
+	}
+	release()
+	if paths, _ := mergeConflicts(s.cfg.Root, "origin/"+trunk, d.Branch); len(paths) == 0 {
+		return DriveItem{}, false
+	}
+	return s.dispatchCatchUp(d, park)
+}
+
+// rerouteConflict takes a conflict driveFinish's own catch-up found on a
+// merge-path resume to resolve_conflict, which the probe before it could not,
+// because the trunk moved between the two. driveFinish ran inside the item's
+// turn at the trunk stage and that turn is spent, so a session cannot start
+// from here: at auto the item goes back to the head of the queue at its
+// implement stage, where the catch-up before that session meets the conflict
+// again and counts it under resolve_conflict's own budget and round limit.
+// Under any other policy, dispatchCatchUp holds the worktree and names who
+// resolves it.
+func (s *session) rerouteConflict(it backlog.Item, d *DriveItem, park func(cause, why string) DriveItem, why string) DriveItem {
+	d.reroute = false
+	if p, _ := s.cfg.Policy("resolve_conflict"); p == polAuto {
+		d.Outcome, d.Park = "", ""
+		d.Reason = why + "; its implementing session resolves it in this drive"
+		d.requeue = s.requeueAt(it, ledger.StageImplement)
+		return *d
+	}
+	if out, stop := s.dispatchCatchUp(d, park); stop {
+		return out
+	}
+	return park(parkTrunkConflict, why)
 }
 
 // reviewHead is the round --review-only and a lost review's rerun start at:
@@ -2800,6 +2908,10 @@ func (s *session) drivePlan(items []backlog.Item, reviewer string, named bool) e
 		impl := s.runnerFor(it, driveRunner)
 		fmt.Printf("%-6s %-9s branch %-46s run %s, review %s\n", it.ID.Bare(), state, branch, impl, reviewer)
 		fmt.Printf("%-6s %-9s %s\n", "", "", s.catchUpPlan(it))
+		if from := s.mergeResume(it); from != "" && reviewOnlyID != it.ID.Bare() {
+			fmt.Printf("%-6s %-9s resumes at the merge path from %s: no implement or review session; "+
+				"catch-up, verify, merge gate, pull request, merge, finish\n", "", "", from)
+		}
 		if p, _ := s.cfg.Policy("stale_citations"); p != polOff {
 			for _, d := range s.refDrift(it, s.driftRef()) {
 				fmt.Printf("%-6s %-9s stale_citations: %s\n", "", "", d)
@@ -5011,6 +5123,9 @@ func (s *session) routeCatchUp(it backlog.Item, d *DriveItem, park func(cause, w
 	case p == parkTrunkRed:
 		d.stop = errTrunkRed
 		return park(p, why), true
+	case p == parkTrunkConflict && s.mergeResuming:
+		d.reroute, d.Reason = true, why
+		return *d, true
 	case p == parkTrunkConflict:
 		d.setDetail(conflictDetail(s.cfg.Root, c.conflicts))
 		return park(p, why), true
