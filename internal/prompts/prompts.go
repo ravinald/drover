@@ -7,11 +7,8 @@
 package prompts
 
 import (
-	"bytes"
 	_ "embed"
-	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"sort"
 	"strconv"
@@ -176,6 +173,10 @@ type Resolution struct {
 	// again: re-judging a settled issue is where a correct answer gets
 	// overwritten and a later pass spends its turn putting it back.
 	Settled bool
+	// Amended is the date an amend replaced the requirements after this
+	// disposition was recorded. The answer rested on a contract that changed,
+	// so the brief asks for it again rather than handing it over.
+	Amended string
 }
 
 // Undisposed reports an issue no pass has judged yet. It is the reviewer's
@@ -331,8 +332,10 @@ type Destination struct {
 // where a finding goes: a run answers for what it changed, so a regression no
 // requirement names still has somewhere to go, and a pre-existing defect
 // standing between the run and a requirement cannot be somebody else's problem
-// when the contract cannot be discharged without touching it. What the defect
-// would break in use then says whether it is worth a run at all. Provenance
+// when the contract cannot be discharged without touching it. What a defect
+// outside the diff would break in use then says whether it is worth a run at
+// all; one inside it goes back when it would break something in use, and is
+// a note in the audit otherwise. Provenance
 // alone answers who caused a defect, which decides attribution and not whether
 // a pull request should stay open.
 //
@@ -353,8 +356,8 @@ var destinations = []Destination{{
 }, {
 	Token: "BRANCH-REGRESSION",
 	Where: "back to the branch",
-	Found: "A defect this branch's own diff introduced that would break something in use: a wrong answer, lost data, a silent failure, a command that stops working.",
-	Do:    "`git diff <trunk>...HEAD` is the boundary, not the numbered list, and both halves of that have to hold. A run answers for what it changed, so a regression nobody wrote a requirement for goes back the same way an unmet requirement does. One that would break nothing in use is `FIX-IN-REVIEW` when you can correct it here and `NEW-ITEM` when you cannot, because sending it back costs a run, a review of the diff that fix just widened, and the round after that. When you cannot tell which it is, it is this row. When the fix for it changes a contract no requirement names, the regression is still yours and the implementation is `SPLIT-OUT`. The report is where a real one evaporates and another item is where it lands on somebody who did not cause it.",
+	Found: "A defect this branch's own diff introduced that would break something in use: a wrong answer, lost data, a silent failure, a command that stops working. Anything smaller in the diff, a harmless undeclared delta, a naming or style point, a typo, is `FIX-IN-REVIEW` when you can correct it here and `REPORT-ONLY` when you cannot, and costs no round.",
+	Do:    "Put `BRANCH-REGRESSION` in the finding's heading. `git diff <trunk>...HEAD` is the boundary, not the numbered list. An unmerged item has no bugs: a defect in its own work that would break something is unfinished implementation, so it goes back the same way an unmet requirement does, on any pass, and it is never filed, because an issue or a new item for it lets the branch merge carrying a defect its own run wrote. When the fix for it changes a contract no requirement names, the regression is still yours and the implementation is `SPLIT-OUT`. `drover request-changes` refuses a send-back whose findings name neither a numbered requirement nor this token, so a finding that is neither belongs in the audit note.",
 }, {
 	Token: "BRANCH-BLOCKER",
 	Where: "back to the branch",
@@ -373,13 +376,13 @@ var destinations = []Destination{{
 }, {
 	Token: "FOLLOW-UP-TO-OWNER",
 	Where: "filed against its owner",
-	Found: "A pre-existing defect outside this branch's diff that blocks no requirement here.",
-	Do:    "File it against the item that owns the gap, not the one that noticed it, and name it in your report. It does not get fixed here.",
+	Found: "A pre-existing defect outside this branch's diff that blocks no requirement here, in code an item that has merged owns.",
+	Do:    "File it against the merged item that owns the gap, not the one that noticed it, and name it in your report. It does not get fixed here. An unmerged item owns nothing filed: its gaps go back to its own branch when it is reviewed.",
 }, {
 	Token: "NEW-ITEM",
 	Where: "filed as a new item",
-	Found: "A defect or gap no existing item owns that would break nothing in use and that you cannot correct in this pass, including one this branch's own diff introduced.",
-	Do:    "`drover new <kind> \"<title>\" --found-in <id> -f <file>` writes it, then name the new id in your report and in the audit note, and let the branch merge. The file is the finding for whoever writes the requirements, who was not here: the file and line, the command that reproduces it with its actual output, and what is wrong. The audit note names the new id rather than carrying the description, because nobody opens the ledger when writing the new item. The scaffold is inert: `run` refuses it until a human writes the numbered requirements and runs `drover accept`, and `accept` is one of the commands a launched session cannot reach, so filing one records the finding and schedules nobody. This is the row that ends a review loop, and the loop is real: a fourth pass correcting a comment costs a run, a review of the diff that fix widened, and whatever the pass after that finds in it. A project declaring no intake stop marker has no inert scaffold to write and `new` refuses there, so the finding is `REPORT-ONLY` instead.",
+	Found: "A gap in merged code that no existing item owns and that blocks no requirement here. Never a defect this branch's own diff introduced: that is `BRANCH-REGRESSION`.",
+	Do:    "`drover new <kind> \"<title>\" -f <file>` writes it, without `--found-in`: the gap was in the trunk before this branch existed, and this item is not where it came from. Name the new id in your report and in the audit note. The file is the finding for whoever writes the requirements, who was not here: the file and line, the command that reproduces it with its actual output, and what is wrong. The audit note names the new id rather than carrying the description, because nobody opens the ledger when writing the new item. The scaffold is inert: `run` refuses it until a human writes the numbered requirements and runs `drover accept`, and `accept` is one of the commands a launched session cannot reach, so filing one records the finding and schedules nobody. A project declaring no intake stop marker has no inert scaffold to write and `new` refuses there, so the finding is `REPORT-ONLY` instead.",
 }, {
 	Token: "REPORT-ONLY",
 	Where: "the report, and nowhere else",
@@ -587,9 +590,10 @@ type Data struct {
 
 	// Rounds is how many times a review has sent this item back, MaxReviewRounds the
 	// project's limit, and Capped whether the next request-changes refuses. A brief that
-	// instructs `drover request-changes` beside a command that will refuse is the tool
-	// arguing with itself, and an agent that meets that spends its turn
-	// retrying, so the capped brief renders the filing route instead.
+	// instructs `drover request-changes` without saying it will refuse sends an agent
+	// retrying, so the capped brief keeps the instruction and says the refusal parks
+	// the item with its findings; it never offers filing, because an unmerged item's
+	// own defects are unfinished work rather than bugs.
 	Rounds, MaxReviewRounds int
 	Capped                  bool
 
@@ -757,35 +761,14 @@ var funcs = template.FuncMap{
 	"trim":  strings.TrimSpace,
 }
 
-// Render executes text against data. name is used in error messages only.
+// Render executes text against data on its own, with no built-in beneath it.
+// name is used in error messages only.
 func Render(name, text string, data Data) (string, error) {
-	t, err := template.New(name).Funcs(funcs).Option("missingkey=error").Parse(text)
+	t, err := parseText(name, text)
 	if err != nil {
-		return "", fmt.Errorf("parse template %s: %w", name, err)
+		return "", err
 	}
-	var buf bytes.Buffer
-	if err := t.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("render template %s: %w", name, err)
-	}
-	// A template that ends mid-thought is a template bug worth catching before
-	// the text reaches an agent that will act on it.
-	out := strings.TrimRight(buf.String(), "\n")
-	if strings.TrimSpace(out) == "" {
-		return "", fmt.Errorf("template %s rendered nothing", name)
-	}
-	return out + "\n", nil
-}
-
-// Load reads a template file, falling back to fallback when path is empty.
-func Load(path, fallbackName, fallback string) (string, string, error) {
-	if path == "" {
-		return fallbackName, fallback, nil
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", "", fmt.Errorf("read prompt template: %w", err)
-	}
-	return path, string(data), nil
+	return execute(name, t, data)
 }
 
 // Sample is a brief with every field populated, for checking a template without
@@ -832,7 +815,7 @@ func Sample() Data {
 		Closes: []Resolution{{
 			Number: 1, Title: "sample issue", Body: "sample report", State: "OPEN",
 			Disposition: "fixed", By: "agent", Note: "sample note",
-			Applied: "closed", Unavailable: "sample reason", Settled: true,
+			Applied: "closed", Unavailable: "sample reason", Settled: true, Amended: "2026-01-01",
 		}},
 		Runs: 1, Reviews: 1, Audits: 1,
 		Recent:           Recent{Commits: []Commit{{Abbrev: "abc1234", Lines: 1}}, Unavailable: "sample reason"},

@@ -362,3 +362,48 @@ func TestNoTrackerWritesNothingAndSaysWhatItLeft(t *testing.T) {
 		t.Errorf("nothing says how to close it later: %q", out)
 	}
 }
+
+// A partial recorded before an amend was judged against requirements that have
+// since changed, and it leaves the issue open. finish names it before writing
+// anything to the tracker, and goes on to write what was recorded.
+func TestFinishWarnsOnAPartialOlderThanTheAmend(t *testing.T) {
+	dir := closesProject(t)
+	bin := ghPATH(t)
+	log := filepath.Join(t.TempDir(), "gh.log")
+	stubIssueWriteGH(t, bin, log, 0)
+	t.Chdir(dir)
+
+	path := filepath.Join(dir, "ledger.jsonl")
+	for _, row := range []ledger.Row{
+		{ID: "B1", Issue: 47, Disposition: ledger.DispositionSatisfied, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-28"},
+		{ID: "B1", Issue: 100, Disposition: ledger.DispositionPartial, CodeBy: ledger.CodeAgent, Independent: true, Date: "2026-10-28"},
+		{ID: "B1", Amend: &ledger.Amendment{From: 1, To: 1}, Date: "2026-10-29"},
+	} {
+		if err := ledger.Append(path, row); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := openIn(t, dir)
+	it, err := s.item("B1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := capture(t, func() { s.applyDispositions(it, "PR #203") })
+	warn := strings.Index(out, "#100: partial was recorded before the amend on 2026-10-29")
+	if warn < 0 {
+		t.Fatalf("no warning for the outdated partial:\n%s", out)
+	}
+	if !strings.Contains(out, "drover resolve B1 100 <") {
+		t.Errorf("warning does not name the resolve command:\n%s", out)
+	}
+	if strings.Contains(out, "#47: partial") {
+		t.Errorf("warned on a satisfied disposition:\n%s", out)
+	}
+	if first := strings.Index(out, "✓"); first >= 0 && first < warn {
+		t.Errorf("warned after writing to the tracker:\n%s", out)
+	}
+	if calls := ghCalls(t, log); len(calls) != 2 {
+		t.Errorf("gh calls: %v, want the close and the comment still written", calls)
+	}
+}

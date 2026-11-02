@@ -84,7 +84,7 @@ const ghPage = `[` +
 // the file and line, the command that reproduces it, and the output it gave.
 // Numbered, because that is how findings get written and the one shape the body
 // cannot carry — request-changes demotes it, and the payload has to survive that.
-const changesEvidence = `1. **The reason never reaches the prompt.** internal/cmd/run.go:210 has no else
+const changesEvidence = `1. **R1: the reason never reaches the prompt.** internal/cmd/run.go:210 has no else
    branch, so a register drover could not read renders as one with nothing in it.
 
    Reproduce: drover run B2 --dry-run | grep -c 'did not answer' answers 0.
@@ -99,7 +99,7 @@ const guarantee = `- Replacing an object preserves whatever mode an operator set
 // closedRound is a finding an earlier pass sent back and a later one closed.
 // Its headline has to survive `request-changes` replacing the section; its body must not,
 // because a closed finding rendered whole reads as an open one.
-const closedRound = `1. **The cache hit is recorded against the configured upstream.** cache.go:41.
+const closedRound = `1. **R1: the cache hit is recorded against the configured upstream.** cache.go:41.
 
    Nobody may act on this round again: it closed two passes ago.
 `
@@ -230,8 +230,8 @@ func TestAFindingReachesTheSurfaceThatMustActOnIt(t *testing.T) {
 			drove(t, "request-changes", item, "-f", second)
 		},
 		reach: map[surface][]string{
-			runProse:    {"The cache hit is recorded against the configured upstream. cache.go:41.", "changes-1.md"},
-			reviewBrief: {"The cache hit is recorded against the configured upstream. cache.go:41.", "changes-1.md"},
+			runProse:    {"R1: the cache hit is recorded against the configured upstream. cache.go:41.", "changes-1.md"},
+			reviewBrief: {"R1: the cache hit is recorded against the configured upstream. cache.go:41.", "changes-1.md"},
 		},
 		absent: map[surface][]string{
 			runBrief:    {"Nobody may act on this round again"},

@@ -12,7 +12,7 @@ import (
 	"text/template"
 
 	"github.com/ravinald/drover/internal/config"
-	"github.com/ravinald/drover/internal/prompts"
+	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/runner"
 	"github.com/spf13/cobra"
 )
@@ -95,6 +95,10 @@ var catalog = []supervised{
 		description: "rerun a check that failed on the forge's infrastructure rather than on the code",
 		supervisor:  "Rerun the failed jobs with `gh run rerun --failed`, at most twice per head. Report the check and the log line that marked it infrastructure.",
 		operator:    "rerun the failed check on {id}'s pull request"},
+	{key: "fix_gate_refusal", category: catChecks, def: polAuto, ceiling: polAuto,
+		description: "send a branch the merge gate or its verify command refused over its own diff back to its implementing session, once per drive",
+		supervisor:  "Read what came back in {id}'s body and the failed job's log (`gh run view --log-failed`), then `drover drive {id}`. Report the failing test.",
+		operator:    "read what came back in {id}'s body and the failed job's log, then drover drive {id}"},
 	{key: "report_trunk_red", category: catChecks, def: polOperator, ceiling: polAuto,
 		description: "report a trunk that fails the verify command on its own, and stop dispatching",
 		supervisor:  "Find the commit that turned the trunk red and report it with the failing output. Fix nothing on an item's branch.",
@@ -209,7 +213,6 @@ var parkActions = map[string]string{
 	"blocked_on_deps":       "write_scaffold_requirements",
 	parkImplementDied:       "relaunch_after_runner_death",
 	passDied:                "rerun_lost_review",
-	passCapped:              "override_review_limit",
 	passNeedsDecision:       "decide_requirement",
 	parkDrained:             "cleanup_interrupted_drive",
 	"interrupted":           "cleanup_interrupted_drive",
@@ -217,16 +220,19 @@ var parkActions = map[string]string{
 }
 
 // parkAction is the catalog action that owns one park, or empty. The detail
-// decides two of them: a runner fault is auth_expired when the runner had no
-// credentials, and a refused push is push_refused_by_hook when the project's
-// own hook refused it. Every other fault and push failure keeps the owner it
-// had, which is none.
+// decides three of them: a runner fault is auth_expired when the runner had no
+// credentials, a refused push is push_refused_by_hook when the project's own
+// hook refused it, and a gate refusal is fix_gate_refusal when a check drive
+// read as code is under it. Every other fault, push failure and gate refusal
+// keeps the owner it had, which is none.
 func parkAction(d DriveItem) string {
 	switch {
 	case d.Park == "runner_fault" && d.Detail == detailAuth:
 		return "auth_expired"
 	case d.Park == "push_failed" && d.Detail == detailPushHook:
 		return "push_refused_by_hook"
+	case d.Park == parkGateRefused && d.Detail == ledger.ClassCode:
+		return "fix_gate_refusal"
 	}
 	return parkActions[d.Park]
 }
@@ -431,9 +437,13 @@ func (s *session) superviseTemplatePath() string {
 // renderSupervise renders the brief from [supervise] template, or the built-in
 // one, the way the implement and review templates resolve.
 func (s *session) renderSupervise(ids []string, runnerName string) (string, error) {
-	name, text, err := prompts.Load(s.cfg.SuperviseTemplate(), "supervise", superviseTemplate)
-	if err != nil {
-		return "", err
+	name, text := "supervise", superviseTemplate
+	if path := s.cfg.SuperviseTemplate(); path != "" {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", fmt.Errorf("read prompt template: %w", err)
+		}
+		name, text = path, string(data)
 	}
 	t, err := template.New(name).Option("missingkey=error").Parse(text)
 	if err != nil {

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ravinald/drover/internal/config"
+	"github.com/ravinald/drover/internal/prompts"
 	"github.com/ravinald/drover/internal/runner"
 )
 
@@ -112,4 +114,51 @@ func displayPath(root, path string) string {
 		return "~" + string(filepath.Separator) + rest
 	}
 	return path
+}
+
+// promptFor is the [prompts] key that overrides slot.
+func promptFor(cfg *config.Config, slot string) string {
+	switch slot {
+	case prompts.SlotImplement:
+		return cfg.Prompts.Implement
+	case prompts.SlotReview:
+		return cfg.Prompts.Review
+	case prompts.SlotDraft:
+		return cfg.Prompts.Draft
+	}
+	return ""
+}
+
+// loadPrompt is slot's built-in template with the project's override, if it
+// names one, layered on top.
+func loadPrompt(cfg *config.Config, slot string) (prompts.Template, error) {
+	return prompts.Load(slot, cfg.Abs(promptFor(cfg, slot)))
+}
+
+// promptWarnings is one line per way slot's override has fallen behind the
+// built-in it layers on, for the commands that launch a session from it. check
+// reports the same as findings; these exist because a drive started without
+// running check otherwise hands every session a stale prompt in silence.
+func promptWarnings(tmpl prompts.Template, shown string) []string {
+	if tmpl.Path == "" {
+		return nil
+	}
+	seen := tmpl.Inspect()
+	var out []string
+	if seen.Whole {
+		out = append(out, fmt.Sprintf("%s replaces the built-in %s template whole, so drover's own instructions in it are those of whatever version it was copied from; drover check names it",
+			shown, tmpl.Slot))
+	}
+	for _, b := range seen.Behind {
+		out = append(out, fmt.Sprintf("%s overrides %s/%s, whose default changed since it was written; drover check --diff shows how",
+			shown, tmpl.Slot, b.Block))
+	}
+	return out
+}
+
+// warnPrompt writes promptWarnings to stderr, naming the file as the config does.
+func (s *session) warnPrompt(tmpl prompts.Template) {
+	for _, w := range promptWarnings(tmpl, promptFor(s.cfg, tmpl.Slot)) {
+		fmt.Fprintf(errOut, "warning: %s\n", w)
+	}
 }

@@ -45,7 +45,7 @@ func (p palette) state(word string) string {
 		return p.OK
 	case outcomeParked, "refused", "red", "trunk_red", "failed", "failure", stateBroken,
 		"needs-operator", "interrupted", passDied, passFaulted, passUnreadable, passSilent,
-		passCapped, passRepeating, passNeedsDecision:
+		passRepeating, passNeedsDecision:
 		return p.Fail
 	case outcomeSkipped, outcomeHeld, "paused", "waiting", "running, paused",
 		evNeedsOperator, evNeedsSupervisor, evUsageWarning, evReexecWaiting, evConfigChanged,

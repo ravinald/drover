@@ -179,7 +179,7 @@ func TestAClearedBlockLeavesTheBranchProposable(t *testing.T) {
 
 	// The counterfactual, and the reason the command exists: the same sentence
 	// written with `request-changes` parks the branch.
-	write(t, evidence, "Nothing came back: every finding above is closed.\n")
+	write(t, evidence, "R1: Nothing came back: every finding above is closed.\n")
 	requestChangesFile = ""
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatalf("request for changes: %v", err)
@@ -276,7 +276,7 @@ func TestBothBriefsKeepTheRoundAClearDischarged(t *testing.T) {
 	dir, _, evidence := blockStanding(t)
 	const (
 		first  = "The walk over-excludes on a nullable column."
-		second = "The handle closes before the rename."
+		second = "R1: The handle closes before the rename."
 	)
 	write(t, evidence, second+"\n")
 	requestChangesFile = ""

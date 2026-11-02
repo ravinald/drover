@@ -51,7 +51,7 @@ const unrecordedLimit = 2000
 func sessionPark(park string) bool {
 	switch park {
 	case "runner_fault", parkImplementDied, parkImplementUnreadable, parkNoCommits, parkUncommitted,
-		passDied, passFaulted, passUnreadable, passSilent, passCapped, passRepeating, passNeedsDecision,
+		passDied, passFaulted, passUnreadable, passSilent, passRepeating, passNeedsDecision,
 		passStanding, passChangesUnrecorded, passEdited:
 		return true
 	}
@@ -278,21 +278,14 @@ func (s *session) recordPark(d *DriveItem, last *runner.Outcome, lastErr error) 
 	}
 }
 
-// loopDetail is the detail of a park the review loop ended on, repeating or
-// at_limit: what repeated or what the cap turned away, and as evidence the
+// loopDetail is the detail of a repeating park: what repeated, and as evidence the
 // first paragraph of the last request for changes. The session finished
 // cleanly, so its log tail would explain nothing.
-func (s *session) loopDetail(it backlog.Item, v string, p pass) parkDetail {
+func (s *session) loopDetail(it backlog.Item, p pass) parkDetail {
 	c := p.after
 	n := c.ChangesRequested
 	var pd parkDetail
 	switch {
-	case v == passCapped:
-		named := "no requirement"
-		if len(c.RefusedReqs) > 0 {
-			named = requirementList(c.RefusedReqs)
-		}
-		pd.Detail = fmt.Sprintf("max_review_rounds %d reached; the refused request named %s", p.cap, named)
 	case c.RepeatedChanges:
 		pd.Detail = fmt.Sprintf("identical evidence in rounds %d and %d", n-1, n)
 	default:
@@ -304,8 +297,24 @@ func (s *session) loopDetail(it backlog.Item, v string, p pass) parkDetail {
 
 // decisionDetail is the detail of a needs_decision park: the requirements the
 // review handed to the operator, and as evidence the first sentence of its
-// reason for each, read off the body request-changes wrote.
+// reason for each, read off the body request-changes wrote. For a request the
+// cap refused it is the file holding the refused findings instead, since the
+// body never received them.
 func decisionDetail(p pass) parkDetail {
+	if p.refused {
+		named := "no requirement"
+		if len(p.after.RefusedReqs) > 0 {
+			named = requirementList(p.after.RefusedReqs)
+		}
+		kept := ", and no file kept its findings"
+		if f := p.after.RefusedFindings; f != "" {
+			kept = ", its findings kept in " + f
+		}
+		return parkDetail{
+			Detail: fmt.Sprintf("max_review_rounds %d reached; the refused request named %s%s", p.cap, named, kept),
+			Log:    p.after.RefusedFindings,
+		}
+	}
 	reqs := p.after.Operator
 	verb := " needs"
 	if len(reqs) > 1 {

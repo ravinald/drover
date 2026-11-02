@@ -43,7 +43,7 @@ refused, and so is one carrying the stop marker, which would survive accept
 deleting the first.`,
 	Example: `  drover new bug "the resolver drops a trailing dot"
   drover new feature "publish a release binary" --sev H
-  drover new bug "re-vet skips proxy-cached objects" --found-in F41 -f -   # a NEW-ITEM finding, described on stdin
+  drover new bug "re-vet skips proxy-cached objects" --found-in F41 -f -   # a gap in merged F41, described on stdin
 
   Then write the requirements and accept them:
     $EDITOR .drover/backlog/B14-the-resolver-drops-a-trailing-dot.md
@@ -95,6 +95,17 @@ deleting the first.`,
 		} else {
 			rank = sev.Of(rank).Letter()
 		}
+		var foundTitle string
+		if newFoundIn != "" {
+			found, err := s.item(newFoundIn)
+			if err != nil {
+				return err
+			}
+			if err := s.refuseUnmerged("new --found-in", found.ID.Bare()); err != nil {
+				return err
+			}
+			newFoundIn, foundTitle = found.ID.Bare(), found.Title()
+		}
 		description, err := s.newDescription()
 		if err != nil {
 			return err
@@ -102,12 +113,8 @@ deleting the first.`,
 		body := s.scaffoldBody(kind, title, map[string]string{s.cfg.Severity.Key: rank})
 		origin := ledger.Origin{Cmd: "new"}
 		if newFoundIn != "" {
-			found, err := s.item(newFoundIn)
-			if err != nil {
-				return err
-			}
-			body = withProvenance(body, found.ID.Bare(), found.Title())
-			origin.FoundIn = found.ID.Bare()
+			body = withProvenance(body, newFoundIn, foundTitle)
+			origin.FoundIn = newFoundIn
 		}
 		if description != "" {
 			body = aboveRole(body, description+"\n\n")
@@ -130,6 +137,21 @@ deleting the first.`,
 		fmt.Printf("  drover run %s --dry-run\n", id.Bare())
 		return nil
 	},
+}
+
+// refuseUnmerged refuses to file a finding against an item that has not merged.
+// An unmerged item's defects are unfinished work on its own branch: filed, they
+// let the branch merge carrying them and land on whoever picks the filing up,
+// rather than going back to the run that wrote them.
+func (s *session) refuseUnmerged(command, id string) error {
+	if s.done(id) {
+		return nil
+	}
+	return Refusal{fmt.Errorf(
+		"drover %s %s: %s has not merged, so a finding against it is not filed.\n"+
+			"  A defect in its work goes back to its branch: drover request-changes %s -f {file}\n"+
+			"  A defect in merged code is filed without naming it: drover new {kind} {title} -f {file}",
+		command, id, id, id)}
 }
 
 // withProvenance names the item a finding came out of, in the body rather than in
@@ -242,7 +264,7 @@ func trimBlankLines(text string) string {
 
 func init() {
 	newCmd.Flags().StringVar(&newFoundIn, "found-in", "",
-		"the item this was found while working, named in the scaffold body")
+		"the merged item this was found while working, named in the scaffold body (an unmerged one is refused)")
 	newCmd.Flags().StringVarP(&newFile, "file", "f", "",
 		"a description written into the scaffold above the placeholder, - for stdin")
 	newCmd.Flags().StringVar(&newSev, "sev", "",

@@ -882,3 +882,30 @@ func TestFileFollowUpLinksTheOwnerRatherThanLabelingIt(t *testing.T) {
 		t.Errorf("the follow-up label was applied without being created first: %q", ghCalls(t, log))
 	}
 }
+
+// An item that reached max_review_rounds merges only once the operator decided
+// its refused findings, so finish has nothing left to nudge about: no line on
+// the cap and no filing command, with or without a follow-up against it.
+func TestFinishSaysNothingAboutTheCap(t *testing.T) {
+	dir, branch := finishProject(t, fileProject+"\n[review]\nmax_review_rounds = 1\n")
+	if err := ledger.Append(filepath.Join(dir, "ledger.jsonl"), ledger.Row{ID: "B1", Changes: "abc", Date: ledger.Today()}); err != nil {
+		t.Fatal(err)
+	}
+	stubPATH(t)
+	t.Setenv(runner.EnvActor, "")
+	t.Chdir(dir)
+
+	var err error
+	out := capture(t, func() { err = execute(t, "finish", "B1") })
+	if err != nil {
+		t.Fatalf("finish: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, branch+" is merged") {
+		t.Fatalf("finish did not finish:\n%s", out)
+	}
+	for _, unwanted := range []string{"max_review_rounds", "drover follow-up open", "nothing records what it found"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("finish wrote %q:\n%s", unwanted, out)
+		}
+	}
+}

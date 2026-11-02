@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -131,7 +132,7 @@ func capProject(t *testing.T, limit int) (dir, evidence string) {
 	s := fixture(t, fmt.Sprintf("\n[review]\nmax_review_rounds = %d\n\n[register]\nbackend = \"none\"\n", limit))
 	dir = s.cfg.Root
 	evidence = filepath.Join(dir, "findings.md")
-	write(t, evidence, "The walk over-excludes on a nullable column.\n")
+	write(t, evidence, "BRANCH-REGRESSION: The walk over-excludes on a nullable column.\n")
 	t.Chdir(dir)
 	return dir, evidence
 }
@@ -192,7 +193,7 @@ func TestRequestChangesRowCarriesTheEvidenceDigest(t *testing.T) {
 		t.Error("two identical requests for changes did not read as a repeat")
 	}
 	// A rewrap is the same finding, and a different one is not.
-	write(t, evidence, "The walk over-excludes\non a nullable column.\n")
+	write(t, evidence, "BRANCH-REGRESSION: The walk over-excludes\non a nullable column.\n")
 	requestChangesFile = ""
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
@@ -201,7 +202,7 @@ func TestRequestChangesRowCarriesTheEvidenceDigest(t *testing.T) {
 	if !l.Counts("1").RepeatedChanges {
 		t.Error("a reflowed paragraph read as a new finding")
 	}
-	write(t, evidence, "Something else entirely.\n")
+	write(t, evidence, "BRANCH-REGRESSION: Something else entirely.\n")
 	requestChangesFile = ""
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
@@ -230,7 +231,7 @@ func TestRequestChangesRowRecordsTheRequirementsItsFindingsName(t *testing.T) {
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
 	}
-	write(t, evidence, "The walk over-excludes on a nullable column.\n")
+	write(t, evidence, "BRANCH-REGRESSION: The walk over-excludes on a nullable column.\n")
 	requestChangesFile = ""
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
@@ -319,7 +320,7 @@ func TestRequestChangesRefusesPastTheLimitAndWritesNothing(t *testing.T) {
 		}
 	}
 	before := read(t, body)
-	write(t, evidence, "A third finding nobody will read.\n")
+	write(t, evidence, "BRANCH-REGRESSION: A third finding nobody will read.\n")
 
 	requestChangesFile = ""
 	err := execute(t, "request-changes", "1", "-f", evidence)
@@ -343,9 +344,54 @@ func TestRequestChangesRefusesPastTheLimitAndWritesNothing(t *testing.T) {
 	if n := refusalRows(t, dir); n != 1 {
 		t.Errorf("%d cap refusal rows, want 1: the refusal has to be readable", n)
 	}
-	for _, want := range []string{"sent back 2 times", "max_review_rounds is 2", "drover audit", "--over-limit", "drover new"} {
+	for _, want := range []string{"sent back 2 times", "max_review_rounds is 2", "drover audit", "--over-limit", "drover amend"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal does not say %q:\n%s", want, err)
+		}
+	}
+}
+
+// The cap turns the send-back away, not the findings. They are the unmerged
+// item's own unfinished work, so they are kept in a file the refusal row names
+// for the operator to decide, and the refusal offers the operator's options and
+// no command that would file them somewhere the item could merge without them.
+func TestACappedRequestKeepsItsFindingsForTheOperator(t *testing.T) {
+	t.Cleanup(func() { requestChangesFile, requestChangesOverLimit = "", false })
+	dir, evidence := capProject(t, 1)
+	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
+		t.Fatalf("under the cap: %v", err)
+	}
+	const finding = "### R1 answers 200 on a refused object\n\n`curl -i /refused` printed 200.\n"
+	write(t, evidence, finding)
+
+	requestChangesFile = ""
+	err := execute(t, "request-changes", "1", "-f", evidence)
+	if Code(err) != ExitRefused {
+		t.Fatalf("past the cap: exit %d (%v), want %d", Code(err), err, ExitRefused)
+	}
+	const kept = "reports/01-first.refused-1.md"
+	got, rerr := os.ReadFile(filepath.Join(dir, kept)) // #nosec G304 -- written by the command under test
+	if rerr != nil {
+		t.Fatalf("the refused findings were not kept at %s: %v", kept, rerr)
+	}
+	if !strings.Contains(string(got), strings.TrimSpace(finding)) {
+		t.Errorf("%s does not carry the full finding:\n%s", kept, got)
+	}
+	l, lerr := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if c := l.Counts("1"); c.Refusals != 1 || c.RefusedFindings != kept {
+		t.Errorf("refusal rows %d naming %q, want 1 naming %q", c.Refusals, c.RefusedFindings, kept)
+	}
+	for _, want := range []string{kept, "drover amend 1", "drover signoff 1", "drover shelve 1", "drover request-changes 1 -f " + kept + " --over-limit"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q:\n%s", want, err)
+		}
+	}
+	for _, unwanted := range []string{"drover new", "drover follow-up", "--found-in", "File it"} {
+		if strings.Contains(err.Error(), unwanted) {
+			t.Errorf("the refusal names a filing command %q:\n%s", unwanted, err)
 		}
 	}
 }
@@ -374,7 +420,7 @@ func TestPastCapIsTheOperatorsAndSealedFromASession(t *testing.T) {
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
 	}
-	write(t, evidence, "A second finding.\n")
+	write(t, evidence, "BRANCH-REGRESSION: A second finding.\n")
 
 	t.Setenv(runner.EnvActor, "agent")
 	requestChangesFile, requestChangesOverLimit = "", false
@@ -406,7 +452,7 @@ func TestPastCapRecordsWhenTheOperatorRunsIt(t *testing.T) {
 	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
 		t.Fatal(err)
 	}
-	write(t, evidence, "A second finding.\n")
+	write(t, evidence, "BRANCH-REGRESSION: A second finding.\n")
 	requestChangesFile, requestChangesOverLimit = "", false
 	out := capture(t, func() {
 		if err := execute(t, "request-changes", "1", "-f", evidence, "--over-limit"); err != nil {
@@ -556,7 +602,7 @@ func TestEveryBodyWriterRecordsWhatItWrote(t *testing.T) {
 	first := filepath.Join(dir, "work", "01-first.md")
 	scaffold := filepath.Join(dir, "work", "B01-empty-feed.md")
 	notes := filepath.Join(dir, "notes.md")
-	write(t, notes, "- The mode dropped to 0644.\n")
+	write(t, notes, "- R1: The mode dropped to 0644.\n")
 
 	for _, c := range []struct {
 		args     []string
@@ -687,6 +733,100 @@ func TestOperatorReasonsReadTheWholeSectionOfTheFinding(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			if got := operatorReasons(c.text, c.nums); !slices.Equal(got, c.want) {
 				t.Errorf("operatorReasons = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// A changes row names what wrote it, so a review round can be told from
+// drive's own send-backs. request-changes run by a review or a person writes
+// review, and drover schema --ledger lists the key for a tool writing rows by
+// hand.
+func TestTheChangesRowNamesItsSource(t *testing.T) {
+	t.Cleanup(func() { requestChangesFile, requestChangesOverLimit = "", false })
+	dir, evidence := capProject(t, 0)
+	if err := execute(t, "request-changes", "1", "-f", evidence); err != nil {
+		t.Fatal(err)
+	}
+	l, err := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sources []string
+	for _, r := range l.Rows {
+		if r.Changes != "" {
+			sources = append(sources, r.ChangesSource)
+		}
+	}
+	if !slices.Equal(sources, []string{ledger.ChangesReview}) {
+		t.Errorf("changes rows carry sources %q, want one %q", sources, ledger.ChangesReview)
+	}
+
+	t.Cleanup(func() { schemaLedger = false })
+	out := capture(t, func() {
+		if err := execute(t, "schema", "--ledger"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var keys map[string]string
+	if err := json.Unmarshal([]byte(out), &keys); err != nil {
+		t.Fatalf("schema --ledger: %v\n%s", err, out)
+	}
+	for _, key := range []string{"changes", "changes_source", "refused", "findings"} {
+		if keys[key] != "string" {
+			t.Errorf("schema --ledger reports %q as %q, want string", key, keys[key])
+		}
+	}
+}
+
+// A review's send-back costs a round only for the contract or a finding routed
+// to the branch. Evidence holding a finding that names neither is refused and
+// writes nothing, and the refusal says where the finding goes instead.
+func TestRequestChangesRefusesFindingsOutsideTheContract(t *testing.T) {
+	cases := []struct {
+		name, evidence string
+		refused        bool
+	}{
+		{"requirement named", "### R4 is unmet\n\nNo link is written.\n", false},
+		{"regression marked", "### BRANCH-REGRESSION: list drops the last row\n\nOff by one.\n", false},
+		{"structural heading beside a finding", "### Settled, do not reopen\n\nNothing.\n\n### R2 is unmet\n\nStill wrong.\n", false},
+		{"unscoped heading", "### R4 is unmet\n\nNo link.\n\n### The helper name reads oddly\n\nRename it.\n", true},
+		{"unscoped prose", "The error message could be friendlier.\n", true},
+		{"subheading under a requirement", "### R3 unmet\n\n#### Reason\n\nNothing ran.\n", false},
+		{"wrapper over scoped findings", "## Findings\n\n### R2 unmet\n\nStill wrong.\n", false},
+		{"wrapper over an unscoped finding", "## Findings\n\n### Rename the helper\n\nIt reads oddly.\n", true},
+		{"requirement only in a fence", "Rename the helper.\n\n```\n# R1\n```\n", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Cleanup(func() { requestChangesFile = "" })
+			dir, evidence := capProject(t, 0)
+			write(t, filepath.Join(dir, "work", "01-first.md"), sevenRequirements)
+			write(t, evidence, c.evidence)
+			requestChangesFile = ""
+			var err error
+			capture(t, func() { err = execute(t, "request-changes", "1", "-f", evidence) })
+			l, lerr := ledger.Load(filepath.Join(dir, "ledger.jsonl"))
+			if lerr != nil {
+				t.Fatal(lerr)
+			}
+			rows := 0
+			for _, r := range l.Rows {
+				if r.ID == "1" && r.Changes != "" {
+					rows++
+				}
+			}
+			if !c.refused {
+				if err != nil || rows != 1 {
+					t.Fatalf("request-changes = %v with %d changes rows, want it recorded", err, rows)
+				}
+				return
+			}
+			if err == nil || Code(err) != ExitRefused || rows != 0 {
+				t.Fatalf("request-changes = %v with %d changes rows, want a refusal and no row", err, rows)
+			}
+			if !strings.Contains(err.Error(), "drover audit 1") || !strings.Contains(err.Error(), regressionToken) {
+				t.Errorf("the refusal does not say where the finding goes:\n%v", err)
 			}
 		})
 	}

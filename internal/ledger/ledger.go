@@ -93,6 +93,13 @@ type Row struct {
 	// hand-written "round": 3 beside three existing rows is a contradiction
 	// somebody has to resolve.
 	Changes string `json:"changes,omitempty"`
+	// ChangesSource names what wrote a changes row: ChangesReview for
+	// `drover request-changes` run by a review or a person, or one of the drive
+	// paths that send a branch back on their own evidence. Only a review's rows
+	// are rounds under [review] max_review_rounds, so a branch drive sent back
+	// for a red verify command does not spend the rounds its reviews are owed.
+	// Absent on a row written before the field existed, which reads as a review.
+	ChangesSource string `json:"changes_source,omitempty"`
 	// Reqs is the requirement numbers the evidence's findings name, sorted, on a
 	// changes row, and on a refused row the ones the request the cap turned away
 	// named. The digest compares wording, so a reviewer rewording one
@@ -133,6 +140,11 @@ type Row struct {
 	// It carries no count: a refusal per pass is what the reader needs, and
 	// Counts.RefusedSince answers that against the pass rows around it.
 	Refused string `json:"refused,omitempty"`
+	// Findings on a refused row is the file, relative to the project root,
+	// holding the evidence the cap turned away. The body is left untouched by a
+	// refusal, so without the file the findings would live only in a session
+	// log, and the operator deciding the item would have nothing to read.
+	Findings string `json:"findings,omitempty"`
 	// Branch and Head are the eighth shape: one row each time drover saw an
 	// item's branch at a commit the trunk did not contain, written before every
 	// push. It is the evidence that the branch carried work of its own, which
@@ -666,6 +678,11 @@ type Resolution struct {
 	// different people: a disposition row names no reviewer, so independence
 	// there is the --code-by list against the grading session alone.
 	Settled bool `json:"settled,omitempty"`
+	// Amended is the date of the item's latest amend when that amend came after
+	// the latest disposition row for the issue, empty otherwise. Such an answer
+	// was judged against requirements that no longer stand, so it is never
+	// Settled, however many passes agreed on it.
+	Amended string `json:"amended,omitempty"`
 	// Locked is when finish last took the issue, zero once released. It is not
 	// a write and never reads as one: Applied stays empty until the tracker took
 	// it, so everything that asks what is still pending still counts it.
@@ -692,8 +709,18 @@ func (l *Ledger) Resolutions(id string) []Resolution {
 	byIssue := map[int]*Resolution{}
 	said := map[int][]Row{}
 	var order []int
+	amended := map[int]string{}
 	for _, row := range l.Rows {
-		if row.ID != id || row.Issue == 0 {
+		if row.ID != id {
+			continue
+		}
+		if row.Amend != nil {
+			for n := range said {
+				amended[n] = row.Date
+			}
+			continue
+		}
+		if row.Issue == 0 {
 			continue
 		}
 		cur, seen := byIssue[row.Issue]
@@ -705,6 +732,7 @@ func (l *Ledger) Resolutions(id string) []Resolution {
 		if row.Disposition != "" {
 			cur.Disposition, cur.CodeBy, cur.Independent, cur.Note, cur.Date = row.Disposition, row.CodeBy, row.Independent, row.Note, row.Date
 			said[row.Issue] = append(said[row.Issue], row)
+			delete(amended, row.Issue)
 		}
 		if row.Applied != "" {
 			cur.Applied = row.Applied
@@ -719,7 +747,8 @@ func (l *Ledger) Resolutions(id string) []Resolution {
 	sort.Ints(order)
 	out := make([]Resolution, 0, len(order))
 	for _, n := range order {
-		byIssue[n].Settled = settled(said[n])
+		byIssue[n].Amended = amended[n]
+		byIssue[n].Settled = settled(said[n]) && amended[n] == ""
 		out = append(out, *byIssue[n])
 	}
 	return out
@@ -779,6 +808,14 @@ const (
 	StageImplement = "implement" // `run` handed the prompt to a runner
 	StageReview    = "review"    // `review` handed the brief to a runner
 	StageDraft     = "draft"     // `draft` handed the drafting prompt to a runner
+)
+
+// What wrote a changes row, the values of ChangesSource.
+const (
+	ChangesReview        = "review"         // `drover request-changes`, by a review or a person
+	ChangesVerify        = "verify"         // drive, on a verify command or merge gate the branch failed
+	ChangesTrunkConflict = "trunk_conflict" // drive, on a trunk merge that conflicted and a session resolves
+	ChangesNumberedFiles = "numbered_files" // drive, on [numbered_files] the branch clashes with or sorts below
 )
 
 // Where a usage row's counts were read from.
@@ -995,8 +1032,12 @@ func (l *Ledger) State(id string) State {
 type Counts struct {
 	ByStage map[string]int
 	Audits  int
-	// Requests for changes is how many times a review sent this item back, and LastChanges is
-	// the date of the most recent. RepeatedChanges marks the last two carrying
+	// ChangesRequested is how many times a review sent this item back, the
+	// rounds [review] max_review_rounds bounds, and LastChanges is the date of
+	// the most recent. Drive's own send-backs are counted apart, in
+	// VerifySendBacks, ConflictSendBacks and NumberedSendBacks, and no field
+	// below reads them: a red gate between two review rounds is not the review
+	// repeating itself or carrying a finding over. RepeatedChanges marks the last two carrying
 	// the same evidence digest, which is a review that has stopped finding
 	// anything new.
 	//
@@ -1017,11 +1058,18 @@ type Counts struct {
 	StillOpenReqs    []int
 	Reqs             []int
 	Operator         []int
+	// The send-backs drive wrote on its own evidence, by ChangesSource.
+	VerifySendBacks   int
+	ConflictSendBacks int
+	NumberedSendBacks int
 	// Refusals is how many requests for changes the cap turned away over the item's history.
 	// A reader deciding about one pass wants RefusedSince instead. RefusedReqs
 	// is the requirements the last refused request named.
 	Refusals    int
 	RefusedReqs []int
+	// RefusedFindings is the findings file the last refused request named,
+	// empty on a row written before refusals kept one.
+	RefusedFindings string
 	// LastBody is the body digest from the most recent row carrying one, review
 	// stage row or body row, in file order. Empty for an item no drover that
 	// records digests has touched.
@@ -1067,7 +1115,15 @@ func (l *Ledger) Counts(id string) Counts {
 		if r.Level != "" {
 			c.Audits++
 		}
-		if r.Changes != "" {
+		switch {
+		case r.Changes == "":
+		case r.ChangesSource == ChangesVerify:
+			c.VerifySendBacks++
+		case r.ChangesSource == ChangesTrunkConflict:
+			c.ConflictSendBacks++
+		case r.ChangesSource == ChangesNumberedFiles:
+			c.NumberedSendBacks++
+		case r.ChangesSource == "", r.ChangesSource == ChangesReview:
 			c.ChangesRequested++
 			c.RepeatedChanges = last != "" && r.Changes == last
 			c.StillOpenReqs = shared(prevStillOpen, r.StillOpen)
@@ -1078,7 +1134,7 @@ func (l *Ledger) Counts(id string) Counts {
 		}
 		if r.Refused != "" {
 			c.Refusals++
-			c.RefusedReqs = r.Reqs
+			c.RefusedReqs, c.RefusedFindings = r.Reqs, r.Findings
 		}
 		if r.Body != "" {
 			c.LastBody = r.Body
@@ -1216,6 +1272,19 @@ func (l *Ledger) Heads(branch string) []string {
 		}
 	}
 	return out
+}
+
+// Branch is the branch the latest row naming one did for an item: a launch, a
+// pushed head or a pull request. Empty says no row recorded one, which is every
+// item nothing has run, and is not the branch the template would render.
+func (l *Ledger) Branch(id string) string {
+	branch := ""
+	for _, r := range l.Rows {
+		if r.ID == id && r.Branch != "" {
+			branch = r.Branch
+		}
+	}
+	return branch
 }
 
 // PR is the pull request drover last recorded for one item, and the branch it

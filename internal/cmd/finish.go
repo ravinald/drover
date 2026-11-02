@@ -272,6 +272,25 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 	},
 }
 
+// warnAmendedDispositions names each partial disposition an amend has since
+// outdated. It warns and never refuses: the merge already happened, and the
+// answer may still be right under the new requirements, but a partial leaves
+// the issue open, and one judged against a requirement that no longer stands is
+// the likeliest to be wrong in that direction.
+func (s *session) warnAmendedDispositions(it backlog.Item) {
+	id := it.ID.Bare()
+	for _, number := range backlog.Ints(it.Get(closesKey)) {
+		res, recorded := s.ledger.Resolution(id, number)
+		if !recorded || res.Applied != "" || res.Amended == "" || res.Disposition != ledger.DispositionPartial {
+			continue
+		}
+		fmt.Printf("  ! %s: partial was recorded before the amend on %s, against requirements that have since changed\n",
+			s.registerRefTo(os.Stdout, number), res.Amended)
+		fmt.Printf("      drover resolve %s %d <%s> --code-by <who> \"<what shipped>\"\n",
+			id, number, strings.Join(ledger.Dispositions(), "|"))
+	}
+}
+
 // reportDispositions names what applyDispositions would have written without
 // writing it. Closing an issue is visible to whoever filed it, so it belongs to
 // a command an operator typed for that purpose rather than to a step some
@@ -281,6 +300,7 @@ func (s *session) reportDispositions(it backlog.Item) {
 	if len(claimed) == 0 {
 		return
 	}
+	s.warnAmendedDispositions(it)
 	var pending []int
 	for _, number := range claimed {
 		if res, recorded := s.ledger.Resolution(it.ID.Bare(), number); recorded && res.Applied == "" {
@@ -315,6 +335,7 @@ func (s *session) applyDispositions(it backlog.Item, how string) (closed []int) 
 	if len(claimed) == 0 {
 		return nil
 	}
+	s.warnAmendedDispositions(it)
 	if s.cfg.RegisterBackend() != config.BackendGitHub {
 		fmt.Printf("  · %s names %s, but %s — nothing to write to\n",
 			id, renderInts(claimed), s.cfg.RegisterDeclaration())
@@ -464,7 +485,6 @@ func (s *session) finishRegister(it backlog.Item, closed []int) {
 		return slices.Contains(closed, is.Number)
 	})
 	s.finishUnlinked(it, scoped.Issues)
-	s.finishCapped(id, len(scoped.Issues))
 	n := s.registerCounts(scoped).Orphaned
 	// A page that stopped early makes the count a floor, and a floor of zero is
 	// the one zero that may not print nothing: silence there reads as "this
@@ -489,33 +509,6 @@ func (s *session) finishRegister(it backlog.Item, closed []int) {
 		return
 	}
 	fmt.Printf("  · "+floor+"\n", s.cfg.GitHub.PageLimit)
-}
-
-// finishCapped says an item merged with its review still sending work back.
-//
-// This is the last moment anybody looks before the record becomes history, and
-// it is where the cap's own failure would otherwise be silent: the cap stops a
-// loop, and a loop still finding things when it stops leaves findings that go
-// nowhere unless somebody files them. drover cannot tell a reviewer that had
-// nothing left to file from one that forgot, so it names the condition and lets
-// the operator decide.
-func (s *session) finishCapped(id string, filed int) {
-	limit := s.cfg.Review.MaxReviewRounds
-	if limit == 0 {
-		return
-	}
-	n := s.ledger.Counts(id).ChangesRequested
-	if n < limit {
-		return
-	}
-	if filed > 0 {
-		fmt.Printf("  · %s finished at [review] max_review_rounds (%d of %d); %d %s open against it\n",
-			id, n, limit, filed, plural(filed, "follow-up is", "follow-ups are"))
-		return
-	}
-	fmt.Printf("  ! %s finished at [review] max_review_rounds (%d of %d) with no follow-up filed against it.\n"+
-		"    The cap stopped a review that was still sending work back, and nothing records what it found.\n"+
-		"    drover follow-up open \"<what>\" --owner %s\n", id, n, limit, id)
 }
 
 // worstOrphaned names the highest severity among the orphaned follow-ups, in the

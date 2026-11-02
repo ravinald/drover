@@ -254,6 +254,18 @@ func TestTheBriefHandsOverASettledDispositionAsFact(t *testing.T) {
 		t.Error("prompt marks one row settled")
 	}
 
+	// An amend since the disposition asks for it again and says why.
+	amended := renderBrief(t, "review", prompts.ReviewTemplate(),
+		base(prompts.Resolution{Number: 41, Disposition: "partial", By: "agent", Amended: "2026-10-29"}))
+	for _, want := range []string{"Re-judge it yourself", "Amended on 2026-10-29, after this was recorded: the requirement it\n    rested on changed since"} {
+		if !strings.Contains(amended, want) {
+			t.Errorf("amended disposition does not render %q", want)
+		}
+	}
+	if strings.Contains(one, "Amended on") {
+		t.Error("prompt names an amend for a disposition no amend followed")
+	}
+
 	// Applied binds first: it reached a tracker other people read.
 	applied := renderBrief(t, "review", prompts.ReviewTemplate(),
 		base(prompts.Resolution{Number: 47, Disposition: "fixed", By: "agent", Settled: true, Applied: "closed"}))

@@ -81,7 +81,14 @@ var failurePatterns = []string{
 	`^\s*Found in: `,
 	`^\s*Fixed in: `,
 	`^panic: `,
+	`^not ok \d+\b`, // TAP: node --test, tap and most JavaScript runners
 }
+
+// tapFailure is a failing TAP test point. A suite's own point follows its
+// subtests' one indent out, so failureLines keeps the subtests, which name the
+// cause, and drops the suite's, which only repeats that something under it
+// failed.
+var tapFailure = regexp.MustCompile(`^not ok \d+\b`)
 
 // stdlibFixed is govulncheck's Fixed in line for a standard-library package,
 // whose version is a Go release where a module's is a semver tag.
@@ -345,6 +352,13 @@ var logEscape = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
 // reported as an error or a warning.
 var logAnnotation = regexp.MustCompile(`^##\[(error|warning|notice)\]`)
 
+// logIndent is how far a log line's text sits in, once the timestamp and the
+// escapes logLine strips are gone: the nesting a TAP runner prints subtests at.
+func logIndent(line string) int {
+	line = logEscape.ReplaceAllString(logStamp.ReplaceAllString(strings.TrimSpace(line), ""), "")
+	return len(line) - len(strings.TrimLeft(line, " \t"))
+}
+
 // logLine is one log line as a person reads it: no timestamp, no annotation,
 // no escapes, and bounded at evidenceMax.
 func logLine(line string) string {
@@ -362,22 +376,40 @@ func logLine(line string) string {
 var failureEnd = regexp.MustCompile(`^(make: \*\*\*|Error:)`)
 
 // failureLines are up to failureMax lines of log matching one of patterns,
-// read as logLine reads them. A log matching none falls back to the last
-// failureMax non-blank lines before the first make or Actions error, and nil
-// when it has neither.
+// read as logLine reads them, each once: a runner that retries a failed file
+// prints its failures again, and the repeat would spend the cap. A TAP suite's
+// point is dropped after the subtests it summarizes. A log matching none falls
+// back to the last failureMax non-blank lines before the first make or Actions
+// error, and nil when it has neither.
 func failureLines(log string, patterns []*regexp.Regexp) []string {
 	var lines []string
+	var indents []int
 	for _, raw := range strings.Split(log, "\n") {
 		if l := logLine(raw); l != "" && !strings.HasPrefix(l, "##[") {
 			lines = append(lines, l)
+			indents = append(indents, logIndent(raw))
 		}
 	}
 	var hit []string
-	for _, l := range lines {
-		if slices.ContainsFunc(patterns, func(p *regexp.Regexp) bool { return p.MatchString(l) }) {
-			if hit = append(hit, l); len(hit) == failureMax {
-				return hit
+	tapIndent := -1
+	for i, l := range lines {
+		if !slices.ContainsFunc(patterns, func(p *regexp.Regexp) bool { return p.MatchString(l) }) {
+			continue
+		}
+		// Ahead of the repeat check: a retried subtest is a repeat, and the
+		// suite point after it is still its suite's.
+		if tapFailure.MatchString(l) {
+			suite := indents[i] < tapIndent
+			tapIndent = indents[i]
+			if suite {
+				continue
 			}
+		}
+		if slices.Contains(hit, l) {
+			continue
+		}
+		if hit = append(hit, l); len(hit) == failureMax {
+			return hit
 		}
 	}
 	if len(hit) > 0 {

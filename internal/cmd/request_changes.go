@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/ravinald/drover/internal/backlog"
-	"github.com/ravinald/drover/internal/config"
 	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/prompts"
 	"github.com/spf13/cobra"
@@ -26,6 +25,11 @@ var (
 	requestChangesYes       bool
 	requestChangesStillOpen []int
 	requestChangesOperator  []int
+	// requestChangesSource is what the changes row names as its writer. No flag
+	// sets it: a person or a review running the command is a review, and drive
+	// sets it around its own calls, which is why it is not on the command line
+	// for a session to claim.
+	requestChangesSource = ledger.ChangesReview
 )
 
 var requestChangesCmd = &cobra.Command{
@@ -155,17 +159,29 @@ change the numbered requirements, refuses evidence whose only findings are
 					// evidence. Without a row, a review that wanted to send work
 					// back and was turned away leaves an audit and no request for changes row,
 					// which is what a review that found nothing leaves; passResult
-					// would then have to guess, and would guess at_limit for every
+					// would then have to guess, and would read the cap into every
 					// later pass on the item. A failure to write the row does not
 					// swallow the refusal: the caller still gets told no, and the
 					// worst case is that ambiguity rather than a request that appears
 					// to have been recorded.
+					//
+					// The findings are kept in a file of their own, because the
+					// body is untouched and the operator deciding the item reads
+					// them there. A file that would not write still records the
+					// refusal, and the refusal says the findings went unkept.
+					kept := ""
+					if path, err := s.keepRefused(it, text); err != nil {
+						fmt.Fprintf(errOut, "warn: the refused findings went unkept: %v\n", err)
+					} else {
+						kept = rel(s.cfg.Root, path)
+					}
 					if err := s.record(ledger.Row{
-						ID: it.ID.Bare(), Refused: "max_review_rounds", Reqs: findingRequirements(it, text), Date: ledger.Today(),
+						ID: it.ID.Bare(), Refused: "max_review_rounds", Reqs: findingRequirements(it, text),
+						Findings: kept, Date: ledger.Today(),
 					}); err != nil {
 						fmt.Fprintf(errOut, "warn: the cap refusal went unrecorded: %v\n", err)
 					}
-					return Refusal{s.capRefusal(it.ID.Bare(), n, limit)}
+					return Refusal{capRefusal(it.ID.Bare(), n, limit, kept)}
 				}
 				if err := sealedFlag("request-changes", "over-limit",
 					"the cap bounds what a review may spend, and this session is the party it bounds"); err != nil {
@@ -179,6 +195,14 @@ change the numbered requirements, refuses evidence whose only findings are
 		if why := s.contractContradictions(it, text); len(why) > 0 {
 			if err := contradictionRefusal(it.ID.Bare(), why, requestChangesOverLimit, requestChangesYes); err != nil {
 				return err
+			}
+		}
+
+		// After the contradictions, which say the more specific thing about
+		// the same evidence.
+		if requestChangesSource == ledger.ChangesReview {
+			if loose := unscopedFindings(it, text); len(loose) > 0 {
+				return Refusal{unscopedRefusal(it.ID.Bare(), loose)}
 			}
 		}
 
@@ -220,8 +244,8 @@ change the numbered requirements, refuses evidence whose only findings are
 		// write failed is the one wrong direction; a body written whose row
 		// failed reports the error and leaves the body correct.
 		if err := s.record(ledger.Row{
-			ID: it.ID.Bare(), Changes: digest(text), Reqs: findingRequirements(it, text), StillOpen: stillOpen,
-			Operator: operator, Date: ledger.Today(),
+			ID: it.ID.Bare(), Changes: digest(text), ChangesSource: requestChangesSource,
+			Reqs: findingRequirements(it, text), StillOpen: stillOpen, Operator: operator, Date: ledger.Today(),
 		}); err != nil {
 			return err
 		}
@@ -470,6 +494,95 @@ func operatorOnlyFindings(it backlog.Item, text string) (ops []backlog.Requireme
 		return nil, nil
 	}
 	return ops, structure
+}
+
+// regressionToken marks a finding as a defect the branch's own diff
+// introduced, which goes back without naming a requirement.
+const regressionToken = "BRANCH-REGRESSION"
+
+// branchToken opens every destination that sends a finding back to the
+// branch. A finding carrying one was routed there on purpose.
+const branchToken = "BRANCH-"
+
+// unscopedFindings is each finding in a review's evidence that names neither a
+// numbered requirement (R<n>) nor a BRANCH- destination.
+//
+// A finding is a heading outside a code fence with no heading nested under it,
+// and it is scoped when it or any heading above it names one: "### R3 unmet"
+// over "#### Reason" is one scoped finding, and "## Findings" over scoped
+// headings is a wrapper rather than a finding. Headings structuralHeadings
+// reads as organization are set aside. Evidence with no heading is one finding,
+// read with its fenced blocks removed, so an R<n> in quoted output scopes
+// nothing.
+//
+// A round is the most expensive thing a review can spend, and every field
+// project's longest loops were rounds spent on findings no requirement asked
+// for: each pass found something new, because a reviewer with no scope always
+// does. A finding that is neither the contract nor a regression is a note, and
+// a note belongs in the audit, where it costs nothing.
+func unscopedFindings(it backlog.Item, text string) []string {
+	reqs := requirementsByNum(it)
+	scoped := func(t string) bool {
+		return strings.Contains(t, branchToken) || len(namedRequirements(t, reqs)) > 0
+	}
+	type heading struct {
+		depth  int
+		text   string
+		scoped bool
+		parent bool
+	}
+	var hs []heading
+	var prose []string
+	var f fence
+	for _, l := range strings.Split(text, "\n") {
+		if f.skip(l) {
+			continue
+		}
+		d := headingDepth(l)
+		if d == 0 {
+			prose = append(prose, l)
+			continue
+		}
+		t := strings.TrimSpace(l)
+		h := heading{depth: d, text: t, scoped: scoped(t)}
+		// The nearest shallower heading is the parent, and its scope already
+		// carries every heading above it.
+		for i := len(hs) - 1; i >= 0; i-- {
+			if hs[i].depth < d {
+				hs[i].parent = true
+				h.scoped = h.scoped || hs[i].scoped
+				break
+			}
+		}
+		hs = append(hs, h)
+	}
+	if len(hs) == 0 {
+		if body := strings.Join(prose, "\n"); !scoped(body) {
+			return []string{text}
+		}
+		return nil
+	}
+	var loose []string
+	for _, h := range hs {
+		if h.parent || h.scoped || structuralHeadings[leadingWord(h.text)] {
+			continue
+		}
+		loose = append(loose, h.text)
+	}
+	return loose
+}
+
+// unscopedRefusal says which findings cost no round and where they go instead.
+func unscopedRefusal(id string, loose []string) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "refusing to send %s back: %d finding(s) name no numbered requirement (R<n>) and no %s:\n", id, len(loose), regressionToken)
+	for _, f := range loose {
+		fmt.Fprintf(&b, "  - %s\n", strings.TrimSpace(firstLine(f)))
+	}
+	b.WriteString("A round is spent only on the contract or on a defect the diff introduced that would break something in use. " +
+		"Name the requirement a finding fails, mark a real regression " + regressionToken + " in its heading, " +
+		"or put the finding in the audit note (FIX-IN-REVIEW or REPORT-ONLY) and record the pass with drover audit " + id)
+	return fmt.Errorf("%s", b.String())
 }
 
 // findingTexts is each finding in evidence: a heading outside a code fence, or
@@ -855,30 +968,36 @@ func bodyMatches(want, sum, exact string) bool {
 	return want != "" && (want == sum || want == exact)
 }
 
-// capRefusal is read out of a log in the morning, so it names the count, the cap,
-// the key the number came from, what the reviewer does instead and what the
-// operator can do.
-//
-// Backend-aware, because `drover follow-up` refuses under [register] backend =
-// "github" and a refusal that sends a reviewer to a command that will refuse is
-// a dead end.
-func (s *session) capRefusal(id string, n, limit int) error {
-	file := fmt.Sprintf(
-		"    drover new <kind> \"<what you found>\" --found-in %s -f <file>", id)
-	if s.cfg.RegisterBackend() == config.BackendFile {
-		file = fmt.Sprintf("    drover follow-up open \"<what you found>\" --owner %s --sev <C|H|M|L>", id)
+// capRefusal is read out of a log in the morning, so it names the count, the
+// cap, where the findings went and what the operator can do. It names no
+// filing command: an unmerged item's findings are its own unfinished work, and
+// filed they would let it merge carrying them. The item parks for a decision.
+func capRefusal(id string, n, limit int, findings string) error {
+	kept := "The findings are kept in " + findings + "; the item body is untouched."
+	if findings == "" {
+		kept = "The findings file would not write, so they live in this session's output alone; the item body is untouched."
 	}
 	return fmt.Errorf(
 		"%s has been sent back %d times and [review] max_review_rounds is %d: this finding does not go\n"+
-			"back to the branch. The refusal is recorded; the item body is untouched.\n\n"+
-			"The branch is no longer the destination. File it and let the work finish:\n\n"+
-			"%s\n\n"+
-			"Then record the look, which the cap does not change:\n\n"+
+			"back to the branch, and nothing is filed. The refusal is recorded. %s\n\n"+
+			"Record the look, which the cap does not change:\n\n"+
 			"    drover audit %s <reviewed|verified> --code-by agent \"<what you traced>\"\n\n"+
-			"To send it back anyway, the operator raises [review] max_review_rounds or runs request-changes --over-limit.\n"+
-			"Both are the operator's: --over-limit refuses inside a session drover launched, and the\n"+
-			"config is not this session's to edit",
-		id, n, limit, file, id)
+			"drive parks %s %s, and the operator decides it, with one of:\n\n"+
+			"    drover amend %s -f {requirements} --reason {text}   # the contract changes\n"+
+			"    drover signoff %s {n} {what was checked}            # a person meets the requirement\n"+
+			"    drover shelve %s                                    # the item stops here\n"+
+			"    drover request-changes %s -f %s --over-limit        # it goes back to the branch anyway\n\n"+
+			"The choice is the operator's, not this session's",
+		id, n, limit, kept, id, id, passNeedsDecision, id, id, id, id, findingsArg(findings))
+}
+
+// findingsArg is the -f an over-limit send-back reads: the kept findings, or
+// a placeholder where none were kept.
+func findingsArg(findings string) string {
+	if findings == "" {
+		return "{file}"
+	}
+	return findings
 }
 
 func init() {

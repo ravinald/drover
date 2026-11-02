@@ -78,8 +78,11 @@ type driveInputs struct {
 // a template that will not read is reported by the launch that needs it.
 func (s *session) snapshotInputs(reviewer string) *driveInputs {
 	in := &driveInputs{cfg: s.cfg, reviewer: reviewer, toml: s.cfg.Raw()}
-	_, in.prompt, _ = prompts.Load(s.cfg.Abs(s.cfg.Prompts.Implement), "default", prompts.DefaultTemplate())
-	_, in.review, _ = prompts.Load(s.cfg.Abs(s.cfg.Prompts.Review), "review", prompts.ReviewTemplate())
+	// An unreadable override records as the built-in alone; the launch that
+	// needs it reports the read.
+	implement, _ := loadPrompt(s.cfg, prompts.SlotImplement)
+	review, _ := loadPrompt(s.cfg, prompts.SlotReview)
+	in.prompt, in.review = implement.Source(), review.Source()
 	return in
 }
 
@@ -106,13 +109,10 @@ func loadDriveInputs() (*driveInputs, *session, error) {
 // validateTemplates renders the implement and review templates cfg names against
 // the sample brief, so a resume refuses a template every launch would refuse.
 func validateTemplates(cfg *config.Config) error {
-	for _, t := range []struct{ path, name, fallback string }{
-		{cfg.Prompts.Implement, "default", prompts.DefaultTemplate()},
-		{cfg.Prompts.Review, "review", prompts.ReviewTemplate()},
-	} {
-		name, text, err := prompts.Load(cfg.Abs(t.path), t.name, t.fallback)
+	for _, slot := range []string{prompts.SlotImplement, prompts.SlotReview} {
+		tmpl, err := loadPrompt(cfg, slot)
 		if err == nil {
-			_, err = prompts.Render(name, text, prompts.SampleFor(cfg.DeclaredKeys(), cfg.Verify))
+			_, err = tmpl.Render(prompts.SampleFor(cfg.DeclaredKeys(), cfg.Verify))
 		}
 		if err != nil {
 			return err
@@ -269,7 +269,7 @@ func (s *session) reverify(ctx context.Context, it backlog.Item, d *DriveItem,
 	// request-changes points the process's stdout elsewhere while it writes, which two
 	// slots must not do at once; the trunk stage does it under this lock too.
 	release := s.holdTrunk()
-	err = s.requestChangesFromVerify(it, "The item's verify command changed while the drive was paused, and the new one refused this branch. Its output:", gout)
+	err = s.requestChangesFromVerify(it, ledger.ChangesVerify, "The item's verify command changed while the drive was paused, and the new one refused this branch. Its output:", gout)
 	release()
 	if err != nil {
 		return park(parkGateRefused, "the new verify command refused this branch after a resume, and the finding could not be written back: "+err.Error()), false, true

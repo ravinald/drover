@@ -134,11 +134,11 @@ func TestPromptNamesNoBranchWithoutGit(t *testing.T) {
 		t.Errorf("branch = %q, want empty — nothing will create it", d.Branch)
 	}
 
-	name, text, err := prompts.Load("", "default", prompts.DefaultTemplate())
+	tmpl, err := prompts.Load(prompts.SlotImplement, "")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	body, err := prompts.Render(name, text, d)
+	body, err := tmpl.Render(d)
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}

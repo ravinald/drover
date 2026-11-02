@@ -10,6 +10,7 @@ import (
 
 	"github.com/ravinald/drover/internal/backlog"
 	"github.com/ravinald/drover/internal/config"
+	"github.com/ravinald/drover/internal/ledger"
 )
 
 // seqFile is one file a [numbered_files] glob numbers: its path from the repository
@@ -269,9 +270,10 @@ func (s *session) sequenceHold(it backlog.Item, d *DriveItem, park func(cause, w
 }
 
 // requestChangesNumbered sends a branch back with the files that cannot keep their
-// numbers. It counts against max_review_rounds as a gate failure does.
+// numbers. Its changes row names numbered_files as its source, so it is not a
+// review round under max_review_rounds.
 func (s *session) requestChangesNumbered(it backlog.Item, d *DriveItem, park func(cause, why string) DriveItem, trunk, sha, out string) DriveItem {
-	if err := s.requestChangesFromVerify(it, sequenceHeader(trunk, sha), out); err != nil {
+	if err := s.requestChangesFromVerify(it, ledger.ChangesNumberedFiles, sequenceHeader(trunk, sha), out); err != nil {
 		return park(parkGateRefused, "numbered files on "+d.Branch+" clash with or sort below "+trunk+
 			" and the finding could not be written back: "+err.Error())
 	}

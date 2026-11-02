@@ -58,12 +58,16 @@ type driveSched struct {
 	// session for. A second conflict on one of them parks for a person: the
 	// trunk is moving faster than the item's rounds can follow it.
 	conflicted map[string]bool
+	// sentBack is every item this drive already requeued for its implementing
+	// session over a refusal its own diff caused. A second one parks for a
+	// person, because a check the session could not turn green once is not
+	// worth a session per head.
+	sentBack map[string]bool
 
 	// Shared across every item's session, and touched only inside the trunk
 	// stage: each item caught up to the same trunk commit asks the same question
-	// of it, and the trunk's branch protection does not change between merges.
+	// of it.
 	trunkResults map[string]trunkResult
-	forgeWait    *forgeWait
 	// usage is usage_admission's hold, read by the dispatcher and by every
 	// item at each stage that launches a session.
 	usage *usageGate
@@ -76,7 +80,7 @@ type driveSched struct {
 
 func newDriveSched() *driveSched {
 	q := &driveSched{gone: map[int]bool{}, trunkResults: map[string]trunkResult{}, holds: map[string]lease.Hold{},
-		conflicted: map[string]bool{}}
+		conflicted: map[string]bool{}, sentBack: map[string]bool{}}
 	q.cond = sync.NewCond(&q.mu)
 	return q
 }
@@ -172,6 +176,18 @@ func (q *driveSched) spendConflict(id string) bool {
 	return true
 }
 
+// spendSendBack takes id's one requeue over a gate refusal for this drive, and
+// reports false when an earlier one already took it.
+func (q *driveSched) spendSendBack(id string) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.sentBack[id] {
+		return false
+	}
+	q.sentBack[id] = true
+	return true
+}
+
 func (q *driveSched) draining() error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -231,9 +247,8 @@ func (s *session) inTrunkStage(it backlog.Item, fn func() DriveItem, park func(c
 		return park(parkDrained, fmt.Sprintf(
 			"the drive stopped while this item waited for the trunk (%v); its review passed, and nothing was updated, verified, opened as a pull request or merged", cause))
 	}
-	s.trunkResults, s.forgeWait = q.trunkResults, q.forgeWait
+	s.trunkResults = q.trunkResults
 	out := fn()
-	q.forgeWait = s.forgeWait
 	if out.stop != nil {
 		q.drain(out.stop)
 	}

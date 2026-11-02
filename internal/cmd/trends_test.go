@@ -335,6 +335,7 @@ func TestTheCatchUpVerifyTimeIsOnTheRowAfterIt(t *testing.T) {
 func TestARequestedChangesCatchUpsVerifyTimeIsNotOnTheChangesRow(t *testing.T) {
 	isolate(t)
 	ghLog := mergeProject(t)
+	parkGateRefusals(t)
 	dir, remote := forge(t, ghLog)
 	moveTrunk(t, remote, "a.txt", "a")
 	t.Setenv("DROVER_TEST_CHECK_REFUSE", "a.txt implemented.txt")

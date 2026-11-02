@@ -99,6 +99,10 @@ type Row struct {
 	// the project has no branches. A read that did not complete is present as
 	// state unknown with its error, never absent.
 	PR *PRState `json:"pr,omitempty"`
+	// Branch is the branch the latest ledger row recorded for the item's work,
+	// absent for an item nothing has run. The table names it on the second line
+	// only for an item that has not merged.
+	Branch string `json:"branch,omitempty"`
 	// Started is the first stage row of the item's latest run, Stage and
 	// StageStarted the latest stage row, and Finished the completion row that
 	// closed the run. Each is RFC 3339 and absent when its row carries no ts,
@@ -244,8 +248,11 @@ which now includes who else is here.
 
 Under each row a second line, dim and indented to the id, says where the item
 came from and who last wrote it, in fixed-width fields so a column scans:
-ORIGIN (28), CREATED (12), EDITED (12), then EDITOR.
+ORIGIN (28), CREATED (12), EDITED (12), EDITOR, then BRANCH for an item not
+merged whose work a ledger row recorded on a branch, cut in the middle to fit.
       operator intake #44           Oct 27 09:21  Oct 27 10:02 accept · operator
+On a terminal a header names the columns of both lines and the footer keys the
+markers printed; a pipe gets neither.
 ORIGIN is the origin row drover writes when new, intake or split makes the
 item, or unrecorded for one made before it did. CREATED for an unrecorded item
 is the earliest ledger row naming it, marked ≤. EDITOR is the command and actor
@@ -747,6 +754,7 @@ func (s *session) rows() []Row {
 			Usage:       spent[it.ID.Bare()],
 		}
 		row.State, row.Missing = s.workState(it, logDir)
+		row.Branch = s.ledger.Branch(it.ID.Bare())
 		if pk, ok := s.ledger.Parked(it.ID.Bare()); ok {
 			row.Park, row.Detail = pk.Park, pk.Detail
 		}
@@ -984,6 +992,26 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error, now time.Time
 	if width < minTitle {
 		width = minTitle
 	}
+	// The branch closes the second line, so the editor before it is padded to
+	// the widest one printed, and the branch takes what the screen has left.
+	editorWidth, branched := 0, false
+	for _, r := range rows {
+		if (!statusAll && r.State == stateDone) || !keep(r) || !recent(r) {
+			continue
+		}
+		if r.Edited != nil {
+			editorWidth = max(editorWidth, utf8.RuneCountInString(r.Edited.editor()))
+		}
+		branched = branched || r.showBranch()
+	}
+	editorWidth = min(editorWidth, maxEditor)
+	branchWidth := 0
+	if cols, measured := screenWidth(); measured {
+		branchWidth = max(cols-(secondIndent+originWidth+2*timeWidth+5+editorWidth+2), minBranch)
+	}
+	header := keyed(w)
+	glyphs, hereShown := map[string]bool{}, false
+
 	c := tally(rows)
 	intakeSeen := false
 	shown, hidden, offRank, old := 0, 0, 0, 0
@@ -1009,6 +1037,11 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error, now time.Time
 			old++
 			continue
 		}
+		if header && shown == 0 {
+			s.printHeader(w, tint, colWidth, prWidth, width, editorWidth, branched)
+		}
+		glyphs[glyph(r.State)] = true
+		hereShown = hereShown || r.Current
 		// Deferred to the first visible intake row: on a project whose intake is
 		// all merged, a header over nothing reads as a rendering bug.
 		// It separates two sections, so a project with only one is owed none, and
@@ -1046,7 +1079,14 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error, now time.Time
 			glyph(r.State), mark, id, cell, width, trunc(r.Title, width), note)
 		fmt.Fprintln(w, paint(line, tint && r.Current))
 		if !statusShort && r.Origin != nil {
-			fmt.Fprintln(w, sgr(r.secondLine(now), pal.Muted, tint))
+			branch := ""
+			if r.showBranch() {
+				branch = r.Branch
+				if branchWidth > 0 {
+					branch = truncMiddle(branch, branchWidth)
+				}
+			}
+			fmt.Fprintln(w, sgr(r.secondLine(now, editorWidth, branch), pal.Muted, tint))
 		}
 	}
 	// An empty table is an answer, and two blank lines is not a way to give it.
@@ -1089,6 +1129,9 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error, now time.Time
 			fmt.Fprintln(w, strings.Join(line, "  ·  "))
 		}
 	}
+	if header && shown > 0 {
+		fmt.Fprintln(w, sgr(glyphKey(glyphs, hereShown), pal.Muted, tint))
+	}
 	// The cell carries the reason in a word; this is what gh said, which is
 	// the part someone acts on.
 	if prErr != nil && prWidth > 0 {
@@ -1119,6 +1162,69 @@ func (s *session) printTable(w io.Writer, rows []Row, prErr error, now time.Time
 		fmt.Fprintf(w, "\n▸ here: %s\n", describeBranch(branch, index, func(n int) string { return s.registerRefTo(os.Stdout, n) }))
 	}
 	s.printLease(w, said)
+}
+
+// maxEditor bounds the padded editor cell, so one long "request-changes · D20"
+// does not push every branch off the screen; minBranch is the least of a branch
+// the line keeps however narrow the screen.
+const (
+	maxEditor = 24
+	minBranch = 24
+)
+
+// showBranch is whether the second line names the item's branch: one a row
+// recorded, on an item that has not merged. A merged item's branch is history
+// the PR column already answers for.
+func (r Row) showBranch() bool { return r.Branch != "" && r.State != stateDone }
+
+// keyed is whether the table carries its column header and marker key: on a
+// terminal only, so a pipe, a file and a wrapper reading the first line see the
+// table they always did.
+func keyed(w io.Writer) bool {
+	f, ok := w.(*os.File)
+	return ok && onTerminal(f)
+}
+
+// printHeader names the columns of both lines, aligned the way printTable
+// aligns the rows. The cell beside the id is [status] column's key when one is
+// set, since that is what it carries, and the namespace kind otherwise.
+func (s *session) printHeader(w io.Writer, tint bool, colWidth, prWidth, width, editorWidth int, branched bool) {
+	label := "KIND"
+	if key := s.cfg.Status.Column; key != "" {
+		label = strings.ToUpper(key)
+	}
+	cell := fmt.Sprintf("%-*s", colWidth, trunc(label, colWidth))
+	if prWidth > 0 {
+		cell += " " + fmt.Sprintf("%-*s", prWidth, "PR")
+	}
+	fmt.Fprintln(w, sgr(strings.TrimRight(fmt.Sprintf("%s %s %-5s %s %-*s %s", "   ", " ", "ID", cell, width, "TITLE", "STATE"), " "), pal.Muted, tint))
+	if statusShort {
+		return
+	}
+	editor := "EDITOR"
+	if branched {
+		editor = padRunes(editor, editorWidth) + "  BRANCH"
+	}
+	fmt.Fprintln(w, sgr(fmt.Sprintf("%s%-*s  %-*s  %-*s %s", strings.Repeat(" ", secondIndent),
+		originWidth, "ORIGIN", timeWidth, "CREATED", timeWidth, "EDITED", editor), pal.Muted, tint))
+}
+
+// glyphKey says what each marker printed means, in the order glyph lists them,
+// naming only the ones present so the key stays one short line.
+func glyphKey(seen map[string]bool, here bool) string {
+	var parts []string
+	for _, k := range []struct{ glyph, means string }{
+		{"[>]", "ready"}, {"[~]", "implemented"}, {"[ ]", "blocked"},
+		{"[?]", "scaffold"}, {"[!]", "unreadable"}, {"[x]", "merged"},
+	} {
+		if seen[k.glyph] {
+			parts = append(parts, k.glyph+" "+k.means)
+		}
+	}
+	if here {
+		parts = append(parts, "▸ checked out")
+	}
+	return "key: " + strings.Join(parts, "  ")
 }
 
 // leaseUnnamed is the holder between taking the tree and writing its account.

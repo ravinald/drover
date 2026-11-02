@@ -117,6 +117,21 @@ func (s *session) driftRef() string {
 // file, because nothing else separates `go.mod:3` from `db.internal:5432`.
 func (s *session) refDrift(it backlog.Item, ref string) []string {
 	var out []string
+	for _, d := range s.drifted(it, ref) {
+		out = append(out, d.msg)
+	}
+	return out
+}
+
+// citeDrift is one citation refDrift reports: the citation as the body wrote
+// it, so two refs can be compared on it, and what is wrong with it on one.
+type citeDrift struct {
+	cite string
+	msg  string
+}
+
+func (s *session) drifted(it backlog.Item, ref string) []citeDrift {
+	var out []citeDrift
 	for _, r := range citedRefs(it.Body) {
 		kind, err := s.objectType(ref, r.Path)
 		rooted := !strings.Contains(r.Path, "/")
@@ -124,10 +139,10 @@ func (s *session) refDrift(it backlog.Item, ref string) []string {
 		case rooted && (err != nil || kind != "blob"):
 			continue
 		case err != nil:
-			out = append(out, fmt.Sprintf("%s names a file %s does not have", r.Text, ref))
+			out = append(out, citeDrift{r.Text, fmt.Sprintf("%s names a file %s does not have", r.Text, ref)})
 			continue
 		case kind != "blob":
-			out = append(out, fmt.Sprintf("%s names a directory on %s, which has no lines", r.Text, ref))
+			out = append(out, citeDrift{r.Text, fmt.Sprintf("%s names a directory on %s, which has no lines", r.Text, ref)})
 			continue
 		}
 		blob, err := gitcmd.Command(s.cfg.Root, "cat-file", "blob", ref+":"+r.Path).Output()
@@ -139,8 +154,8 @@ func (s *session) refDrift(it backlog.Item, ref string) []string {
 			n++
 		}
 		if r.End > n {
-			out = append(out, fmt.Sprintf("%s runs past the end of %s, which has %d %s on %s",
-				r.Text, r.Path, n, plural(n, "line", "lines"), ref))
+			out = append(out, citeDrift{r.Text, fmt.Sprintf("%s runs past the end of %s, which has %d %s on %s",
+				r.Text, r.Path, n, plural(n, "line", "lines"), ref)})
 		}
 	}
 	return out

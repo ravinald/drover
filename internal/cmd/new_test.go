@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/runner"
 )
 
@@ -192,6 +195,7 @@ func TestNewNamesTheItemAFindingCameFrom(t *testing.T) {
 	write(t, filepath.Join(dir, "work", "B01-finish-refuses-after-done.md"),
 		"---\ntitle: finish refuses after done\ndeps:\nkind: bug\n---\n\n1. Fix it.\n")
 
+	markMerged(t, dir, "B1")
 	newFoundIn = "B1"
 	out := capture(t, func() {
 		if err := execute(t, "new", "bug", "the walk over-excludes on a nullable column"); err != nil {
@@ -245,6 +249,9 @@ func TestNewRefusesAFoundInThatIsNotAnItem(t *testing.T) {
 func newFiled(t *testing.T, dir, title, foundIn, description string) (string, string) {
 	t.Helper()
 	t.Cleanup(func() { newSev, newFoundIn, newFile = "", "", "" })
+	if foundIn != "" {
+		markMerged(t, dir, foundIn)
+	}
 	newFoundIn, newFile = foundIn, ""
 	if description != "" {
 		newFile = filepath.Join(t.TempDir(), "finding.md")
@@ -436,5 +443,71 @@ func TestNewInsideAnotherProjectWritesThereDespiteDroverRoot(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Errorf("new run inside %s wrote into %s's backlog: %v", scratch, runner.EnvRoot, entries)
+	}
+}
+
+// markMerged records id merged the way finish does, so a test can file against
+// it.
+func markMerged(t *testing.T, dir, id string) {
+	t.Helper()
+	merged := true
+	if err := ledger.Append(filepath.Join(dir, "ledger.jsonl"), ledger.Row{ID: id, Merged: &merged, Date: ledger.Today()}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// snapshot is every file under dir by path and content, so a refusal that
+// promises to write nothing can be held to it.
+func snapshot(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := os.ReadFile(path) // #nosec G304 -- the test's own tree
+		out[path] = string(b)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// A defect in an unmerged item's work is that item's unfinished work, and goes
+// back to its branch. --found-in naming one would file it and let the item
+// merge carrying it, so new refuses until the item is recorded merged.
+func TestNewFoundInRefusesAnUnmergedItem(t *testing.T) {
+	t.Cleanup(func() { newSev, newFoundIn = "", "" })
+	dir := newProject(t)
+	write(t, filepath.Join(dir, "work", "B01-finish-refuses-after-done.md"),
+		"---\ntitle: finish refuses after done\ndeps:\nkind: bug\n---\n\n1. Fix it.\n")
+	write(t, filepath.Join(dir, "ledger.jsonl"), `{"id":"B1","stage":"implement","runner":"claude","date":"2026-10-28"}`+"\n")
+	before := snapshot(t, dir)
+
+	newFoundIn = "B1"
+	var err error
+	capture(t, func() { err = execute(t, "new", "bug", "the walk over-excludes on a nullable column") })
+	if Code(err) != ExitRefused {
+		t.Fatalf("new --found-in an unmerged item: exit %d (%v), want %d", Code(err), err, ExitRefused)
+	}
+	for _, want := range []string{"B1 has not merged", "drover request-changes B1 -f {file}", "drover new {kind} {title} -f {file}"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q:\n%s", want, err)
+		}
+	}
+	if got := snapshot(t, dir); !maps.Equal(got, before) {
+		t.Errorf("the refusal wrote to the tree:\nbefore %v\nafter  %v", slices.Sorted(maps.Keys(before)), slices.Sorted(maps.Keys(got)))
+	}
+
+	markMerged(t, dir, "B1")
+	newFoundIn = "B1"
+	capture(t, func() { err = execute(t, "new", "bug", "the walk over-excludes on a nullable column") })
+	if err != nil {
+		t.Fatalf("new --found-in a merged item: %v", err)
+	}
+	if bodies, _ := filepath.Glob(filepath.Join(dir, "work", "B*-the-walk-over-excludes*.md")); len(bodies) != 1 {
+		t.Errorf("scaffolded %d bodies against the merged item, want 1", len(bodies))
 	}
 }

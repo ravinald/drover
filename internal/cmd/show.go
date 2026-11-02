@@ -169,6 +169,12 @@ type Show struct {
 	Rounds          int  `json:"rounds"`
 	MaxReviewRounds int  `json:"max_review_rounds,omitempty"`
 	Capped          bool `json:"at_limit,omitempty"`
+	// VerifySendBacks, ConflictSendBacks and NumberedSendBacks are the times
+	// drive sent the branch back on its own evidence, by source. None is a
+	// round under max_review_rounds, which is why they are not in Rounds.
+	VerifySendBacks   int `json:"verify_send_backs,omitempty"`
+	ConflictSendBacks int `json:"conflict_send_backs,omitempty"`
+	NumberedSendBacks int `json:"numbered_send_backs,omitempty"`
 	// Pass is what the most recent drive read from this item's last review, and
 	// PassStale says the item has run since, which leaves the pass a record of
 	// that pass rather than a statement about the branch as it stands. Absent
@@ -402,6 +408,7 @@ the same text as body.`,
 		sh.Runs, sh.Reviews, sh.Rounds = c.Of(ledger.StageImplement), c.Of(ledger.StageReview), c.ChangesRequested
 		sh.MaxReviewRounds = s.cfg.Review.MaxReviewRounds
 		sh.Capped = sh.MaxReviewRounds > 0 && sh.Rounds >= sh.MaxReviewRounds
+		sh.VerifySendBacks, sh.ConflictSendBacks, sh.NumberedSendBacks = c.VerifySendBacks, c.ConflictSendBacks, c.NumberedSendBacks
 		sh.Pass, _, sh.PassStale, _ = s.ledger.Pass(id)
 		if pk, ok := s.ledger.Parked(id); ok {
 			sh.Parked = &ShowPark{Park: pk.Park, Detail: pk.Detail, Evidence: pk.Evidence, Log: pk.Log, Date: pk.Date}
@@ -594,6 +601,9 @@ func (sh Show) print(cfg *config.Config) {
 		}
 		fmt.Printf("    sent back      %d%s%s\n", sh.Rounds, limit, capped)
 	}
+	if by := driveSendBacks(sh); by != "" {
+		fmt.Printf("    drive sent back %s  (not review rounds)\n", by)
+	}
 	if sh.RecentUnknown != "" {
 		fmt.Printf("    recent commits  unknown (%s)\n", sh.RecentUnknown)
 	} else if len(sh.Recent) > 0 {
@@ -703,6 +713,25 @@ func (s *session) created(path string) (string, string) {
 // the project default. The two are the answers this record exists to keep
 // apart: one says a runner ran the stage, the other says nothing did or that
 // whatever did went unrecorded.
+// driveSendBacks names drive's own send-backs by source, or "" when there were
+// none.
+func driveSendBacks(sh Show) string {
+	var parts []string
+	for _, b := range []struct {
+		n      int
+		source string
+	}{
+		{sh.VerifySendBacks, ledger.ChangesVerify},
+		{sh.ConflictSendBacks, ledger.ChangesTrunkConflict},
+		{sh.NumberedSendBacks, ledger.ChangesNumberedFiles},
+	} {
+		if b.n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", b.n, b.source))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 // rounds is the parenthetical beside a runner, and nothing at all below two.
 // One run of an item is every item that went right the first time.
 //

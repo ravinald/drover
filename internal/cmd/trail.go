@@ -61,6 +61,31 @@ func (s *session) keepRound(it backlog.Item, text string) (string, error) {
 	return path, nil
 }
 
+// keepRefused writes the evidence of a request for changes the cap turned
+// away beside the kept rounds, as refused-N rather than changes-N: it never
+// reached the body, so no run read it, and listing it among the rounds would
+// tell the next run it was sent back.
+func (s *session) keepRefused(it backlog.Item, text string) (string, error) {
+	n := s.ledger.Counts(it.ID.Bare()).Refusals + 1
+	path := s.refusedPath(it, n)
+	for ; fileExists(path); n++ {
+		path = s.refusedPath(it, n+1)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		return "", err
+	}
+	header := fmt.Sprintf("# %s refused %d · %s\n\n", it.ID.Bare(), n, ledger.Today())
+	if err := os.WriteFile(path, []byte(header+strings.TrimSpace(text)+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func (s *session) refusedPath(it backlog.Item, n int) string {
+	return s.cfg.Abs(filepath.Join(s.cfg.Paths.Reports,
+		fmt.Sprintf("%s-%s.refused-%d.md", it.ID.Stem(), it.Slug, n)))
+}
+
 func (s *session) roundPath(it backlog.Item, n int) string {
 	return s.cfg.Abs(filepath.Join(s.cfg.Paths.Reports,
 		fmt.Sprintf("%s-%s.changes-%d.md", it.ID.Stem(), it.Slug, n)))

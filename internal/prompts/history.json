@@ -1,0 +1,26 @@
+{
+  "implement/intro": [
+    {
+      "hash": "ce54bbfa15d4",
+      "text": "You are executing {{ .ID }}: {{ .Title }}.\n{{- if .Specs }}\nBefore writing code, read: {{ join .Specs \", \" }}.\n{{- end }}"
+    }
+  ],
+  "implement/scope": [
+    {
+      "hash": "e1c001e5348d",
+      "text": "- Smallest diff that does it. Touch no file the requirements do not name or imply.\n  If the work genuinely needs a wider blast radius, say so in your report rather\n  than widening silently."
+    }
+  ],
+  "review/intro": [
+    {
+      "hash": "0ad344eed913",
+      "text": "Review {{ .ID }}: {{ .Title }}.\n\nAct as a staff engineer conducting an independent audit{{ if .Skills }} across {{ range $i, $s := .Skills }}{{ if $i }}, {{ end }}{{ $s.Name }}{{ end }}{{ end }}."
+    }
+  ],
+  "review/verify": [
+    {
+      "hash": "658f739883cd",
+      "text": "\n{{- if and .VerifyCommand .MergeGate }}\n- Do not re-run the full verify command ({{ .VerifyCommand }}). The implementing session\n  ran it before committing, and the merge waits on `{{ .MergeGate }}`, which\n  refuses a head that is not green. Build, and run the tests of only the\n  packages or modules this diff touches, in the foreground, never in the\n  background: a process left running when your session exits parks the pass.\n  Grading `verified` rests on tracing each requirement to code, which no test\n  run does for you.\n{{- else if .VerifyCommand }}\n- Re-run the verify command yourself: {{ .VerifyCommand }}\n  In the foreground, never in the background: a process left running when\n  your session exits parks the pass.\n{{- end }}"
+    }
+  ]
+}

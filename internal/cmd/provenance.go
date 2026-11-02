@@ -231,7 +231,7 @@ const (
 // has to say on its own that it belongs to a merged row for the drover-status
 // filter to drop it with that row, and the glyph above already says merged to a
 // reader, so the mark is one nobody sees.
-func (r Row) secondLine(now time.Time) string {
+func (r Row) secondLine(now time.Time, editorWidth int, branch string) string {
 	indent := strings.Repeat(" ", secondIndent)
 	merged := ""
 	if r.State == stateDone {
@@ -258,6 +258,9 @@ func (r Row) secondLine(now time.Time) string {
 	origin := ""
 	if r.Origin != nil {
 		origin = r.Origin.Text
+	}
+	if branch != "" {
+		edited = padRunes(edited, editorWidth) + "  " + branch
 	}
 	return fmt.Sprintf("%s%-*s %s%-*s %s%-*s %s%s", indent,
 		originWidth, trunc(origin, originWidth),

@@ -34,10 +34,6 @@ type session struct {
 	// and gate command, for the life of one drive. Every item caught up to the
 	// same trunk commit asks the same question of it.
 	trunkResults map[string]trunkResult
-	// forgeWait is whether the trunk has required checks, read once per drive:
-	// the trunk's protection does not change between one item's merge and the
-	// next's.
-	forgeWait *forgeWait
 	// slot is this item's place in a drive's schedule, nil everywhere else.
 	slot *driveSlot
 	// inputs is what a drive's session runs under, so a stage boundary can
@@ -209,6 +205,13 @@ func (s *session) launched(it backlog.Item, cmd, stage, name string) (runner.Whe
 	at.Session = runner.NewSession()
 	row := ledger.Row{ID: it.ID.Bare(), Stage: stage, Runner: name, Session: at.Session, Date: ledger.Today(),
 		Conflict: stage == ledger.StageImplement && s.conflict != nil}
+	// The branch as rendered now, which is the one this session works on, so
+	// status names a running item's branch before its first push records a head.
+	if stage != ledger.StageDraft {
+		if b, err := s.branchFor(it); err == nil {
+			row.Branch = b
+		}
+	}
 	if stage == ledger.StageReview {
 		sum, err := bodyDigest(it.Path)
 		if err != nil {

@@ -274,10 +274,11 @@ Then do the part no tool can:
    records how hard you looked, not how the item scored. What happens to the gap
    depends on whether the work can still be changed. Before the merge the three
    `BRANCH-` cases above go back through a request for changes and `FIX-IN-REVIEW` is
-   corrected in this pass; either way nothing is filed. After the merge the
-   branch is gone, so each `BRANCH-` case becomes a follow-up filed against its
-   owner, `FIX-IN-REVIEW` has no branch left to commit to and becomes
-   `NEW-ITEM`, and the row still records that someone traced them all.
+   corrected in this pass; either way nothing is filed. A defect found after
+   the merge is a bug: the branch is gone, so it is filed through intake (your
+   tracker's bug label, then `drover intake <n>`) or with
+   `drover new <kind> "<title>" -f <file>` without `--found-in`, and the row
+   still records that someone traced them all.
    Drop to `reviewed` only when you could not trace one.
 
    **`--code-by` is not a formality.** It names who wrote the code under
