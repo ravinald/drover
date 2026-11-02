@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -92,8 +94,34 @@ func (l *Live) UnmarshalTOML(data any) error {
 	return nil
 }
 
-// MarshalTOML is the empty table, what [live] means when nothing declares it.
-func (l Live) MarshalTOML() ([]byte, error) { return []byte("{}"), nil }
+// MarshalTOML renders [live] as one inline table, every check nested in it,
+// so a printed config carries each key the project declared. The empty table
+// is what [live] means when nothing declares it.
+func (l Live) MarshalTOML() ([]byte, error) {
+	var parts []string
+	if l.Default != "" {
+		parts = append(parts, "default = "+strconv.Quote(l.Default))
+	}
+	if l.Wait != "" {
+		parts = append(parts, "wait = "+strconv.Quote(l.Wait))
+	}
+	for _, n := range l.Names() {
+		c := l.Checks[n]
+		argv := make([]string, len(c.Argv))
+		for i, a := range c.Argv {
+			argv[i] = strconv.Quote(a)
+		}
+		check := []string{"argv = [" + strings.Join(argv, ", ") + "]"}
+		if c.Lock != "" {
+			check = append(check, "lock = "+strconv.Quote(c.Lock))
+		}
+		parts = append(parts, Quote(n)+" = { "+strings.Join(check, ", ")+" }")
+	}
+	if len(parts) == 0 {
+		return []byte("{}"), nil
+	}
+	return []byte("{ " + strings.Join(parts, ", ") + " }"), nil
+}
 
 // Names is every declared check, sorted.
 func (l Live) Names() []string {
