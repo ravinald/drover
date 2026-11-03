@@ -701,7 +701,7 @@ func codeEvidence(code []judged) string {
 
 // noneFirst heads a gate's refusal with the report that no workflow ran on the
 // head, where one was made, because that is a different fix from a red check:
-// CI that never fires on a branch push rather than a check that failed.
+// CI that has not run on the head rather than a check that failed.
 func noneFirst(none, reason string) string {
 	if none == "" {
 		return reason

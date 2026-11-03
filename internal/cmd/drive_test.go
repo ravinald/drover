@@ -2944,7 +2944,7 @@ func TestEveryEntryFormHoldsEveryAwkwardName(t *testing.T) {
 				if len(hits) != 1 || hits[0] != file {
 					t.Errorf("entry %q denied %q, want exactly [%q]", entry, hits, file)
 				}
-				park, reason := s.denyHold("work", "main")
+				park, reason, _ := s.denyHold("work", "main")
 				if park != "protected_paths" {
 					t.Fatalf("entry %q parked %q (%s), want protected_paths", entry, park, reason)
 				}
@@ -3429,6 +3429,9 @@ func TestADriveHoldsANonASCIIFileUnderADeniedDirectory(t *testing.T) {
 	if d := rows[0]; d.Outcome != outcomeParked || d.Park != "protected_paths" || d.Merged {
 		t.Errorf("item 1 is %q/%q/merged=%v (%s), want %q/protected_paths/false",
 			d.Outcome, d.Park, d.Merged, d.Reason, outcomeParked)
+	}
+	if d := rows[0]; d.Detail != detailProtected || !strings.Contains(d.Evidence, " matches backend/migrations/") {
+		t.Errorf("detail %q, evidence %q; want %s naming the entry the file matched", d.Detail, d.Evidence, detailProtected)
 	}
 	for _, c := range ghCalls(t, ghLog) {
 		if strings.HasPrefix(c, "pr merge") {

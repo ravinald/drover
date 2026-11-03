@@ -669,7 +669,8 @@ is empty for the next item too.
 Every park carries a detail beside its cause: why the session or the push under
 it failed. runner_exit, tool_denied, background_left_running, stream_cut, auth,
 oom, push_hook, push_network, checks_pending on a merge branch protection refused,
-or unknown with the log's last lines. The ledger
+protected_file naming the protected_paths entry each file matched, or unknown
+with the log's last lines. The ledger
 keeps it, and status shows the item as parked: <park> (<detail>) until it runs
 again. A review that died, was cut, or was killed is rerun once on the same
 head ([supervise] rerun_lost_review); a second loss parks. A runner whose
@@ -3488,6 +3489,15 @@ func (s *session) runGateOn(ctx context.Context, branch, trunk string, merged bo
 	return gateForge, out, runErr
 }
 
+// denyGlobs is [drive] protected_paths, or the built-in set when it declares
+// none.
+func (s *session) denyGlobs() []string {
+	if globs := s.cfg.Loop.DenyPaths; len(globs) > 0 {
+		return globs
+	}
+	return []string{".drover.toml", ".github/workflows/*", ".github/*.sh", "Makefile"}
+}
+
 // deniedPaths are the files a merge refuses to carry.
 //
 // An agent that edits the gate, a workflow or the config in its own pull request
@@ -3495,10 +3505,7 @@ func (s *session) runGateOn(ctx context.Context, branch, trunk string, merged bo
 // be reviewed by the loop it just altered. The built-in set is what a project
 // gets when it declares none.
 func (s *session) deniedPaths(branch, trunk string) ([]string, error) {
-	globs := s.cfg.Loop.DenyPaths
-	if len(globs) == 0 {
-		globs = []string{".drover.toml", ".github/workflows/*", ".github/*.sh", "Makefile"}
-	}
+	globs := s.denyGlobs()
 	files, err := s.changedNames(branch, trunk)
 	if err != nil {
 		return nil, fmt.Errorf("could not read what %s changed: %w", branch, err)
@@ -3515,23 +3522,41 @@ func (s *session) deniedPaths(branch, trunk string) ([]string, error) {
 	return hit, nil
 }
 
-// denyHold is the merge hold: the park token and its reason when the branch
-// changes a denied path, empty when the merge may go ahead. The names are
-// quoted for the reason only after the decision is made on the raw bytes.
-func (s *session) denyHold(branch, trunk string) (park, reason string) {
+// denyHold is the merge hold: the park token, its reason and its detail when
+// the branch changes a denied path, empty when the merge may go ahead. The
+// names are quoted for the reason only after the decision is made on the raw
+// bytes. The detail names the entry each file matched, which the reason does
+// not, so the operator can tell a workflow from a gate script without the diff.
+func (s *session) denyHold(branch, trunk string) (park, reason string, detail parkDetail) {
 	hits, err := s.deniedPaths(branch, trunk)
 	switch {
 	case err != nil:
-		return "deny_unreadable", err.Error()
+		return "deny_unreadable", err.Error(), parkDetail{}
 	case len(hits) > 0:
 		how := "merge it by hand"
 		if p, _ := s.cfg.Policy("merge_protected_paths"); supervisorMay(p) {
 			how = "read the diff of each before merging it"
 		}
 		return "protected_paths", "this branch changes " + displayPaths(hits) +
-			", which decides what every later item tonight is measured by; " + how
+				", which decides what every later item tonight is measured by; " + how,
+			parkDetail{Detail: detailProtected, Evidence: s.deniedBy(hits)}
 	}
-	return "", ""
+	return "", "", parkDetail{}
+}
+
+// deniedBy is one line per denied file naming the protected_paths entry it
+// matched.
+func (s *session) deniedBy(files []string) string {
+	lines := make([]string, 0, len(files))
+	for _, f := range files {
+		for _, g := range s.denyGlobs() {
+			if denyMatch(g, f) {
+				lines = append(lines, displayPaths([]string{f})+" matches "+g)
+				break
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // changedNames and trackedNames are the only two readings of the tree a
@@ -4366,7 +4391,8 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 	}
 	d.PR = p.Number
 
-	if p, why := s.denyHold(d.Branch, trunk); p != "" {
+	if p, why, detail := s.denyHold(d.Branch, trunk); p != "" {
+		d.setDetail(detail)
 		return park(p, why)
 	}
 	if p, why, run := s.operatorHold(it); p != "" {
