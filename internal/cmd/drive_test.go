@@ -4390,6 +4390,10 @@ case "$1 $2" in
       fi
       [ -n "${DROVER_TEST_AUTO_MERGES:-}" ] || exit 0 ;;
     esac
+    if [ -n "${DROVER_TEST_MERGE_NEEDS:-}" ] && [ ! -f "$DROVER_TEST_MERGE_NEEDS" ]; then
+      echo 'X Pull request o/r#7 is not mergeable: the base branch policy prohibits the merge.' >&2
+      exit 1
+    fi
     for b; do :; done
     tmp=$(mktemp -d)
     git clone -q "$DROVER_TEST_REMOTE" "$tmp/c" >/dev/null 2>&1 &&

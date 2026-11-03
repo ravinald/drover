@@ -178,6 +178,7 @@ Why drive stopped an item (ledger and `--json` `park`), and the underlying failu
 | `oom`                     | Detail: the session was killed for memory.                                                       |
 | `push_hook`               | Detail: a pre-push hook refused the branch.                                                      |
 | `push_network`            | Detail: the push failed on the network.                                                          |
+| `checks_pending`          | Detail: branch protection refused the merge while a required check had not finished.             |
 | `unknown`                 | Detail: drover could not classify the failure.                                                   |
 | `unrecorded`              | Detail: a park no session caused named no detail; evidence is the reason.                        |
 
