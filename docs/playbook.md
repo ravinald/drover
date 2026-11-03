@@ -220,7 +220,7 @@ Five things, and they are the floor rather than the answer:
 - **`audit` cannot record `verified` from whoever wrote the code.** When the session or `--reviewer` recording it matches a `--code-by` entry, it refuses at the write path, names the entry and exits 3. Whoever wrote the code cannot certify every requirement against it.
 - **An independent audit warns** when the ledger records one runner for both stages, names both, records the row and exits 0. drover cannot tell two sessions of one runner from one session auditing itself. Only you can, so it says what it sees and lets you record what you know.
 - **`drover request-changes` refuses a finding outside the contract.** A review's send-back has to name, for each finding, the numbered requirement it fails or a `BRANCH-REGRESSION`: a defect the branch's own diff introduced that would break something in use. Anything else is a note for the audit, and a round spent on it is one the loop never gets back.
-- **`drover request-changes` refuses past `[review] max_review_rounds`**, once you set one. Off by default, because how many rounds a loop may spend is a question about your budget rather than about correctness.
+- **`drover request-changes` refuses past `[review] max_review_rounds`**, four unless you set another number. A loop past four rounds has mostly been one requirement coming back, and each round is a full implementing session; `0` turns the cap off.
 
 ### How many rounds
 

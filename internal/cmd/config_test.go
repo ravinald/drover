@@ -114,7 +114,7 @@ func TestDiffAnswersForAConfigLoadRefuses(t *testing.T) {
 		// Every table schema_version 1 did not have. [review] matters most:
 		// a project that declares no [review] table at all still gets
 		// max_review_rounds.
-		"[review]", "max_review_rounds = 0",
+		"[review]", "max_review_rounds = 4",
 		"[prompts]", "[severity]", "[run]", "[git]",
 		"trunk = \"\"",
 		"runner_key = \"runner\"",

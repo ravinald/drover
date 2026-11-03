@@ -292,7 +292,8 @@
         "max_review_rounds": {
           "type": "integer",
           "minimum": 0,
-          "description": "How many times a review may send one item back before request-changes refuses. 0, and an absent key, mean no cap. Set it higher than the worst item that went round the loop and finished correctly; the operator escapes one refusal with request-changes --over-limit, which a launched session cannot reach."
+          "default": 4,
+          "description": "How many times a review may send one item back before request-changes refuses. An absent key means 4, and 0 means no cap. Set it higher only where an item went round the loop more than four times and finished correctly; the operator escapes one refusal with request-changes --over-limit, which a launched session cannot reach."
         }
       }
     },

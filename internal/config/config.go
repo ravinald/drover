@@ -210,15 +210,20 @@ type Prompts struct {
 // Review bounds how often a review may send one item back.
 type Review struct {
 	// MaxReviewRounds is how many times a review may send one item back before
-	// `request-changes` refuses. Zero, and an absent key, mean no cap.
+	// `request-changes` refuses. An absent key resolves to
+	// DefaultMaxReviewRounds, and an explicit zero means no cap.
 	//
-	// Off by default, and absent means the same as zero because nothing reads
-	// the difference. A number drover picked would change when `request-changes` refuses
-	// for every project on the day it upgraded, and a cap is a policy about how
-	// much a loop may spend, which drover does not know. Set it higher than the
-	// worst item that went round the loop and merged correctly.
+	// A default rather than off, because an unattended loop with no cap spends
+	// until something outside drover notices: measured across two projects'
+	// drives, every item sent back more than four times either parked anyway or
+	// spent its later rounds on one requirement, each round a full implementing
+	// session. At the cap the item parks for a decision, which costs a person
+	// one look instead of a session per round.
 	MaxReviewRounds int `toml:"max_review_rounds"`
 }
+
+// DefaultMaxReviewRounds is [review] max_review_rounds when nothing declares it.
+const DefaultMaxReviewRounds = 4
 
 // Status shapes the table.
 type Status struct {
@@ -1369,6 +1374,10 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Severity.Key == "" {
 		c.Severity.Key = "severity"
+	}
+	// Declared, not zero: an explicit 0 is the no-cap opt-out.
+	if !c.Declared("review.max_review_rounds") {
+		c.Review.MaxReviewRounds = DefaultMaxReviewRounds
 	}
 	// Canonicalised to letters so a table written with words resolves the same,
 	// and so validate below reports the rank the author wrote.

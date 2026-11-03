@@ -557,15 +557,16 @@ func TestRegisterBackendResolvesFromNoTracker(t *testing.T) {
 
 // A cap is a policy about how much a loop may spend. Absent and zero are one
 // answer because nothing reads the difference, and a negative is a typo.
-func TestTheReviewRoundLimitIsOffUnlessSomebodyTypedIt(t *testing.T) {
+func TestTheReviewRoundLimitIsFourUnlessSomebodyTypedIt(t *testing.T) {
 	for _, c := range []struct {
 		name, extra string
 		want        int
 		refuses     bool
 	}{
-		{"absent", "", 0, false},
-		{"zero", "\n[review]\nmax_review_rounds = 0\n", 0, false},
-		{"a number", "\n[review]\nmax_review_rounds = 4\n", 4, false},
+		{"absent", "", DefaultMaxReviewRounds, false},
+		{"an empty table", "\n[review]\n", DefaultMaxReviewRounds, false},
+		{"zero turns the cap off", "\n[review]\nmax_review_rounds = 0\n", 0, false},
+		{"a number", "\n[review]\nmax_review_rounds = 7\n", 7, false},
 		{"negative", "\n[review]\nmax_review_rounds = -1\n", 0, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
