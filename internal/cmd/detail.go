@@ -37,9 +37,22 @@ const (
 	detailOOM         = "oom"
 	detailPushHook    = "push_hook"
 	detailPushNetwork = "push_network"
+	detailChecksDue   = "checks_pending"
 	detailUnknown     = "unknown"
 	detailUnrecorded  = "unrecorded"
 )
+
+// mergeDetail names a merge GitHub refused under branch protection, which is
+// what it says while a required check has not finished: the pull request is
+// sound and its checks are still due. Any other refusal is left for
+// recordPark, carrying the forge's own words.
+func mergeDetail(err error) parkDetail {
+	line := firstMatch(err.Error(), []string{"base branch policy prohibits the merge"})
+	if line == "" {
+		return parkDetail{}
+	}
+	return parkDetail{Detail: detailChecksDue, Evidence: trim(line, 300)}
+}
 
 // unrecordedLimit is the most of a reason an unrecorded detail carries: enough
 // for the sentence and the verify output tail some reasons end on.

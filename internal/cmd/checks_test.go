@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,6 +38,10 @@ import (
 //	infratrunk the first head read fails build with no step run; every other
 //	           head fails vuln, which main fails too
 //	joblog     build fails with $DROVER_TEST_CHECKS_LOG as its job log
+//	onpr       no check run on any head until a pull request opens, then gate
+//	           runs for two reads and passes; the merge is refused under
+//	           branch protection until it has
+//	onprred    onpr, with vuln failing once its run finishes
 //
 // gh run rerun counts into reruns.
 func checksForge(t *testing.T, scenario string) string {
@@ -101,6 +106,16 @@ case "$*" in
     sha=$(printf '%s' "$*" | sed -n 's|.*/commits/\([^/]*\)/check-runs.*|\1|p')
     case "$DROVER_TEST_CHECKS_SCENARIO" in
       none) echo '{"total_count":0,"check_runs":[]}' ; exit 0 ;;
+      onpr|onprred)
+        grep -q '^pr create' "$DROVER_TEST_GH_LOG" || { echo '{"total_count":0,"check_runs":[]}' ; exit 0 ; }
+        n=$(cat "$DROVER_TEST_CHECKS_STATE/pr-reads" 2>/dev/null || echo 0)
+        echo $((n + 1)) > "$DROVER_TEST_CHECKS_STATE/pr-reads"
+        [ "$n" -lt 2 ] && { echo '{"total_count":1,"check_runs":[{"id":60,"name":"gate","status":"in_progress","conclusion":null}]}' ; exit 0 ; }
+        if [ "$DROVER_TEST_CHECKS_SCENARIO" = onpr ]; then
+          touch "$DROVER_TEST_CHECKS_STATE/green"
+          echo '{"total_count":1,"check_runs":[{"id":60,"name":"gate","status":"completed","conclusion":"success"}]}' ; exit 0
+        fi
+        name=vuln ;;
       nosteps) name=build ;;
       recovers)
         n=$(cat "$DROVER_TEST_CHECKS_STATE/reads-$sha" 2>/dev/null || echo 0)
@@ -911,5 +926,93 @@ func TestFailureLinesReadTAPLeavesOnce(t *testing.T) {
 		"- waiting for getByRole('textbox', { name: 'Search', exact: true })", "not ok 24 - a flat test"}
 	if got := failureLines(b.String(), s.failurePatterns()); !slices.Equal(got, want) {
 		t.Errorf("with the Playwright patterns, read\n%q\nwant\n%q", got, want)
+	}
+}
+
+// onprProject is a checksForge scenario whose CI runs only on pull_request,
+// as bodega's does, with a short checks_wait and a merge GitHub refuses until
+// the required check has passed.
+func onprProject(t *testing.T, scenario string) {
+	t.Helper()
+	checksForge(t, scenario)
+	t.Setenv("DROVER_TEST_MERGE_NEEDS", filepath.Join(os.Getenv("DROVER_TEST_CHECKS_STATE"), "green"))
+	write(t, config.FileName, read(t, config.FileName)+"\n[forge]\nchecks_wait = \"20ms\"\n")
+}
+
+// The bodega D36 case: no run exists on the head until the pull request
+// opens, so the gate passes on none. drive settles the checks again before the
+// merge, waits out the pending run, and merges once it is green, where it used
+// to merge at once and park merge_failed.
+func TestAHeadWhoseChecksStartWithThePullRequestMergesOnceTheyPass(t *testing.T) {
+	onprProject(t, "onpr")
+
+	rows, stderr, err := driveRowsErr(t)
+	if err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	if got := finalRow(t, rows, "1"); got.Outcome != outcomeMergedByGate {
+		t.Fatalf("item 1 ended %s/%s (%s), want merged after its pull request's checks passed\n%s", got.Outcome, got.Park, got.Reason, stderr)
+	}
+	var classes []string
+	for _, r := range checkRows(t) {
+		classes = append(classes, r.Class)
+	}
+	if len(classes) == 0 || classes[0] != ledger.ClassNone {
+		t.Errorf("classified %v, want none first, before the pull request opened", classes)
+	}
+}
+
+// A repository with no CI at all waits checks_wait twice and merges on the
+// gate's answer, as it did before the pull request settled anything.
+func TestAHeadNoWorkflowEverRunsOnStillMerges(t *testing.T) {
+	checksForge(t, "none")
+	write(t, config.FileName, read(t, config.FileName)+"\n[forge]\nchecks_wait = \"20ms\"\n")
+
+	rows, stderr, err := driveRowsErr(t)
+	if err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	if got := finalRow(t, rows, "1"); got.Outcome != outcomeMergedByGate {
+		t.Fatalf("item 1 ended %s/%s (%s), want merged with no CI\n%s", got.Outcome, got.Park, got.Reason, stderr)
+	}
+	if cs := checkRows(t); len(cs) != 2 || cs[0].Class != ledger.ClassNone || cs[1].Class != ledger.ClassNone {
+		t.Errorf("classification rows %+v, want two of class none: before and after the pull request", cs)
+	}
+}
+
+// A pull request's first checks that fail on the diff are a gate refusal like
+// the one before it opens: classified code, sent back and not merged.
+func TestAHeadWhoseFirstChecksFailAfterThePullRequestIsSentBack(t *testing.T) {
+	onprProject(t, "onprred")
+	parkGateRefusals(t)
+	t.Setenv("DROVER_TEST_GATE_REFUSE_FROM", "1")
+
+	rows, stderr, err := driveRowsErr(t)
+	if err != nil {
+		t.Fatalf("drive: %v\n%s", err, stderr)
+	}
+	got := finalRow(t, rows, "1")
+	if got.Outcome != outcomeParked || got.Park != parkGateRefused || !strings.Contains(got.Reason, "sent back") {
+		t.Fatalf("item 1 ended %s/%s (%s), want gate_refused and sent back\n%s", got.Outcome, got.Park, got.Reason, stderr)
+	}
+	if got.Detail != ledger.ClassCode {
+		t.Errorf("detail %q, want %q", got.Detail, ledger.ClassCode)
+	}
+	if body := read(t, filepath.Join("work", "01-first.md")); !strings.Contains(body, "vuln") {
+		t.Errorf("the request for changes does not name the failing check:\n%s", body)
+	}
+	if strings.Contains(strings.Join(ghCalls(t, os.Getenv("DROVER_TEST_GH_LOG")), "\n"), "pr merge") {
+		t.Error("drive merged a head whose checks failed")
+	}
+}
+
+// A merge branch protection refuses names its cause, not unrecorded.
+func TestMergeDetailNamesPendingChecks(t *testing.T) {
+	err := errors.New("gh pr merge: exit status 1: X Pull request o/r#7 is not mergeable: the base branch policy prohibits the merge")
+	if got := mergeDetail(err); got.Detail != detailChecksDue {
+		t.Errorf("detail %+v, want %s", got, detailChecksDue)
+	}
+	if got := mergeDetail(errors.New("gh pr merge: exit status 1: merge conflict")); got.Detail != "" {
+		t.Errorf("detail %+v for a conflict, want none", got)
 	}
 }

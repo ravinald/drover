@@ -538,6 +538,9 @@ type DriveItem struct {
 	// opened. The merge reuses that answer only while the branch still points
 	// there.
 	gated string
+	// unchecked is a gate that passed on a head no workflow had run on, so
+	// the merge settles the checks again once the pull request is open.
+	unchecked bool
 	// signoff is the same for an [operator] requirement park: which ones, and
 	// the command that records them.
 	signoff string
@@ -665,7 +668,8 @@ is empty for the next item too.
 
 Every park carries a detail beside its cause: why the session or the push under
 it failed. runner_exit, tool_denied, background_left_running, stream_cut, auth,
-oom, push_hook, push_network, or unknown with the log's last lines. The ledger
+oom, push_hook, push_network, checks_pending on a merge branch protection refused,
+or unknown with the log's last lines. The ledger
 keeps it, and status shows the item as parked: <park> (<detail>) until it runs
 again. A review that died, was cut, or was killed is rerun once on the same
 head ([supervise] rerun_lost_review); a second loss parks. A runner whose
@@ -749,7 +753,9 @@ written back to the item as a request for changes. Under [supervise]
 fix_gate_refusal at auto the item then goes back to the head of the queue for
 another implement session in the same drive, once per item per drive; a second
 refusal, or any other policy, parks gate_refused. A head with no check run after [forge] checks_wait is reported
-as no workflow ran on this head. Each classification is a ledger row. An infra
+as no workflow ran on this head; once its pull request opens, drive waits checks_wait
+again for the runs CI starts on pull_request, settles them, and asks the merge
+gate again before it merges. Each classification is a ledger row. An infra
 check drive parked rather than reran (rerun_infra_failure below auto) is read
 once more after the queue drains, unless the drive is stopping: a head whose
 checks all passed and that the branch still points at gets a green row and
@@ -4330,22 +4336,7 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 		s.leaveItem(d)
 		return *d
 	case code == gateDiff:
-		// The gate blamed the diff, which makes it a finding like any other and
-		// sends it back the way a reviewer's would, to the implementing session
-		// in this drive while fix_gate_refusal allows. It is recorded as
-		// verify's and not a review round, so a red check does not spend the
-		// rounds the item's reviews are owed.
-		if err := s.requestChangesFromVerify(it, ledger.ChangesVerify, noneFirst(checks.none, "The merge gate refused this branch. Its output:"), out, checks.code...); err != nil {
-			return park("gate_refused", noneFirst(checks.none, "the merge gate blamed this diff and the finding could not be written back: "+err.Error()))
-		}
-		d.Reason = noneFirst(checks.none, "the merge gate blamed this diff; sent back")
-		if len(checks.code) > 0 {
-			// The cause is the check, so the detail is its class: the last
-			// session's log describes a review that passed.
-			d.Reason = codeReason(checks.code[0]) + "; sent back"
-			d.setDetail(parkDetail{Detail: ledger.ClassCode, Evidence: codeEvidence(checks.code)})
-		}
-		return s.sendBackOrPark(it, d)
+		return s.sendBackGateDiff(it, d, park, checks, out)
 	case code == gateBehind:
 		return park(parkGateRefused, behindAgain(d.Branch, trunk, read, out))
 	case code == gateForge:
@@ -4403,7 +4394,29 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 		s.leaveItem(d)
 		return *d
 	}
+	d.unchecked = checks.none != ""
 	return s.driveMerge(ctx, it, d, park, trunk, deadline)
+}
+
+// sendBackGateDiff answers a merge gate that blamed the diff. That makes it a
+// finding like any other, sent back the way a reviewer's would be, to the
+// implementing session in this drive while fix_gate_refusal allows. It is
+// recorded as verify's and not a review round, so a red check does not spend
+// the rounds the item's reviews are owed.
+func (s *session) sendBackGateDiff(it backlog.Item, d *DriveItem,
+	park func(cause, why string) DriveItem, checks *settled, out string,
+) DriveItem {
+	if err := s.requestChangesFromVerify(it, ledger.ChangesVerify, noneFirst(checks.none, "The merge gate refused this branch. Its output:"), out, checks.code...); err != nil {
+		return park("gate_refused", noneFirst(checks.none, "the merge gate blamed this diff and the finding could not be written back: "+err.Error()))
+	}
+	d.Reason = noneFirst(checks.none, "the merge gate blamed this diff; sent back")
+	if len(checks.code) > 0 {
+		// The cause is the check, so the detail is its class: the last
+		// session's log describes a review that passed.
+		d.Reason = codeReason(checks.code[0]) + "; sent back"
+		d.setDetail(parkDetail{Detail: ledger.ClassCode, Evidence: codeEvidence(checks.code)})
+	}
+	return s.sendBackOrPark(it, d)
 }
 
 // driveMerge merges a reviewed head whose gate just passed, synchronously, so
@@ -4413,6 +4426,11 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 // passed and the trunk has not moved past it. A branch that moved, a trunk
 // that moved, or a fetch that cannot say goes through mergeByGate, which
 // catches the branch up and asks the gate again about the head that merges.
+//
+// So does a head no workflow ran on before the pull request opened. CI that
+// triggers on pull_request starts only now, and branch protection refuses the
+// merge until it finishes; the gate's answer was about checks that did not
+// exist yet.
 func (s *session) driveMerge(ctx context.Context, it backlog.Item, d *DriveItem,
 	park func(cause, why string) DriveItem, trunk string, deadline time.Time,
 ) DriveItem {
@@ -4420,11 +4438,12 @@ func (s *session) driveMerge(ctx context.Context, it backlog.Item, d *DriveItem,
 	if err != nil {
 		return park("merge_failed", err.Error())
 	}
-	if past, err := s.trunkPast(d.Branch, trunk); err != nil || past || head != d.gated {
+	if past, err := s.trunkPast(d.Branch, trunk); err != nil || past || head != d.gated || d.unchecked {
 		return s.mergeByGate(ctx, it, d, park, trunk, deadline)
 	}
 	events.stage(d.ID, stageMerge)
 	if err := s.mergeBranch(ctx, d.Branch); err != nil {
+		d.setDetail(mergeDetail(err))
 		return park("merge_failed", err.Error())
 	}
 	return s.afterMergeCall(ctx, it, d, "[drive] merge_gate passed "+shortSHA(head)+" and drover merged it")
@@ -4508,6 +4527,11 @@ func (s *session) mergeByGate(ctx context.Context, it backlog.Item, d *DriveItem
 		return park("gate_unrunnable", gerr.Error())
 	case code == gateBehind:
 		return park(parkGateRefused, behindAgain(d.Branch, trunk, read, out)+", so the pull request stays open")
+	case code == gateDiff && d.unchecked:
+		// The first checks this head ever had, so the refusal is the one the
+		// gate would have given before the pull request opened had they run
+		// then: the diff's, and sent back the same way.
+		return s.sendBackGateDiff(it, d, park, &checks, out)
 	case code == gateForge:
 		// Still a refusal of this merge, and still a forge that will refuse the
 		// next item's for the same reason, so the drive stops as it does at the
@@ -4520,6 +4544,7 @@ func (s *session) mergeByGate(ctx context.Context, it backlog.Item, d *DriveItem
 	}
 	events.stage(d.ID, stageMerge)
 	if err := s.mergeBranch(ctx, d.Branch); err != nil {
+		d.setDetail(mergeDetail(err))
 		return park("merge_failed", err.Error())
 	}
 	return s.afterMergeCall(ctx, it, d, "[drive] merge_gate passed "+shortSHA(head)+" and drover merged it")
