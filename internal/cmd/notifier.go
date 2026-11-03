@@ -775,7 +775,9 @@ func noticeBody(e DriveEvent) string {
 		if e.Reason != "" {
 			b += ": " + e.Reason
 		}
-		if e.Evidence != "" {
+		// An unrecorded park's evidence is its cause and reason, which the
+		// line above already says.
+		if ev := strings.TrimPrefix(e.Evidence, e.Park+": "); ev != "" && !strings.HasPrefix(e.Reason, ev) {
 			b += "\n" + firstLines(e.Evidence, 5)
 		}
 		return b

@@ -38,6 +38,7 @@ const (
 	detailPushHook    = "push_hook"
 	detailPushNetwork = "push_network"
 	detailChecksDue   = "checks_pending"
+	detailProtected   = "protected_file"
 	detailUnknown     = "unknown"
 	detailUnrecorded  = "unrecorded"
 )
