@@ -580,13 +580,13 @@ The review prompt is the mirror of the implement prompt: same data, plus the ite
 
 ## `[review]`
 
-| Key                 | Meaning                                                                                                                      |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `max_review_rounds` | How many times a review may send one item back before `drover request-changes` refuses. `0`, and an absent key, mean no cap. |
+| Key                 | Meaning                                                                                                                                |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `max_review_rounds` | How many times a review may send one item back before `drover request-changes` refuses. An absent key means `4`, and `0` means no cap. |
 
 `max_review_rounds` bounds a review loop that converges without terminating: each pass is correct on its own, the diffs get smaller, and nothing stops. Attended, that costs patience. Driven unattended it costs money until something outside drover intervenes, which is the case the cap is for.
 
-Off unless you type a number, because a default would change when `request-changes` refuses for every project on the day it upgraded, and how much a loop may spend is not something drover can know. Set it higher than the worst item that went round the loop and merged correctly; three is a reasonable start. At the cap the review prompt still instructs `drover request-changes`, and says drover will refuse the send-back, keep the findings and park the item for the operator, so a reviewer records what it found without filing it. The refused findings are kept as `<stem>-<slug>.refused-N.md` beside the kept rounds, and `drive` parks the item `needs_decision` naming that file.
+Four unless you type a number. Across two projects' drives, every item a review sent back more than four times either parked anyway or spent its later rounds on one requirement, each round a full implementing session, so the cap parks an item for a decision before it pays for those rounds. Set `0` to turn the cap off, or a higher number where an item has gone round the loop more than four times and merged correctly. At the cap the review prompt still instructs `drover request-changes`, and says drover will refuse the send-back, keep the findings and park the item for the operator, so a reviewer records what it found without filing it. The refused findings are kept as `<stem>-<slug>.refused-N.md` beside the kept rounds, and `drive` parks the item `needs_decision` naming that file.
 
 Only a review's send-backs count toward the cap. drive's own, for a verify command or merge gate the branch failed, a trunk conflict a session resolves, or a `[numbered_files]` clash, write `changes` rows naming that source and are counted apart, so a red gate does not spend the rounds the item's reviews are owed.
 

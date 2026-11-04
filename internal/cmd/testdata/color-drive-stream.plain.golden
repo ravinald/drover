@@ -4,6 +4,7 @@
 ==> prompts: implement built-in default · review built-in review
 ==> bounds: unbounded · merge: [drive] merge_gate decides
 ==> forge: push each branch to origin · open a pull request for what the merge gate passes, then ask the forge to merge it
+==> max review rounds: 4 per item
   · work not linked into the worktree: git would not ignore a link there (ignore it as work, without the trailing slash, to give sessions a copy)
 ==> 1 · implement · branch first · round 1
 ==> item   work/01-first.md
