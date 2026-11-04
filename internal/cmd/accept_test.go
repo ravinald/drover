@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1037,5 +1038,70 @@ func TestAcceptGoesAheadPastABranchThatWillNotRead(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "1's branch did not read") {
 		t.Errorf("stderr does not name the unreadable branch: %q", stderr)
+	}
+}
+
+// The limit counts the list accept is about to fix in place, and one past it
+// is refused while the limit itself is taken: bodega's provenance items reached
+// eighteen requirements, one per file, and spent rounds on one after another.
+func TestAcceptRefusesAListPastMaxRequirements(t *testing.T) {
+	list := func(n int) string {
+		var b strings.Builder
+		for i := 1; i <= n; i++ {
+			b.WriteString(strconv.Itoa(i) + ". Do part " + strconv.Itoa(i) + ".\n")
+		}
+		return "---\ntitle: Wide\ndeps:\n---\n\n" +
+			"STOP: requirements not yet written\n" +
+			"drover refuses to launch this item while this line is present. Delete it\n" +
+			"once the list below is real.\n\n" +
+			"Act as a maintainer.\n\nRequirements:\n\n" + b.String()
+	}
+	cases := []struct {
+		name    string
+		reqs    int
+		config  string
+		refused bool
+	}{
+		{"at the default", config.DefaultMaxRequirements, "", false},
+		{"one past the default", config.DefaultMaxRequirements + 1, "", true},
+		{"zero turns it off", 30, "[backlog]\nmax_requirements = 0\n", false},
+		{"a declared limit", 4, "[backlog]\nmax_requirements = 3\n", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Cleanup(func() { acceptYes = false })
+			dir := markerProject(t, map[string]string{"B01-wide.md": list(c.reqs)})
+			if c.config != "" {
+				f, err := os.OpenFile(filepath.Join(dir, ".drover.toml"), os.O_APPEND|os.O_WRONLY, 0o600) // #nosec G304 -- written by this test
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.WriteString("\n" + c.config); err != nil {
+					t.Fatal(err)
+				}
+				_ = f.Close()
+			}
+			t.Chdir(dir)
+
+			var err error
+			capture(t, func() { err = acceptCmd.RunE(acceptCmd, []string{"B1"}) })
+			if !c.refused {
+				if err != nil {
+					t.Fatalf("accept refused %d requirements: %v", c.reqs, err)
+				}
+				return
+			}
+			if err == nil || Code(err) != ExitRefused {
+				t.Fatalf("accept = %v, want a refusal", err)
+			}
+			if !strings.Contains(err.Error(), "max_requirements") || !strings.Contains(err.Error(), "drover accept B1 --yes") {
+				t.Errorf("the refusal names neither the key nor the override:\n%v", err)
+			}
+			acceptYes = true
+			capture(t, func() { err = acceptCmd.RunE(acceptCmd, []string{"B1"}) })
+			if err != nil {
+				t.Fatalf("accept --yes: %v", err)
+			}
+		})
 	}
 }

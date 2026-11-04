@@ -365,6 +365,15 @@ merge after one.
 
 ## Writing an item
 
+- **Three to five requirements{{ if .MaxRequirements }}, and never past {{ .MaxRequirements }}{{ end }}.**
+  Each numbered line is one more thing every review can send back, and a round
+  costs a whole implementing session. Write a requirement per property the
+  change must have, not per file it touches: the config key, its validation and
+  its doc row are one requirement when they are one setting.
+{{- if .MaxRequirements }} `drover accept`
+  refuses a list past `[backlog] max_requirements` ({{ .MaxRequirements }} here)
+  without `--yes`; split the rest into an item of its own with a deps line.
+{{- end }}
 - **A mechanical change is one item, and its requirement is a script.** A
   rename, a reformat, a file move or a dependency bump is a term map applied by
   a script in one branch, plus the build and test fixes it causes, under one

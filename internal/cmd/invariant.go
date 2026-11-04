@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ravinald/drover/internal/backlog"
+	"github.com/ravinald/drover/internal/ledger"
 	"github.com/ravinald/drover/internal/prompts"
 	"github.com/spf13/cobra"
 )
@@ -94,7 +95,7 @@ no tracker.`,
 		if err := os.WriteFile(it.Path, written, 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", it.Path, err)
 		}
-		if err := s.wroteBody(it.ID.Bare(), "invariant", written); err != nil {
+		if err := s.wroteBody(it.ID.Bare(), ledger.CmdInvariant, written); err != nil {
 			return err
 		}
 		fmt.Printf("recorded against %s -> %s (%d requirement(s) unchanged)\n",

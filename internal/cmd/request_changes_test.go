@@ -831,3 +831,50 @@ func TestRequestChangesRefusesFindingsOutsideTheContract(t *testing.T) {
 		})
 	}
 }
+
+// A requirement the previous review sent back, sent back again, needs an
+// invariant written in between. The refusal writes nothing; the invariant
+// clears it for one round, and the next repeat needs another.
+func TestARepeatedRequirementNeedsAnInvariantFirst(t *testing.T) {
+	t.Cleanup(func() { requestChangesFile, invariantFile, requestChangesStillOpen = "", "", nil })
+	dir, evidence := capProject(t, 0)
+	write(t, filepath.Join(dir, "work", "01-first.md"), sevenRequirements)
+	send := func(text string, extra ...string) error {
+		write(t, evidence, text)
+		requestChangesFile, requestChangesStillOpen = "", nil
+		return execute(t, append([]string{"request-changes", "1", "-f", evidence}, extra...)...)
+	}
+	if err := send("### R3 deadlocks taking the index lock\n\nHangs.\n"); err != nil {
+		t.Fatalf("first request: %v", err)
+	}
+	if err := send("### R4 writes no link\n\nMissing.\n"); err != nil {
+		t.Fatalf("a different requirement: %v", err)
+	}
+	err := send("### R4 a second link is lost\n\nMissing again.\n")
+	if err == nil || Code(err) != ExitRefused {
+		t.Fatalf("R4 twice in a row with no invariant = %v, want a refusal", err)
+	}
+	if !strings.Contains(err.Error(), "drover invariant 1") || !strings.Contains(err.Error(), "R4") {
+		t.Errorf("the refusal names neither the requirement nor the command:\n%v", err)
+	}
+	if n := requestChangesRows(t, dir); n != 2 {
+		t.Errorf("%d changes rows after the refusal, want 2", n)
+	}
+
+	if err := send("### R4 the link is not written\n\nStill missing.\n", "--still-open", "4"); err != nil {
+		t.Errorf("--still-open is the same defect unfixed and needs no invariant: %v", err)
+	}
+
+	prop := filepath.Join(dir, "prop.md")
+	write(t, prop, "- Every place written carries its link.\n")
+	invariantFile = ""
+	if err := execute(t, "invariant", "1", "-f", prop); err != nil {
+		t.Fatal(err)
+	}
+	if err := send("### R4 a third link is lost\n\nMissing.\n"); err != nil {
+		t.Fatalf("after an invariant: %v", err)
+	}
+	if err := send("### R4 a fourth link is lost\n\nMissing.\n"); err == nil {
+		t.Error("the invariant cleared more than the round after it")
+	}
+}

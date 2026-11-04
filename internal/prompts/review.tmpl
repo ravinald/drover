@@ -128,6 +128,13 @@ your note, because a later reader has nothing else to compare against — the
 ledger records that a request for changes happened and a digest of it, never the prose.
 
 {{ .Changes }}
+
+If you send back a requirement this block also named, write the property behind
+it first with `drover invariant {{ .ID }} -f <file>`: what the code must keep true
+for that requirement, which the fixes so far each broke in a new place. A second
+round on one requirement is the sign that property is missing, and
+`request-changes` refuses that send-back until an invariant has been written
+since the last one.
 {{ end }}
 {{- if .Earlier }}
 Rounds before this one, as headlines. `request-changes` replaces the section rather than
@@ -143,7 +150,7 @@ None of these is an open finding and none of them is yours to re-judge. Read the
 list for what it says about where the defect is: rounds that each corrected a
 real gap and each produced the next one are circling a guarantee no requirement
 states. When you see that, the finding to write is the invariant, and
-`drover invariant {{ .ID }} -f <file>` is where it goes — a sixth correction aimed
+`drover invariant {{ .ID }} -f <file>` is where it goes: a sixth correction aimed
 at the fifth symptom buys a seventh.
 {{ end }}
 {{- if .Closes }}

@@ -1082,6 +1082,11 @@ type Counts struct {
 	StillOpenReqs    []int
 	Reqs             []int
 	Operator         []int
+	// InvariantSince marks an invariant written after the last review
+	// send-back: a body row by the invariant command following it. A review
+	// sending the same requirement back twice in a row is circling a property
+	// nobody wrote down, and request-changes asks for that property first.
+	InvariantSince bool
 	// The send-backs drive wrote on its own evidence, by ChangesSource.
 	VerifySendBacks   int
 	ConflictSendBacks int
@@ -1117,6 +1122,11 @@ func (c Counts) Launches() int {
 	}
 	return n
 }
+
+// CmdInvariant is the Cmd a body row carries when `drover invariant` wrote the
+// body. Counts reads it to tell an invariant from any other edit, since the
+// command writes no row of its own.
+const CmdInvariant = "invariant"
 
 // Counts counts the stage and audit rows for one id.
 //
@@ -1155,6 +1165,10 @@ func (l *Ledger) Counts(id string) Counts {
 			c.Reqs, prevStillOpen = r.Reqs, r.StillOpen
 			c.Operator = r.Operator
 			c.LastChanges, last = r.Date, r.Changes
+			c.InvariantSince = false
+		}
+		if r.Body != "" && r.Cmd == CmdInvariant {
+			c.InvariantSince = true
 		}
 		if r.Refused != "" {
 			c.Refusals++
