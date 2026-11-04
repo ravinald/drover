@@ -206,6 +206,13 @@ func (s *session) acceptOne(bare string) error {
 			"or accept anyway: drover accept %s --yes\n"+
 			"A variable part is written in braces, {name}, which is never read as a placeholder", strings.Join(msgs, "\n"), it.ID.Bare())}
 	}
+	if limit, have := s.cfg.Backlog.MaxRequirements, len(backlog.Item{Body: strings.Join(kept[bodyStart(kept):], "\n")}.Requirements()); limit > 0 && have > limit && !acceptYes {
+		return Refusal{fmt.Errorf("%s holds %d numbered requirements, past [backlog] max_requirements %d.\n"+
+			"Nothing was accepted. Each requirement is one more thing every review can send back, and an item this size "+
+			"spends its rounds on one requirement after another until max_review_rounds parks it.\n"+
+			"Move what is its own change into another item with drover new and a deps line, merge requirements that check one property into one, "+
+			"or accept anyway: drover accept %s --yes", it.ID.Bare(), have, limit, it.ID.Bare())}
+	}
 	if live := liveRequirements(kept); len(live) > 0 && !acceptYes {
 		msgs := make([]string, len(live))
 		for i, r := range live {

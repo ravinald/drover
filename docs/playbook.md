@@ -15,7 +15,7 @@ One item is one implementing session's worth of work, with an outcome an indepen
 
 ### One outcome
 
-Aim for one coherent change and three to five falsifiable requirements. Five is a writing limit rather than a parser limit: it is about where a reviewer stops holding the whole contract in their head while reading the diff. Count decisions and the ways to verify them, not lines. One requirement carrying six unrelated changes is six requirements.
+Aim for one coherent change and three to five falsifiable requirements. Five is a writing limit, about where a reviewer stops holding the whole contract in their head while reading the diff; `accept` refuses past [`[backlog] max_requirements`](configuration.md#backlog), 8 unless you set it. Count decisions and the ways to verify them, not lines. One requirement carrying six unrelated changes is six requirements.
 
 Split when the parts have different acceptance criteria, need different expertise, or could merge on separate days. Keep a fix together with the regression test that proves it, and a stored-format change together with its migration and a test against representative old data.
 

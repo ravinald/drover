@@ -88,6 +88,14 @@ reviewer can tell a carried-over finding from a new one, so drover never
 infers it from the numbers alone. It refuses a number the previous request did
 not name, and refuses the flag on a first request.
 
+A requirement sent back by two review requests in a row needs an invariant
+between them. The second request is refused, and writes nothing, until
+` + "`drover invariant`" + ` has recorded the property those fixes keep breaking: a
+finding names the case that broke, and a number that comes back round after
+round is the sign that what may not break was never written down. A number
+marked --still-open or --operator is not counted, since the first is the same
+defect unfixed and the second goes to a person.
+
 --operator names the requirements whose finding no implementing session can
 meet as written: one that depends on a release upstream never made, on a
 decision nobody has taken, or on evidence no source publishes. The reason goes
@@ -206,6 +214,12 @@ change the numbered requirements, refuses evidence whose only findings are
 			}
 		}
 
+		if requestChangesSource == ledger.ChangesReview {
+			if again := s.repeatedWithoutInvariant(it, text, append(slices.Clone(operator), stillOpen...)); len(again) > 0 {
+				return Refusal{invariantRefusal(it.ID.Bare(), again, s.ledger.Counts(it.ID.Bare()).Reqs)}
+			}
+		}
+
 		raw, err := os.ReadFile(it.Path)
 		if err != nil {
 			return err
@@ -263,6 +277,44 @@ change the numbered requirements, refuses evidence whose only findings are
 		fmt.Printf("The next run reads it: drover run %s --dry-run\n", it.ID.Bare())
 		return nil
 	},
+}
+
+// repeatedWithoutInvariant is each requirement this evidence sends back that the
+// previous review's request also named, when no invariant has been written
+// since that request. Empty on a first request and once an invariant is in.
+// The numbers in exempt are left out: one handed to the operator goes to a
+// person, and one marked --still-open is the same defect unfixed, which drive
+// parks repeating on the second such round rather than looping it.
+//
+// Not a repeat in the sense drive parks on. The same number twice can be two
+// different defects, which is why this asks for the property behind them
+// rather than refusing the round: E127 sent R3 back three rounds running, a
+// different lock-ordering deadlock each time, with no invariant naming the
+// lock order.
+func (s *session) repeatedWithoutInvariant(it backlog.Item, text string, exempt []int) []int {
+	c := s.ledger.Counts(it.ID.Bare())
+	if c.ChangesRequested == 0 || c.InvariantSince {
+		return nil
+	}
+	var out []int
+	for _, n := range findingRequirements(it, text) {
+		if slices.Contains(c.Reqs, n) && !slices.Contains(exempt, n) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// invariantRefusal is the refusal for a requirement sent back twice running,
+// naming the command that clears it, since the reviewer reading it has to act
+// on it before the pass ends.
+func invariantRefusal(id string, again, last []int) error {
+	return fmt.Errorf("the previous request for changes on %s named %s, and this one sends %s back again with no invariant written since.\n"+
+		"Nothing was written. A requirement that comes back round after round is missing the property its fixes keep breaking, "+
+		"and a finding names only the case that broke.\n"+
+		"Write that property first, as bullets: drover invariant %s -f {file}. Then run this request again. "+
+		"Every later pass reads the invariant above the findings, and %s's [review] max_review_rounds still bounds the loop",
+		id, intList(last), requirementList(again), id, id)
 }
 
 // stillOpenAgainstLast checks --still-open against the previous changes row and

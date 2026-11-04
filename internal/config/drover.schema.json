@@ -669,6 +669,12 @@
           "minimum": 1,
           "default": 12,
           "description": "The most numbered requirements drover fold may leave on the item it folds into. A fold past it refuses with exit 3 and writes nothing."
+        },
+        "max_requirements": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 8,
+          "description": "The most numbered requirements drover accept takes on one item without --yes. An absent key means 8, and 0 means no limit. An item past it refuses with exit 3 and writes nothing; split it into items of one coherent change each, or accept it anyway with --yes."
         }
       }
     },

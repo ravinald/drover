@@ -1005,7 +1005,19 @@ type Backlog struct {
 	// resolves to DefaultFoldMax. A cap because folding is cheap and a contract
 	// past a dozen requirements is one no single run or review holds in view.
 	FoldMax int `toml:"fold_max"`
+	// MaxRequirements is the most numbered requirements `drover accept` takes
+	// on one item without --yes. An absent key resolves to
+	// DefaultMaxRequirements, and an explicit zero means no limit.
+	//
+	// A limit at accept because that is the last point before sessions are spent
+	// on the contract, and nothing earlier sees the whole list: an item written
+	// one requirement per file it touches reaches twenty, and a review then
+	// sends one or another of them back every round until the cap parks it.
+	MaxRequirements int `toml:"max_requirements"`
 }
+
+// DefaultMaxRequirements is [backlog] max_requirements when nothing declares it.
+const DefaultMaxRequirements = 8
 
 // DefaultFoldMax is [backlog] fold_max when nothing declares it.
 const DefaultFoldMax = 12
@@ -1379,6 +1391,9 @@ func (c *Config) applyDefaults() {
 	if !c.Declared("review.max_review_rounds") {
 		c.Review.MaxReviewRounds = DefaultMaxReviewRounds
 	}
+	if !c.Declared("backlog.max_requirements") {
+		c.Backlog.MaxRequirements = DefaultMaxRequirements
+	}
 	// Canonicalised to letters so a table written with words resolves the same,
 	// and so validate below reports the rank the author wrote.
 	if c.Severity.Ranks == nil {
@@ -1484,6 +1499,9 @@ func (c *Config) validate(path string) error {
 	}
 	if c.Backlog.FoldMax < 0 {
 		return fmt.Errorf("%s: backlog.fold_max must be positive, the most requirements drover fold leaves on one item; leave it out for %d", path, DefaultFoldMax)
+	}
+	if c.Backlog.MaxRequirements < 0 {
+		return fmt.Errorf("%s: backlog.max_requirements must be 0 (no limit) or positive", path)
 	}
 	if c.Review.MaxReviewRounds < 0 {
 		return fmt.Errorf("%s: review.max_review_rounds must be 0 (no cap) or positive", path)

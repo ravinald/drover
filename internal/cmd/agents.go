@@ -105,6 +105,10 @@ type agentsData struct {
 	// only part of these instructions that assumes one, and instructions an
 	// agent cannot follow are worse than instructions it does not have.
 	Git bool
+	// MaxRequirements is [backlog] max_requirements, which accept enforces,
+	// so the item-writing rule states the number this project holds to; zero
+	// is no limit.
+	MaxRequirements int
 	// MergeDrivePR and MergeDenyPaths say a supervisor may merge at those
 	// actions' policies, which moves where the review loop stops; MergeDo is
 	// the conditions it may merge under.
@@ -279,35 +283,36 @@ func (s *session) readAddendum() (string, error) {
 func (s *session) generatedAgents() (string, error) {
 	cfg := s.cfg
 	d := agentsData{
-		Project:        cfg.Project,
-		Git:            cfg.Git.On(),
-		Bodies:         cfg.Paths.Backlog,
-		Ledger:         cfg.Paths.Ledger,
-		Reports:        cfg.Paths.Reports,
-		Specs:          cfg.Paths.Specs,
-		Skills:         cfg.Paths.Skills,
-		Implement:      cfg.Prompts.Implement,
-		Draft:          cfg.Prompts.Draft,
-		Review:         cfg.Prompts.Review,
-		ReviewRunner:   cfg.Run.ReviewRunner,
-		DraftRunner:    cfg.Run.DraftRunner,
-		Branch:         cfg.Run.Branch,
-		MergeGate:      strings.Join(cfg.Loop.MergeGate, " "),
-		Required:       cfg.Frontmatter.Required,
-		Optional:       cfg.Frontmatter.Optional,
-		Closes:         cfg.Known(backlog.KeyCloses),
-		Issue:          cfg.Known(backlog.KeyIssue),
-		SeedCloses:     cfg.Intake.Closes == config.IntakeClosesIssue,
-		StopMarker:     cfg.Intake.StopMarker,
-		FollowUpLabel:  cfg.GitHub.FollowUpLabel,
-		SeverityPrefix: cfg.GitHub.SeverityPrefix,
-		Posture:        cfg.Agents.Principles,
-		Safety:         SafetyTable(),
-		Effects:        CommandEffects(varsFor(cfg)),
-		Destinations:   prompts.Destinations(),
-		Operator:       OperatorCommands(),
-		Policies:       policyRows(cfg),
-		DocsRef:        docsRef(),
+		Project:         cfg.Project,
+		Git:             cfg.Git.On(),
+		MaxRequirements: cfg.Backlog.MaxRequirements,
+		Bodies:          cfg.Paths.Backlog,
+		Ledger:          cfg.Paths.Ledger,
+		Reports:         cfg.Paths.Reports,
+		Specs:           cfg.Paths.Specs,
+		Skills:          cfg.Paths.Skills,
+		Implement:       cfg.Prompts.Implement,
+		Draft:           cfg.Prompts.Draft,
+		Review:          cfg.Prompts.Review,
+		ReviewRunner:    cfg.Run.ReviewRunner,
+		DraftRunner:     cfg.Run.DraftRunner,
+		Branch:          cfg.Run.Branch,
+		MergeGate:       strings.Join(cfg.Loop.MergeGate, " "),
+		Required:        cfg.Frontmatter.Required,
+		Optional:        cfg.Frontmatter.Optional,
+		Closes:          cfg.Known(backlog.KeyCloses),
+		Issue:           cfg.Known(backlog.KeyIssue),
+		SeedCloses:      cfg.Intake.Closes == config.IntakeClosesIssue,
+		StopMarker:      cfg.Intake.StopMarker,
+		FollowUpLabel:   cfg.GitHub.FollowUpLabel,
+		SeverityPrefix:  cfg.GitHub.SeverityPrefix,
+		Posture:         cfg.Agents.Principles,
+		Safety:          SafetyTable(),
+		Effects:         CommandEffects(varsFor(cfg)),
+		Destinations:    prompts.Destinations(),
+		Operator:        OperatorCommands(),
+		Policies:        policyRows(cfg),
+		DocsRef:         docsRef(),
 	}
 	d.SupervisorRefused = SupervisorRefused(cfg)
 	if p, _ := cfg.Policy("merge_drive_pr"); supervisorMay(p) {

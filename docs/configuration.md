@@ -1002,14 +1002,17 @@ Under `github` and `none` it refuses with exit 3, naming the backend that is con
 
 ## `[backlog]`
 
-| Key        | Default | Meaning                                                                                                                        |
-| ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `mirror`   | `none`  | Where accepted items are published: `none` or `github`.                                                                        |
-| `fold_max` | `12`    | The most numbered requirements `drover fold` may leave on one item. Load refuses a negative one, and `0` reads as the default. |
+| Key                | Default | Meaning                                                                                                                            |
+| ------------------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `mirror`           | `none`  | Where accepted items are published: `none` or `github`.                                                                            |
+| `fold_max`         | `12`    | The most numbered requirements `drover fold` may leave on one item. Load refuses a negative one, and `0` reads as the default.     |
+| `max_requirements` | `8`     | The most numbered requirements `drover accept` takes on one item without `--yes`. An absent key means `8`, and `0` means no limit. |
 
 Under `github`, `accept` opens an issue per accepted item carrying its title and numbered requirements, writes the number into the item's `issue:` key, and keeps a `drover:<state>` label, an open or closed state and blocked-by links in step with the backlog. The file stays the contract and drover never reads the issue back. [The mirror](concepts.md#the-mirror) covers what each command writes and how `drover check` reports a write that did not go through.
 
 Publishing makes item text readable to everyone who can read the repository, so the default is `none` and a project whose items must stay private keeps it there. Two settings are refused at load. The per-user config may not set the key, since one value there would publish every project on the machine. And `github` needs `issue` declared in [`[frontmatter]`](#frontmatter): an item that cannot record its issue number would be published again by every `accept`.
+
+`max_requirements` holds an item to what one implementing session and one review can carry. Every numbered line is something each review can send back, and a round is a whole implementing session, so an item written one requirement per file it touches spends its rounds on one requirement after another: one with 18 requirements went round nine times before it parked. `accept` refuses a list past the limit, names the count, and takes `--yes` to accept it anyway. Items already accepted are not re-checked. [Size the item](playbook.md#1-size-the-item) covers how to split one.
 
 ## `[supervise]`
 

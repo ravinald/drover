@@ -225,6 +225,11 @@ func TestAFindingReachesTheSurfaceThatMustActOnIt(t *testing.T) {
 			first := filepath.Join(dir, "round1.md")
 			write(t, first, closedRound)
 			drove(t, "request-changes", item, "-f", first)
+			// Both rounds name R1, and request-changes takes the second only
+			// once an invariant has been written between them.
+			prop := filepath.Join(dir, "prop.md")
+			write(t, prop, "- A cache hit is recorded against the upstream that served it.\n")
+			drove(t, "invariant", item, "-f", prop)
 			second := filepath.Join(dir, "round2.md")
 			write(t, second, changesEvidence)
 			drove(t, "request-changes", item, "-f", second)
