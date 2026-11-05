@@ -56,7 +56,7 @@ Parallelism doesn't make an item cheaper; it moves the same spend earlier. Raise
 
 ### Oversized items
 
-An item too large for one run goes back for changes, comes back larger, and is reviewed against a diff that keeps growing. Each round is two more sessions, each reading more code than the last. Splitting it into a chain costs some re-reading across the parts and almost always costs less than the rounds it avoids ([Splitting into a chain](playbook.md#splitting-into-a-chain)).
+An item too large for one run goes back for changes, comes back larger, and is reviewed against a diff that keeps growing. Each round is two more sessions, each reading more code than the last. Splitting it into a chain costs some re-reading across the parts and almost always costs less than the rounds it avoids ([Chains](playbook.md#chains)).
 
 ### Review loops
 
