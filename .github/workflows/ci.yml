@@ -66,6 +66,10 @@ jobs:
         if: steps.same_tree.outputs.passed != 'true'
         run: make build && make check
 
+      - name: Cross-compile release targets
+        if: steps.same_tree.outputs.passed != 'true'
+        run: make cross
+
       - name: Example project checks
         if: steps.same_tree.outputs.passed != 'true'
         run: cd examples && ../bin/drover check

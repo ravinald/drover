@@ -12,13 +12,21 @@ LDFLAGS := -s -w \
 # so a target that stopped building never reaches a tag.
 TARGETS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 
-.PHONY: build install dist test lint vuln check clean
+.PHONY: build install cross dist test lint vuln check clean
 
 build:
 	go build -trimpath -ldflags '$(LDFLAGS)' -o bin/$(BIN) ./cmd/$(BIN)
 
 install:
 	go install -trimpath -ldflags '$(LDFLAGS)' ./cmd/$(BIN)
+
+# Every release target, built and thrown away. CI runs it on each push, so a
+# platform-specific call (syscall.Flock, say) fails a pull request rather than
+# the tag that would have published it.
+cross:
+	@for t in $(TARGETS); do \
+		GOOS=$${t%/*} GOARCH=$${t#*/} go build -o /dev/null ./cmd/$(BIN) || { echo "cross: $$t failed"; exit 1; }; \
+	done
 
 # The artifacts a tag publishes, stamped from the tree they were cut from. Run
 # it on a clean checkout of the tag: VERSION reads `git describe --dirty`, so a
