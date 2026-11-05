@@ -33,7 +33,7 @@ The workflow's `permissions:` block grants `contents: write` and nothing else, w
 
 ## What it stamps
 
-`make dist` cross-compiles the five targets `ci.yml` already builds on every pull request, so a target that stopped compiling never reaches a tag. Each binary is built `-trimpath` with three `-ldflags`:
+`make dist` cross-compiles the five targets `make cross` already builds on every push in `ci.yml`, so a target that stopped compiling fails a pull request, not a tag. Each binary is built `-trimpath` with three `-ldflags`:
 
 | Variable               | Source                                 | Reads back as                  |
 | ---------------------- | -------------------------------------- | ------------------------------ |

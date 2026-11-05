@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/ravinald/drover/internal/backlog"
@@ -96,16 +95,16 @@ func acquireLiveLock(name string, wait time.Duration) (func(), error) {
 	}
 	deadline := time.Now().Add(wait)
 	for {
-		err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) // #nosec G115 -- a file descriptor fits an int
-		if err == nil {
-			return func() {
-				_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN) // #nosec G115 -- a file descriptor fits an int
-				_ = f.Close()
-			}, nil
-		}
-		if !errors.Is(err, syscall.EWOULDBLOCK) {
+		held, err := tryLiveLock(f)
+		if err != nil {
 			_ = f.Close()
 			return nil, err
+		}
+		if held {
+			return func() {
+				releaseLiveLock(f)
+				_ = f.Close()
+			}, nil
 		}
 		if time.Now().After(deadline) {
 			_ = f.Close()
