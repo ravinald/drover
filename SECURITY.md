@@ -14,8 +14,8 @@ drover is pre-1.0, so the supported set is the current minor and nothing else.
 
 | Version | Supported    |
 | ------- | ------------ |
-| v0.1.x  | Yes          |
-| < v0.1  | No — upgrade |
+| v0.2.x  | Yes          |
+| < v0.2  | No — upgrade |
 
 A fix ships as a new patch on the current minor. Nothing is backported to an earlier one; a minor bump before 1.0 is allowed to change behavior, which is what makes backporting a guess rather than a cherry-pick.
 
