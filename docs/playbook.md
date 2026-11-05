@@ -82,6 +82,7 @@ Mark a paragraph that cites files only as background:
 
 ```markdown
 <!-- drover: context -->
+
 Read `internal/session/store.go` for the existing ownership convention. This item does not change that store.
 
 Changes belong in `internal/auth/login.go` and its tests.
@@ -221,6 +222,7 @@ Five things, and they are the floor rather than the answer:
 - **An independent audit warns** when the ledger records one runner for both stages, names both, records the row and exits 0. drover cannot tell two sessions of one runner from one session auditing itself. Only you can, so it says what it sees and lets you record what you know.
 - **`drover request-changes` refuses a finding outside the contract.** A review's send-back has to name, for each finding, the numbered requirement it fails or a `BRANCH-REGRESSION`: a defect the branch's own diff introduced that would break something in use. Anything else is a note for the audit, and a round spent on it is one the loop never gets back.
 - **`drover request-changes` refuses past `[review] max_review_rounds`**, four unless you set another number. A loop past four rounds has mostly been one requirement coming back, and each round is a full implementing session; `0` turns the cap off.
+- **`drover request-changes` refuses a requirement sent back twice running with no invariant between.** The second send-back on one number means the fixes are aimed at cases, so the review writes the property behind them with `drover invariant` first, and every later pass reads it. Numbers given to `--still-open` or `--operator` are exempt.
 
 ### How many rounds
 

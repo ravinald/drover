@@ -476,7 +476,7 @@ The `.drover.toml` sections, with the keys whose names carry drover vocabulary. 
 | `[usage]`                    | How status reads usage rows, and when drive warns and holds: `weekly_budget`, `reset`, `session_max_hours`, `context_warn`, and the tables `[usage.weekly]`, `[usage.five_hour]` and `[usage.overage]`. |
 | `"off"`                      | A `[usage]` level written as unset, so a project can remove one the per-user file sets: `pause_remaining = "off"`. Any number, `0` included, is a level.                                                |
 | `[register]`                 | Where the follow-up list lives: `backend`.                                                                                                                                                              |
-| `[backlog]`                  | `mirror`, which publishes items as tracker issues.                                                                                                                                                      |
+| `[backlog]`                  | `mirror`, which publishes items as tracker issues; `fold_max`, the longest list `fold` writes; `max_requirements`, the longest list `accept` takes without `--yes`.                                     |
 | `[supervise]`                | One policy per supervise action, plus `template`.                                                                                                                                                       |
 | `[notify]`                   | Where a drive's events go: `coalesce`, `quiet_hours`, and `[notify.destinations.<name>]` tables, each an `ntfy` topic or a `command` routing its own events at their own priorities.                    |
 
