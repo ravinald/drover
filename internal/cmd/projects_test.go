@@ -324,7 +324,7 @@ func TestProjectsTableHeaderSaysFinished(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, after, ok := strings.Cut(string(doc), "```\nPROJECT ")
+	_, after, ok := strings.Cut(string(doc), "```text\nPROJECT ")
 	if !ok {
 		t.Fatal("docs/automation.md has no status --all-projects sample")
 	}

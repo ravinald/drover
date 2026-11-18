@@ -1,6 +1,7 @@
 # Glossary
 
-Every word drover prints, or reads back from you, with what it means today. One line per term; the pages that explain each one in full are [concepts](concepts.md), [lifecycle](lifecycle.md), [configuration](configuration.md) and [automation](automation.md), and each command's `--help` carries its own flags and examples.
+Every word drover prints, or reads back from you, with what it means today.
+One line per term; the pages that explain each one in full are [concepts](concepts.md), [lifecycle](lifecycle.md), [configuration](configuration.md) and [automation](automation.md), and each command's `--help` carries its own flags and examples.
 
 ## Commands
 
@@ -55,7 +56,7 @@ Each command, as typed after `drover`.
 | `split`                 | Scaffolds a new item for work the contract never named and adds it to this item's deps.                              |
 | `status`                | Prints every item, its state and its audit level.                                                                    |
 | `supervise`             | Launches a supervising session that handles what `[supervise]` allows.                                               |
-| `t3`                    | The bridge to a T3 Code server, through the subcommands below.                                                       |
+| `t3`                    | The bridge to a T3 Code server, through the subcommands in the following rows.                                       |
 | `t3 discover`           | Prints the T3 Code server's name, version and tool catalog.                                                          |
 | `t3 login`              | Signs drover in to the T3 Code server and writes `[t3] token_file`; `--check` only reports whether it can.           |
 | `t3 run`                | The runner bridge: launches one T3 Code thread with the prompt, follows it to the end and prints a log drover reads. |
@@ -71,7 +72,8 @@ Each command, as typed after `drover`.
 
 ## Flags
 
-The flags whose names carry drover vocabulary. Each command's `--help` lists the rest.
+The flags whose names carry drover vocabulary.
+Each command's `--help` lists the rest.
 
 | Term                            | Meaning                                                                                                       |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -138,7 +140,8 @@ The state `status` prints and `--json` carries as `state`.
 
 ## Park causes and details
 
-Why drive stopped an item (ledger and `--json` `park`), and the underlying failure (`detail`). A review result can also be the park.
+Why drive stopped an item (ledger and `--json` `park`), and the underlying failure (`detail`).
+A review result can also be the park.
 
 | Term                      | Meaning                                                                                          |
 | ------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -438,7 +441,8 @@ The `[supervise]` keys, each an action drive or a supervisor may take, and the p
 
 ## Config sections and keys
 
-The `.drover.toml` sections, with the keys whose names carry drover vocabulary. [Configuration](configuration.md) documents every key.
+The `.drover.toml` sections, with the keys whose names carry drover vocabulary.
+[Configuration](configuration.md) documents every key.
 
 | Term                         | Meaning                                                                                                                                                                                                 |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

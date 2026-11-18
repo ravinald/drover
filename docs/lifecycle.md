@@ -1,10 +1,13 @@
 # Lifecycle
 
-One item, start to finish. [Concepts](concepts.md) explains why each store is where it is; this page is the order you touch them in, and what each step refuses to do for you.
+One item, start to finish.
+[Concepts](concepts.md) explains why each store is where it is; this page is the order you touch them in, and what each step refuses to do for you.
 
-Every step is a command a person can type. Nothing here needs an agent, and the same sequence drives one: [Agent guide](agent-guide.md) is which of these steps a coding session may take and which it may not, and [Automation](automation.md) is the machine-readable contract underneath both.
+Every step is a command a person can type.
+Nothing here needs an agent, and the same sequence drives one: [Agent guide](agent-guide.md) is which of these steps a coding session may take and which it may not, and [Automation](automation.md) is the machine-readable contract underneath both.
 
-For a first run (install, `init --user`, `init`, and the choices each of those needs), read [Getting started](getting-started.md) instead. This page begins after those, at the point where a project already loads.
+For a first run (install, `init --user`, `init`, and the choices each of those needs), read [Getting started](getting-started.md) instead.
+This page begins after those, at the point where a project already loads.
 
 ## Sequence
 
@@ -16,11 +19,17 @@ write ─> check ─> run ─> review ─> audit ─> open-pr ─> merge ─> fi
                    └──────────────────── report ─────────────────────┘
 ```
 
-`run`, `open-pr` and `finish` are the only steps that touch git, and `open-pr` is the only one that reaches the forge before the merge. `audit` is the only step that records judgment, and it closes the review pass rather than waiting for the merge: the session that has just traced every requirement is the one holding what the row has to say. The independence the row needs comes from `--code-by`, which refuses `verified` from whoever wrote the code whenever the level is written, so waiting for the branch to disappear buys nothing and costs the reader. A merged item nobody audited is what `drover unaudited` reports, and a later row still counts: the most recent level wins, in either direction.
+`run`, `open-pr` and `finish` are the only steps that touch git, and `open-pr` is the only one that reaches the forge before the merge.
+`audit` is the only step that records judgment, and it closes the review pass rather than waiting for the merge: the session that has just traced every requirement is the one holding what the row has to say.
+The independence the row needs comes from `--code-by`, which refuses `verified` from whoever wrote the code whenever the level is written, so waiting for the branch to disappear buys nothing and costs the reader.
+A merged item nobody audited is what `drover unaudited` reports, and a later row still counts: the most recent level wins, in either direction.
 
-**Review sits before the merge, and the arrow back is the point of putting it there.** A requirement the review finds unmet is this item unfinished, not a new defect: the branch is still open and no pull request exists yet, so `drover run <id>` returns to the same branch and the review runs again. Only a defect owned by a _different_ item becomes a tracker row. Filing an unmet requirement instead of returning it merges the item incomplete and leaves an issue whose only owner just shipped, which is how a backlog fills with rows nothing closes.
+**Review sits before the merge, and the arrow back is the point of putting it there.**
+A requirement the review finds unmet is this item unfinished, not a new defect: the branch is still open and no pull request exists yet, so `drover run <id>` returns to the same branch and the review runs again.
+Only a defect owned by a _different_ item becomes a tracker row.
+Filing an unmet requirement instead of returning it merges the item incomplete and leaves an issue whose only owner just shipped, which is how a backlog fills with rows nothing closes.
 
-### The whole loop, and who may run each step
+**The whole loop, and who may run each step.**
 
 | Step                                               | Command                                                 | A launched session may run it                                                                  |
 | -------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -46,11 +55,13 @@ write ─> check ─> run ─> review ─> audit ─> open-pr ─> merge ─> fi
 | Record the merge, write the tracker                | `drover finish <id>`                                    | no: the operator merges, so the operator records it                                            |
 | Confirm nothing was left unjudged                  | `drover check`                                          | yes: it is read-only                                                                           |
 
-Three commands carry the mechanical core (`run`, `review`, `finish`). The loop is not complete without `audit`, which is the only record of whether anyone checked, and `check`, which reports the issue nobody judged.
+Three commands carry the mechanical core (`run`, `review`, `finish`).
+The loop is not complete without `audit`, which is the only record of whether anyone checked, and `check`, which reports the issue nobody judged.
 
 ## 1. Write the item
 
-One file at `<paths.backlog>/<stem>-<slug>.md`. The directory is the backlog, so there is no index to update.
+One file at `<paths.backlog>/<stem>-<slug>.md`.
+The directory is the backlog, so there is no index to update.
 
 ```markdown
 ---
@@ -72,13 +83,21 @@ Out of scope: the resolver itself.
 
 Three things about that file are not style.
 
-**The numbered list is the contract.** `report --save` turns every top-level `N.` line into an audit checkbox. A requirement written as prose is not on the checklist, so nobody will ever confirm it.
+**The numbered list is the contract.**
+`report --save` turns every top-level `N.` line into an audit checkbox.
+A requirement written as prose is not on the checklist, so nobody will ever confirm it.
 
-**A requirement only a person can meet opens with `[operator]`.** A live check over ssh, a deploy, anything the session's permission mode blocks: write it as `3. [operator] psql on the dev host shows the migration applied`. The prompt lists it under its own heading and tells the session not to attempt it, `report --save` marks its checkbox `(operator)`, and the rest of the lifecycle treats it as the hold described under [Requirements only the operator can meet](#requirements-only-the-operator-can-meet).
+**A requirement only a person can meet opens with `[operator]`.**
+A live check over ssh, a deploy, anything the session's permission mode blocks: write it as `3. [operator] psql on the dev host shows the migration applied`.
+The prompt lists it under its own heading and tells the session not to attempt it, `report --save` marks its checkbox `(operator)`, and the rest of the lifecycle treats it as the hold described under [Requirements only the operator can meet](#requirements-only-the-operator-can-meet).
 
-**Frontmatter is a closed schema**, declared in `[frontmatter]`. An undeclared key is a parse error, because a typo'd `deps` reads as no dependencies and renders a blocked item READY: a wrong answer rather than a degraded one. Required keys may be empty; they may not be absent.
+**Frontmatter is a closed schema**, declared in `[frontmatter]`.
+An undeclared key is a parse error, because a typo'd `deps` reads as no dependencies and renders a blocked item READY: a wrong answer rather than a degraded one.
+Required keys may be empty; they may not be absent.
 
-**The filename carries the slug.** There is no `slug` key, and writing one is a parse error. Renaming the file changes its branch, its log names and its report path, so run `check` after any rename.
+**The filename carries the slug.**
+There is no `slug` key, and writing one is a parse error.
+Renaming the file changes its branch, its log names and its report path, so run `check` after any rename.
 
 Or scaffold an empty one and fill it in:
 
@@ -87,7 +106,8 @@ drover new bug "the resolver drops a trailing dot"
 drover new feature "publish a release binary" --sev H
 ```
 
-`new` allocates the next free id in the namespace matching the kind (see [Item ids](concepts.md#item-ids): `B1` is the first bug, `F1` the first feature) and writes the same scaffold `intake` does, minus the issue. A project with no tracker needs it to create an item at all, and a project with one still wants it: work that starts as a decision rather than as a bug report has no issue to take in.
+`new` allocates the next free id in the namespace matching the kind (see [Item ids](concepts.md#item-ids): `B1` is the first bug, `F1` the first feature) and writes the same scaffold `intake` does, minus the issue.
+A project with no tracker needs it to create an item at all, and a project with one still wants it: work that starts as a decision rather than as a bug report has no issue to take in.
 
 To scaffold from a tracker issue instead:
 
@@ -97,26 +117,36 @@ drover intake 42                     # namespace from the issue's labels
 drover intake 42 --kind enhancement  # override
 ```
 
-`intake --list` is the import queue: every open issue carrying a label that matches an id namespace, minus the ones a body already names. It is not the follow-up list. A row there is work somebody is going to do; a row in `drover follow-ups` is work nobody has priced, and an issue carrying neither appears in neither.
+`intake --list` is the import queue: every open issue carrying a label that matches an id namespace, minus the ones a body already names.
+It is not the follow-up list.
+A row there is work somebody is going to do; a row in `drover follow-ups` is work nobody has priced, and an issue carrying neither appears in neither.
 
-That writes the body and quotes the issue as raw material. The scaffold's severity is the tracker's own rank, read from the `severity_prefix` label; an issue carrying no rank drover recognizes scaffolds `M` if it is a bug and leaves the key empty otherwise, which is a fallback rather than an assessment.
+That writes the body and quotes the issue as raw material.
+The scaffold's severity is the tracker's own rank, read from the `severity_prefix` label; an issue carrying no rank drover recognizes scaffolds `M` if it is a bug and leaves the key empty otherwise, which is a fallback rather than an assessment.
 
-It does **not** write the requirements. The scaffold carries `[intake] stop_marker` and drover refuses to launch or even preview the item while it is there, because requirements lifted mechanically from a bug report are checkboxes nobody can falsify.
+It does **not** write the requirements.
+The scaffold carries `[intake] stop_marker` and drover refuses to launch or even preview the item while it is there, because requirements lifted mechanically from a bug report are checkboxes nobody can falsify.
 
 ### Draft the requirements
 
-Writing a good list means reading the code the item touches and citing files and lines, which is work an agent is suited to. `draft` assembles what that takes:
+Writing a good list means reading the code the item touches and citing files and lines, which is work an agent is suited to.
+`draft` assembles what that takes:
 
 ```bash
 drover draft B1                              # print the prompt
 drover draft B1 --runner claude --headless   # hand it to a drafting agent
 ```
 
-The prompt carries the originating issue read fresh from the tracker, `[agents] principles`, the numbered-list contract and why it exists, the rest of the backlog with paths so a requirement belonging to a sibling gets filed there rather than absorbed, and the body file to write into. Point `[prompts] draft` at your own to change what it says.
+The prompt carries the originating issue read fresh from the tracker, `[agents] principles`, the numbered-list contract and why it exists, the rest of the backlog with paths so a requirement belonging to a sibling gets filed there rather than absorbed, and the body file to write into.
+Point `[prompts] draft` at your own to change what it says.
 
-`draft` writes nothing itself and records nothing. The agent writes the body, the same division `run` and `review` keep.
+`draft` writes nothing itself and records nothing.
+The agent writes the body, the same division `run` and `review` keep.
 
-**The stop marker survives the draft.** The prompt tells the agent to leave it, and no flag on `draft` removes it. Deleting it is a human reading the drafted list and accepting it, which is the only thing that makes the body runnable, so an unsupervised agent cannot produce an item that executes. `draft` refuses an item whose marker is already gone and exits 3: a body past intake is somebody's accepted contract, and a redraft would overwrite it.
+**The stop marker survives the draft.**
+The prompt tells the agent to leave it, and no flag on `draft` removes it.
+Deleting it is a human reading the drafted list and accepting it, which is the only thing that makes the body runnable, so an unsupervised agent cannot produce an item that executes.
+`draft` refuses an item whose marker is already gone and exits 3: a body past intake is somebody's accepted contract, and a redraft would overwrite it.
 
 ### Accept the requirements
 
@@ -126,21 +156,32 @@ drover accept B4 B5 E2            # several at once; a bad id is named and skipp
 drover unaccept B1                # put the marker back and redraft
 ```
 
-Given several ids, `accept` takes each in turn. One that fails is reported on stderr by name and the rest are still accepted; the run then exits non-zero (3 when every failure was a refusal, 1 otherwise) and its last line lists the ids left unaccepted.
+Given several ids, `accept` takes each in turn.
+One that fails is reported on stderr by name and the rest are still accepted; the run then exits non-zero (3 when every failure was a refusal, 1 otherwise) and its last line lists the ids left unaccepted.
 
-`accept` deletes the block `intake` wrote and nothing else: the marker line, the two explanation lines under it, and the blank that separates them from the body. `unaccept` writes the same block back, so an item accepted and then unaccepted is byte-identical to the scaffold it came from, and a body whose block a human deleted by hand gets the explanation back with the marker rather than a bare line.
+`accept` deletes the block `intake` wrote and nothing else: the marker line, the two explanation lines under it, and the blank that separates them from the body.
+`unaccept` writes the same block back, so an item accepted and then unaccepted is byte-identical to the scaffold it came from, and a body whose block a human deleted by hand gets the explanation back with the marker rather than a bare line.
 
-The lines under the marker are matched against `intake`'s own text rather than scanned to the next blank. A marker somebody typed by hand with a paragraph directly under it loses the marker line alone, and the paragraph stays where its author put it.
+The lines under the marker are matched against `intake`'s own text rather than scanned to the next blank.
+A marker somebody typed by hand with a paragraph directly under it loses the marker line alone, and the paragraph stays where its author put it.
 
-It stays a separate command rather than a flag on `draft` for the reason the marker exists at all. A flag is something a runner's argv can carry; a command an operator types is not. Nothing that launches a session can reach `accept`.
+It stays a separate command rather than a flag on `draft` for the reason the marker exists at all.
+A flag is something a runner's argv can carry; a command an operator types is not.
+Nothing that launches a session can reach `accept`.
 
-`accept` reads the body against the trunk before it deletes anything, and refuses, unless given `--yes`, three contracts that cannot run as written. The first is a `path:line` citation naming a file the trunk lacks, or a range past its last line: the check `drive` makes at dispatch, run while the author still has the body open. While a dependency is unmerged it prints a note instead, since that dependency may create the file first, and says nothing of a citation the dependency's branch already holds. The second is an `[operator]` requirement that can only be met after the merge (one that says "after the merge" or "post-merge", or runs a backticked flag whose name the trunk holds nowhere) holds the merge waiting on itself, because `signoff` comes before the merge; meet it before the merge, move an automated check to [`[finish] post_check`](configuration.md#finish), or track the post-merge step as its own item. The third is a list longer than [`[backlog] max_requirements`](configuration.md#backlog), 8 unless set: every numbered line is one more thing a review can send back, so split what is its own change into another item with a deps line, or merge requirements that check one property into one.
+`accept` reads the body against the trunk before it deletes anything, and refuses, unless given `--yes`, three contracts that cannot run as written.
+The first is a `path:line` citation naming a file the trunk lacks, or a range past its last line: the check `drive` makes at dispatch, run while the author still has the body open.
+While a dependency is unmerged it prints a note instead, since that dependency may create the file first, and says nothing of a citation the dependency's branch already holds.
+The second is an `[operator]` requirement that can only be met after the merge (one that says "after the merge" or "post-merge", or runs a backticked flag whose name the trunk holds nowhere) holds the merge waiting on itself, because `signoff` comes before the merge; meet it before the merge, move an automated check to [`[finish] post_check`](configuration.md#finish), or track the post-merge step as its own item.
+The third is a list longer than [`[backlog] max_requirements`](configuration.md#backlog), 8 unless set: every numbered line is one more thing a review can send back, so split what is its own change into another item with a deps line, or merge requirements that check one property into one.
 
-Both name a state rather than a transition, so both are idempotent: `accept` on a body with no marker and `unaccept` on one that already has it each report what already holds and exit 0. `unaccept` refuses an item the ledger records merged and exits 3: a merged item is not a scaffold, and `unmark-merged` is the command for withdrawing a completion.
+Both name a state rather than a transition, so both are idempotent: `accept` on a body with no marker and `unaccept` on one that already has it each report what already holds and exit 0.
+`unaccept` refuses an item the ledger records merged and exits 3: a merged item is not a scaffold, and `unmark-merged` is the command for withdrawing a completion.
 
-The marker is matched as a whole line outside any fenced block. An item quoting it in a config sample, which is routine in a backlog of items about intake, is somebody's accepted contract and not a scaffold.
+The marker is matched as a whole line outside any fenced block.
+An item quoting it in a config sample, which is routine in a backlog of items about intake, is somebody's accepted contract and not a scaffold.
 
-#### What accept checks
+### What accept checks
 
 `accept` is the last look before a body becomes the contract, so it reads the body for what a lint can see:
 
@@ -153,7 +194,9 @@ The marker is matched as a whole line outside any fenced block. An item quoting 
 | A cited directory in the project tree.                                                                                                                                                                                                                                                                                                                                                                                                                      | One note per directory: under `drive --jobs` the item waits for any item citing a path below it. Exit 0. | `new` prints the same note and `check` reports `BROAD CITATION` for a top-level directory, both while the body is still a scaffold. |
 | The deps line, the stop marker and the actor.                                                                                                                                                                                                                                                                                                                                                                                                               | Refused. `--yes` never overrides these.                                                                  |                                                                                                                                     |
 
-A passing mention is not a file the item touches. Open the paragraph with `<!-- drover: context -->` on its first line and its citations count for neither the note nor dispatch's overlap set, which `drive --dry-run --jobs N` shows in the pairs it holds apart. A numbered requirement line inside that paragraph still counts:
+A passing mention is not a file the item touches.
+Open the paragraph with `<!-- drover: context -->` on its first line and its citations count for neither the note nor dispatch's overlap set, which `drive --dry-run --jobs N` shows in the pairs it holds apart.
+A numbered requirement line inside that paragraph still counts:
 
 ```text
 <!-- drover: context -->
@@ -162,7 +205,8 @@ Nothing in `backend/` parses a retail barcode today.
 
 ### Change an accepted contract
 
-Once accepted, the numbered list is what every run and review is measured against, so no command a session can reach changes it: `request-changes`, `close-changes` and `invariant` each refuse a write that would move the count. When the contract itself is wrong (a requirement belongs to a different design, or to another item), the operator changes it with `amend`:
+Once accepted, the numbered list is what every run and review is measured against, so no command a session can reach changes it: `request-changes`, `close-changes` and `invariant` each refuse a write that would move the count.
+When the contract itself is wrong (a requirement belongs to a different design, or to another item), the operator changes it with `amend`:
 
 ```bash
 drover amend 7 -f reqs.md --reason "R4 belongs to the cache redesign"
@@ -170,19 +214,32 @@ drover amend 7 -f reqs7.md --reason "R4 moves to 9" --moved 9     # a move is am
 drover amend 9 -f reqs9.md --reason "R4 of 7 lands here" --moved 7
 ```
 
-The file is the new numbered list and nothing else. `amend` replaces the body's one contiguous list in place, keeps the list it replaced beside the saved reports as `<stem>-<slug>.amend-N.md` with the reason, and appends a body row carrying the new digest and an `amend` row naming the count before and after, the reason and, with `--moved`, the other item. It refuses a scaffold (write its list by hand and `accept` it), a merged item, and a list that prose splits in two. It is the operator's: it refuses inside any session drover launched, supervisor included, because `move_requirement` sits at `operator` with no higher ceiling.
+The file is the new numbered list and nothing else.
+`amend` replaces the body's one contiguous list in place, keeps the list it replaced beside the saved reports as `<stem>-<slug>.amend-N.md` with the reason, and appends a body row carrying the new digest and an `amend` row naming the count before and after, the reason and, with `--moved`, the other item.
+It refuses a scaffold (write its list by hand and `accept` it), a merged item, and a list that prose splits in two.
+It is the operator's: it refuses inside any session drover launched, supervisor included, because `move_requirement` sits at `operator` with no higher ceiling.
 
-When two accepted items turn out to be one change, `drover fold <from> --into <to>` makes them one: it appends the numbered requirements of `<from>` to the list of `<to>`, renumbered after its last, through the same write and ledger rows `amend --moved` records, then shelves `<from>`. It prints each moved line naming either id or a requirement number, because the renumbering moved what those references point at; rewrite them and record the edit with `drover touch`. It refuses, writing nothing, when either item is a scaffold or merged, when `<to>` depends on `<from>`, when another item depends on `<from>`, and when the combined list would pass [`[backlog] fold_max`](configuration.md#backlog). `check` and `accept` suggest a candidate pair as a note: two unmerged items whose cited line ranges overlap in one file.
+When two accepted items turn out to be one change, `drover fold <from> --into <to>` makes them one: it appends the numbered requirements of `<from>` to the list of `<to>`, renumbered after its last, through the same write and ledger rows `amend --moved` records, then shelves `<from>`.
+It prints each moved line naming either id or a requirement number, because the renumbering moved what those references point at; rewrite them and record the edit with `drover touch`.
+It refuses, writing nothing, when either item is a scaffold or merged, when `<to>` depends on `<from>`, when another item depends on `<from>`, and when the combined list would pass [`[backlog] fold_max`](configuration.md#backlog).
+`check` and `accept` suggest a candidate pair as a note: two unmerged items whose cited line ranges overlap in one file.
 
-Do it before sending the item back. `request-changes` refuses evidence that names a requirement by number (`R3`, "requirement 3") the body's list does not hold, unless an `amend` since the last round removed it, and evidence that says requirements were removed or replaced when no `amend` has run since the last round. That is a heuristic over the evidence's prose, read outside code fences: a prompt to look, not a proof. Under `--over-limit` it warns instead and writes with `--yes`.
+Do it before sending the item back.
+`request-changes` refuses evidence that names a requirement by number (`R3`, "requirement 3") the body's list does not hold, unless an `amend` since the last round removed it, and evidence that says requirements were removed or replaced when no `amend` has run since the last round.
+That is a heuristic over the evidence's prose, read outside code fences: a prompt to look, not a proof.
+Under `--over-limit` it warns instead and writes with `--yes`.
 
-An edit by hand works on the file and breaks the review that follows. Every drover command that writes a body records its digest, and `drive` reads a body that no longer matches the last one recorded as a reviewer writing findings by hand, so the next clean pass parks `body_edited`. `drover check` reports such an item as `HAND EDITED`, and `drive` parks it `hand_edited` before launching any session, until the edit is recorded: `amend` for a change to the numbered requirements, or `touch` for prose.
+An edit by hand works on the file and breaks the review that follows.
+Every drover command that writes a body records its digest, and `drive` reads a body that no longer matches the last one recorded as a reviewer writing findings by hand, so the next clean pass parks `body_edited`.
+`drover check` reports such an item as `HAND EDITED`, and `drive` parks it `hand_edited` before launching any session, until the edit is recorded: `amend` for a change to the numbered requirements, or `touch` for prose.
 
 ```bash
 drover touch 7 --reason "reworded the background paragraph"
 ```
 
-`touch` appends one body row carrying the current digest and the reason, and keeps nothing else, so a requirements change recorded with it leaves no trace of the list it replaced. It is the operator's under the same refusals as `amend`. A scaffold is never reported, since writing its requirements by hand is the workflow, and neither is an item with no digest on record, nor one a live session in this checkout is working.
+`touch` appends one body row carrying the current digest and the reason, and keeps nothing else, so a requirements change recorded with it leaves no trace of the list it replaced.
+It is the operator's under the same refusals as `amend`.
+A scaffold is never reported, since writing its requirements by hand is the workflow, and neither is an item with no digest on record, nor one a live session in this checkout is working.
 
 ## 2. Check
 
@@ -190,9 +247,11 @@ drover touch 7 --reason "reworded the background paragraph"
 drover check
 ```
 
-Exit 0 clean, exit 2 on findings, exit 1 if it could not run the validation at all. Put it in CI; run it after any rename.
+Exit 0 clean, exit 2 on findings, exit 1 if it could not run the validation at all.
+Put it in CI; run it after any rename.
 
-Findings are `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BRIDGE SIGNED OUT`, `BRIDGE UNREACHABLE`, `BRIDGE VERSION`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `SUPERVISOR UNSET`, `BAD TEMPLATE`, `WHOLE TEMPLATE`, `STALE OVERRIDE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `SESSION MARKER`, `PLACEHOLDER`, `HOLD MARKER`, `LIVE REQUIREMENT`, `BROAD CITATION`, `HAND EDITED`, `UNREVIEWED MERGE` and `BRANCH OVERLAP`. [Concepts](concepts.md#validation) says what each means.
+Findings are `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BRIDGE SIGNED OUT`, `BRIDGE UNREACHABLE`, `BRIDGE VERSION`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `SUPERVISOR UNSET`, `BAD TEMPLATE`, `WHOLE TEMPLATE`, `STALE OVERRIDE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `SESSION MARKER`, `PLACEHOLDER`, `HOLD MARKER`, `LIVE REQUIREMENT`, `BROAD CITATION`, `HAND EDITED`, `UNREVIEWED MERGE` and `BRANCH OVERLAP`.
+[Concepts](concepts.md#validation) says what each means.
 
 Then see where the item sits:
 
@@ -205,7 +264,8 @@ drover show 2            # one item, including its full audit history
 drover show 2 detail     # the same, then the body a run is handed
 ```
 
-`--sev none` selects the items declaring no rank drover recognizes. Where `[status] column` names the severity key, the cell is colored by rank.
+`--sev none` selects the items declaring no rank drover recognizes.
+Where `[status] column` names the severity key, the cell is colored by rank.
 
 ## 3. Preview the run
 
@@ -215,7 +275,8 @@ drover run 2 --dry-run
 
 This touches nothing and prints what the runner will be handed: the prompt template rendered against the item, its dependencies, the resolved `spec:` paths, the vendored guides, the selected verify command, and the open follow-ups owned by this item and its direct dependencies.
 
-Read it. The three things worth checking before spending a run:
+Read it.
+The three things worth checking before spending a run:
 
 ```bash
 drover run 2 --dry-run | grep -A20 'Open follow-ups' # what it inherits
@@ -223,7 +284,9 @@ drover run 2 --dry-run | grep 'The verify command passes'           # which veri
 drover skills                                        # any guide not vendored
 ```
 
-A verify command named for a frontmatter key wins when that key is `yes`, names are tried in sorted order, and the first match wins. drover selects **one** verify command and never composes several, so a flagged verify command must be a superset of the default. A check that lives in only one of them stops running the moment two flags are set together.
+A verify command named for a frontmatter key wins when that key is `yes`, names are tried in sorted order, and the first match wins.
+drover selects **one** verify command and never composes several, so a flagged verify command must be a superset of the default.
+A check that lives in only one of them stops running the moment two flags are set together.
 
 ## 4. Run
 
@@ -232,17 +295,28 @@ drover run 2              # interactive
 drover run 2 --headless   # event stream to a log, report captured on exit
 ```
 
-`run` switches to the branch `[run] branch` renders for the item, then hands the prompt to the runner. Dependencies are advisory here: an unmerged dep is reported, not enforced, because the operator sometimes has a reason.
+`run` switches to the branch `[run] branch` renders for the item, then hands the prompt to the runner.
+Dependencies are advisory here: an unmerged dep is reported, not enforced, because the operator sometimes has a reason.
 
-`run` refuses to switch over a dirty tree and exits 3, listing up to ten of the paths `git status --porcelain` reports and counting the rest. A `git switch` carries uncommitted changes onto the branch it switches to, so work left from another item would become part of this one's diff and nothing downstream would say so. Every path git does not ignore counts, untracked files included even where `status.showUntrackedFiles` is `no`, and `.drover.toml` and the backlog among them, since either can be an item's work. So the paths drover writes its own records to (ledger, reports, register file, logs, and the backlog a review rewrites) have to be ignored or kept outside the host repo, or `run` and `drive` refuse on them, and the refusal names the ones it found. Nothing is stashed, reset or cleaned: commit the work on the branch it belongs to or discard it, then run again. `drive` applies the same check when it starts, before reconciliation finishes anything, then before each item's switch and after each implement stage and review; see [`drive --json`](automation.md#drive---json) for the three causes it parks on.
+`run` refuses to switch over a dirty tree and exits 3, listing up to ten of the paths `git status --porcelain` reports and counting the rest.
+A `git switch` carries uncommitted changes onto the branch it switches to, so work left from another item would become part of this one's diff and nothing downstream would say so.
+Every path git does not ignore counts, untracked files included even where `status.showUntrackedFiles` is `no`, and `.drover.toml` and the backlog among them, since either can be an item's work.
+So the paths drover writes its own records to (ledger, reports, register file, logs, and the backlog a review rewrites) have to be ignored or kept outside the host repo, or `run` and `drive` refuse on them, and the refusal names the ones it found.
+Nothing is stashed, reset or cleaned: commit the work on the branch it belongs to or discard it, then run again.
+`drive` applies the same check when it starts, before reconciliation finishes anything, then before each item's switch and after each implement stage and review; see [`drive --json`](automation.md#drive---json) for the three causes it parks on.
 
-A project with [`[git] enabled = false`](configuration.md#git) has no branch to switch to. `run` executes in place and its prompt names none, because the prompt is an instruction and naming a branch nothing will create is a wrong one.
+A project with [`[git] enabled = false`](configuration.md#git) has no branch to switch to.
+`run` executes in place and its prompt names none, because the prompt is an instruction and naming a branch nothing will create is a wrong one.
 
-Only a headless run leaves a log, and only a headless run captures a report. Capturing after an interactive session would reach back to a stale log and misattribute the report.
+Only a headless run leaves a log, and only a headless run captures a report.
+Capturing after an interactive session would reach back to a stale log and misattribute the report.
 
-`run` appends one ledger row naming the runner it resolved, before the launch. That row is what `finish` and `mark-merged` read to attribute the work, so neither has to be told with `--runner` and neither falls back to a literal `claude`. Deriving it from the newest log instead breaks the moment an item is run twice with two runners, and is not available at all after an interactive run.
+`run` appends one ledger row naming the runner it resolved, before the launch.
+That row is what `finish` and `mark-merged` read to attribute the work, so neither has to be told with `--runner` and neither falls back to a literal `claude`.
+Deriving it from the newest log instead breaks the moment an item is run twice with two runners, and is not available at all after an interactive run.
 
-An agent that ran an item outside drover records the fact by appending one line to the ledger itself. That protocol is why the ledger is text rather than a database: it has to be writable from a sandbox with no binary and no network.
+An agent that ran an item outside drover records the fact by appending one line to the ledger itself.
+That protocol is why the ledger is text rather than a database: it has to be writable from a sandbox with no binary and no network.
 
 ## 5. Review
 
@@ -250,17 +324,29 @@ An agent that ran an item outside drover records the fact by appending one line 
 drover review 2
 ```
 
-Assembles the reviewer's prompt: the numbered contract, every dependency with how well it is audited, the open follow-ups, the dependencies' saved reports, the run's own report, the issues the item's `closes` key names, and the verify command. Seven things a reviewer would otherwise gather from five commands, and the failure mode of gathering them by hand is skipping one silently.
+Assembles the reviewer's prompt: the numbered contract, every dependency with how well it is audited, the open follow-ups, the dependencies' saved reports, the run's own report, the issues the item's `closes` key names, and the verify command.
+Seven things a reviewer would otherwise gather from five commands, and the failure mode of gathering them by hand is skipping one silently.
 
-A headless review reports what its pass amounted to when the runner returns, in the same tokens and the same sentences a `drive` parks on: `drover review B1 --runner codex --headless` ends on `Pass: no_record`, then the outcome and the next step described under [what the review leaves you to do](#what-the-review-leaves-you-to-do). Without it, a review that recorded neither an audit nor a send-back would leave a stage row and nothing else, and the operator would have to work out whether no findings was good news. Where the runner's terminal event names what it refused the session, `no_record` and `died` name that too, so a review denied every command reads as one that could not reach `drover audit` rather than one that found nothing. An interactive review prints nothing after the runner returns: it writes no log, so there is no terminal event to read, and every pass would read as `died`.
+A headless review reports what its pass amounted to when the runner returns, in the same tokens and the same sentences a `drive` parks on: `drover review B1 --runner codex --headless` ends on `Pass: no_record`, then the outcome and the next step described under [what the review leaves you to do](#what-the-review-leaves-you-to-do).
+Without it, a review that recorded neither an audit nor a send-back would leave a stage row and nothing else, and the operator would have to work out whether no findings was good news.
+Where the runner's terminal event names what it refused the session, `no_record` and `died` name that too, so a review denied every command reads as one that could not reach `drover audit` rather than one that found nothing.
+An interactive review prints nothing after the runner returns: it writes no log, so there is no terminal event to read, and every pass would read as `died`.
 
-Nothing is recorded. A pass row is `drive`'s, and [`drover open-pr`](#7-open-the-pull-request-merge-then-finish) reads one as the authority that a branch may merge; a review nobody supervised does not acquire that standing by having printed a word.
+Nothing is recorded.
+A pass row is `drive`'s, and [`drover open-pr`](#7-open-the-pull-request-merge-then-finish) reads one as the authority that a branch may merge; a review nobody supervised does not acquire that standing by having printed a word.
 
-The `closes` issues are read from the tracker as the prompt is built, so the reviewer judges the current report rather than whatever the body quoted. Each one gets a `drover resolve` line; `finish` writes them to the tracker after the merge. See [issue dispositions](concepts.md#issue-dispositions).
+The `closes` issues are read from the tracker as the prompt is built, so the reviewer judges the current report rather than whatever the body quoted.
+Each one gets a `drover resolve` line; `finish` writes them to the tracker after the merge.
+See [issue dispositions](concepts.md#issue-dispositions).
 
-An issue the run fixed that the key never named is not on that list, and `resolve` refuses it. `drover link <id> <n>` puts it there, checking the number against the tracker before `resolve` accepts it; `resolve --link` does both in one step. Leaving the key alone is the other legitimate answer and says a later run owes the work. `drover check` asks the question as `UNLINKED` while the branch is still open.
+An issue the run fixed that the key never named is not on that list, and `resolve` refuses it.
+`drover link <id> <n>` puts it there, checking the number against the tracker before `resolve` accepts it; `resolve --link` does both in one step.
+Leaving the key alone is the other legitimate answer and says a later run owes the work.
+`drover check` asks the question as `UNLINKED` while the branch is still open.
 
-The prompt asks it too. Open follow-ups split into the rows owned by this item, each with a `resolve --link` line pre-filled, and the rows carried one hop from its dependencies, which are listed with their owners so a review does not re-file one as new. A row this branch discharged is linked and judged there; a row it did not touch is left undisposed, which keeps it open and owned for a later run.
+The prompt asks it too.
+Open follow-ups split into the rows owned by this item, each with a `resolve --link` line pre-filled, and the rows carried one hop from its dependencies, which are listed with their owners so a review does not re-file one as new.
+A row this branch discharged is linked and judged there; a row it did not touch is left undisposed, which keeps it open and owned for a later run.
 
 ### What the review leaves you to do
 
@@ -272,9 +358,11 @@ Outcome:    the review sent work back; the findings are in the item body, under 
 Next steps: drover run B2, then drover review B2 --runner codex
 ```
 
-An interactive review prints none of them. It leaves no log, so there is no terminal event to read and every pass would report as `died`; `review` returns the runner's exit and nothing else.
+An interactive review prints none of them.
+It leaves no log, so there is no terminal event to read and every pass would report as `died`; `review` returns the runner's exit and nothing else.
 
-The reading is the one `drive` makes of a pass, from the log and the rows. The next step repeats the runner and `--headless`, so the command pastes as the pass it follows.
+The reading is the one `drive` makes of a pass, from the log and the rows.
+The next step repeats the runner and `--headless`, so the command pastes as the pass it follows.
 
 | The pass                                                                                                | Next steps                                                                                                                                                                                                                        |
 | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -291,11 +379,15 @@ The reading is the one `drive` makes of a pass, from the log and the rows. The n
 | The runner's service or account failed (`faulted`)                                                      | Review again once the service recovers                                                                                                                                                                                            |
 | A stream no schema reads (`unreadable`)                                                                 | `drover show <id>` lists what the review recorded                                                                                                                                                                                 |
 
-`drive` ends the same way, once per item after its count line, and adds its own causes: a merge a required merge queue holds, a pull request held by `--no-merge`, `protected_paths` or a dependency a review split out, a merge gate that refused the diff or would not run, and every skip. The follow-up is on stderr in both commands, so `drive --json` keeps stdout to the document.
+`drive` ends the same way, once per item after its count line, and adds its own causes: a merge a required merge queue holds, a pull request held by `--no-merge`, `protected_paths` or a dependency a review split out, a merge gate that refused the diff or would not run, and every skip.
+The follow-up is on stderr in both commands, so `drive --json` keeps stdout to the document.
 
 ### Where a finding goes
 
-The prompt sends each one to its owner, and picking wrong costs in both directions: a backlog fills with rows nothing closes, or a pull request collects round after round over findings nobody would have scheduled. Two questions decide it, in order. The contract and the branch's own diff say where a finding goes: `git diff <trunk>...HEAD` names what the run answers for, and a regression it introduced is the run's whether or not a requirement mentions it. What the defect would break in use then says whether it is worth a run at all, because the diff answers who caused it and not whether a pull request should stay open.
+The prompt sends each one to its owner, and picking wrong costs in both directions: a backlog fills with rows nothing closes, or a pull request collects round after round over findings nobody would have scheduled.
+Two questions decide it, in order.
+The contract and the branch's own diff say where a finding goes: `git diff <trunk>...HEAD` names what the run answers for, and a regression it introduced is the run's whether or not a requirement mentions it.
+What the defect would break in use then says whether it is worth a run at all, because the diff answers who caused it and not whether a pull request should stay open.
 
 <!-- prettier-ignore -->
 | Token | What you found | Where it goes |
@@ -309,19 +401,48 @@ The prompt sends each one to its owner, and picking wrong costs in both directio
 | `NEW-ITEM` | A gap in merged code that no existing item owns and that blocks no requirement here; never a defect this branch's diff introduced | A new item: `drover new <kind> "<title>" -f <file>`, without `--found-in` because the gap predates this branch, and the new id named in the report and the audit note. The `-f` file is the finding, written for whoever writes the requirements: the file and line, the command that reproduces it with its actual output, and what is wrong. The audit note names the new id and does not carry the description. The scaffold is inert until a human accepts it, so filing one schedules nobody. Without an intake stop marker `new` refuses and the finding is `REPORT-ONLY`. |
 | `REPORT-ONLY` | Anything you would not spend a run on, would not file, and cannot correct here | The report, and nowhere else. A finding nobody would schedule needs no tracker row and no backlog body. |
 
-The three `BRANCH-` rows, `FIX-IN-REVIEW` and `SPLIT-OUT` are why review sits before the merge: each needs a branch that is still open. A defect found after the merge is a bug: the branch is gone, so it is filed through intake or with `drover new <kind> "<title>" -f <file>` without `--found-in`. Before the merge nothing in the item's own work is filed, at any pass and at the round cap: past `[review] max_review_rounds` the reviewer still records its findings with `request-changes`, and drover refuses the send-back, keeps the findings and parks the item for the operator.
+The three `BRANCH-` rows, `FIX-IN-REVIEW` and `SPLIT-OUT` are why review sits before the merge: each needs a branch that is still open.
+A defect found after the merge is a bug: the branch is gone, so it is filed through intake or with `drover new <kind> "<title>" -f <file>` without `--found-in`.
+Before the merge nothing in the item's own work is filed, at any pass and at the round cap: past `[review] max_review_rounds` the reviewer still records its findings with `request-changes`, and drover refuses the send-back, keeps the findings and parks the item for the operator.
 
-Sending a finding back to the branch means writing it into the item body: `drover request-changes <id> -f <file>` replaces the `## What the review sent back` section and touches nothing else. That body is the whole prompt `run` assembles: a reviewer's report and an audit note both reach the operator and neither reaches the next run, so a gap recorded only in those is one the next run rediscovers or ships again. The section is replaced rather than appended, because a block naming gaps a later pass closed sends the next run to re-verify finished work. The numbered requirements are the contract and stay as they are; only the evidence under that heading changes. Every finding sent back carries a test that fails on the branch as it stands, as a fenced block in the file or the path and name of a test already on the branch. The implement prompt has the next run commit that test unchanged and make it pass, and report one line per numbered requirement naming the test that fails without the change; the review reads that map before anything else, and a requirement with no test is unmet.
+Sending a finding back to the branch means writing it into the item body: `drover request-changes <id> -f <file>` replaces the `## What the review sent back` section and touches nothing else.
+That body is the whole prompt `run` assembles: a reviewer's report and an audit note both reach the operator and neither reaches the next run, so a gap recorded only in those is one the next run rediscovers or ships again.
+The section is replaced rather than appended, because a block naming gaps a later pass closed sends the next run to re-verify finished work.
+The numbered requirements are the contract and stay as they are; only the evidence under that heading changes.
+Every finding sent back carries a test that fails on the branch as it stands, as a fenced block in the file or the path and name of a test already on the branch.
+The implement prompt has the next run commit that test unchanged and make it pass, and report one line per numbered requirement naming the test that fails without the change; the review reads that map before anything else, and a requirement with no test is unmet.
 
-A section ends at the next `##` line, so evidence written with `-f` has its own headings pushed below `###` before it is written. Without that, a reviewer's `## Evidence` would split the block: the replacement would end up above it, everything under it would stay, and the next run would read those settled findings as current instructions. Narrowing the boundary instead would break the other half of the rule, since a project's prompt template writes its own `##` sections into a body and those survive a send-back. Nothing about a heading's position says which of the two wrote it, so the evidence is what gets corrected. A top-level `N.` becomes a bullet for the same reason, and both moves are reported on stderr, so a writer knows their file reached the body in a different form.
+A section ends at the next `##` line, so evidence written with `-f` has its own headings pushed below `###` before it is written.
+Without that, a reviewer's `## Evidence` would split the block: the replacement would end up above it, everything under it would stay, and the next run would read those settled findings as current instructions.
+Narrowing the boundary instead would break the other half of the rule, since a project's prompt template writes its own `##` sections into a body and those survive a send-back.
+Nothing about a heading's position says which of the two wrote it, so the evidence is what gets corrected.
+A top-level `N.` becomes a bullet for the same reason, and both moves are reported on stderr, so a writer knows their file reached the body in a different form.
 
-Each round's evidence is kept beside the saved reports as `<stem>-<slug>.changes-N.md`, and both prompts list the earlier rounds as headlines with their paths. The ledger's `changes` row is a digest, which separates a review repeating itself from one finding something new and says nothing about either round; the list says what the rounds were about. Beside the digest the row carries `reqs`, the requirement numbers the evidence's headings name, traced the way the `[operator]` refusal traces them. `drive` parks a pass as `repeating` on either rule: the last two `changes` rows carry the same digest, or both carry `still_open` and the two lists share a requirement. The reviewer writes `still_open` with `drover request-changes <id> -f <file> --still-open N[,N...]`, naming the requirements whose finding from the previous request it reproduced as still open, and `request-changes` refuses a number that request did not name. The second rule catches a reviewer rewording one finding, where every rewording is a new digest, and it is the reviewer's word rather than drover's inference because only the reviewer knows whether it reproduced the old finding or found a new one. Equal `reqs` alone parks nothing: a requirement such as "every refused object answers 403" admits any number of distinct defects, and a reviewer writing new probes each round sends the same number back while the branch improves. `[review] max_review_rounds` bounds that loop: past it `request-changes` refuses, keeps the evidence beside the rounds as `<stem>-<slug>.refused-N.md` rather than in the body, and `drive` parks the item `needs_decision` with that file as its detail. Only a review's `changes` rows count toward the cap; drive's own send-backs, for a verify command, a trunk conflict or a `[numbered_files]` clash, carry their source on the row and are counted apart. A finding no implementing session can meet as written, because it waits on an upstream release, a decision nobody has made or evidence no source publishes, goes back with `--operator N[,N...]` instead, its reason under a heading naming the requirement: the row carries `operator`, and `drive` parks the item `needs_decision` for the operator rather than spending rounds the implementer cannot win. That matters because the pattern is the diagnosis: five send-backs reading "record the cache hit", "persist by key", "compare the metadata", "take it from the open handle", "publish by rename" are one guarantee nobody stated, and each of them on its own reads as a clean fix to a real defect.
+Each round's evidence is kept beside the saved reports as `<stem>-<slug>.changes-N.md`, and both prompts list the earlier rounds as headlines with their paths.
+The ledger's `changes` row is a digest, which separates a review repeating itself from one finding something new and says nothing about either round; the list says what the rounds were about.
+Beside the digest the row carries `reqs`, the requirement numbers the evidence's headings name, traced the way the `[operator]` refusal traces them.
+`drive` parks a pass as `repeating` on either rule: the last two `changes` rows carry the same digest, or both carry `still_open` and the two lists share a requirement.
+The reviewer writes `still_open` with `drover request-changes <id> -f <file> --still-open N[,N...]`, naming the requirements whose finding from the previous request it reproduced as still open, and `request-changes` refuses a number that request did not name.
+The second rule catches a reviewer rewording one finding, where every rewording is a new digest, and it is the reviewer's word rather than drover's inference because only the reviewer knows whether it reproduced the old finding or found a new one.
+Equal `reqs` alone parks nothing: a requirement such as "every refused object answers 403" admits any number of distinct defects, and a reviewer writing new probes each round sends the same number back while the branch improves.
+`[review] max_review_rounds` bounds that loop: past it `request-changes` refuses, keeps the evidence beside the rounds as `<stem>-<slug>.refused-N.md` rather than in the body, and `drive` parks the item `needs_decision` with that file as its detail.
+Only a review's `changes` rows count toward the cap; drive's own send-backs, for a verify command, a trunk conflict or a `[numbered_files]` clash, carry their source on the row and are counted apart.
+A finding no implementing session can meet as written, because it waits on an upstream release, a decision nobody has made or evidence no source publishes, goes back with `--operator N[,N...]` instead, its reason under a heading naming the requirement: the row carries `operator`, and `drive` parks the item `needs_decision` for the operator rather than spending rounds the implementer cannot win.
+That matters because the pattern is the diagnosis: five send-backs reading "record the cache hit", "persist by key", "compare the metadata", "take it from the open handle", "publish by rename" are one guarantee nobody stated, and each of them on its own reads as a clean fix to a real defect.
 
 ### Which way a split points
 
-`drover split` writes the dependency between the two items in one direction: the item split waits on the new one. Its `deps:` line gains the new id, and it stays blocked until the new item merges. There is no `--before`. An item whose own work went out to another may not merge ahead of it, because that merges the item carrying the gap the split was written to close. `--after` names the one direction and is the default.
+`drover split` writes the dependency between the two items in one direction: the item split waits on the new one.
+Its `deps:` line gains the new id, and it stays blocked until the new item merges.
+There is no `--before`.
+An item whose own work went out to another may not merge ahead of it, because that merges the item carrying the gap the split was written to close.
+`--after` names the one direction and is the default.
 
-A proposal that needs code only the original's branch has written deadlocks the pair. The new item runs from the trunk, so it cannot change code that exists only on the original's branch, and the original cannot merge until the new item does. Such work belongs on the original's branch, through `request-changes`, rather than in a split. So drover reads the new item's citations against the trunk and against the original's branch: every path cited with a line part (the same citations `stale_citations` reads), and every backticked name that looks like a function or type, found with a whole-word `git grep` over those cited files on each ref. The names are a heuristic: a definition in a file the body never cites is missed, and a word spelled like a name can match.
+A proposal that needs code only the original's branch has written deadlocks the pair.
+The new item runs from the trunk, so it cannot change code that exists only on the original's branch, and the original cannot merge until the new item does.
+Such work belongs on the original's branch, through `request-changes`, rather than in a split.
+So drover reads the new item's citations against the trunk and against the original's branch: every path cited with a line part (the same citations `stale_citations` reads), and every backticked name that looks like a function or type, found with a whole-word `git grep` over those cited files on each ref.
+The names are a heuristic: a definition in a file the body never cites is missed, and a word spelled like a name can match.
 
 Each citation only the branch has is reported as `B cites X, which only A's branch has; with --after these items deadlock`:
 
@@ -331,31 +452,50 @@ Each citation only the branch has is reported as `B cites X, which only A's bran
 | `accept` of the split | A refusal, and nothing is accepted. `drover accept <id> --yes` overrides it, and only it: never the stop marker or the actor check. |
 | `check`               | A `BRANCH CYCLE` finding for any unmerged dependency, split or not, so a pair written before this check existed is still found.     |
 
-Every one of the three prints the same remedy, naming the ids: `drop B2 from the deps line of 1, and add 1 to B2's`. That is a hand edit of two `deps:` lines. Shelving the new item and splitting again is not a remedy, because `shelve` refuses an id another item's `deps:` line names, and the original names it.
+Every one of the three prints the same remedy, naming the ids: `drop B2 from the deps line of 1, and add 1 to B2's`.
+That is a hand edit of two `deps:` lines.
+Shelving the new item and splitting again is not a remedy, because `shelve` refuses an id another item's `deps:` line names, and the original names it.
 
-The scaffold records the direction in a line under the stop marker (`Split from 1 with --after: 1 waits on this item.`), and `drover show` names it on both items. `show` takes the direction from the two `deps:` lines rather than that record, so a pair flipped by hand, or written by a split older than this rule, reads `--before` and notes what the split recorded.
+The scaffold records the direction in a line under the stop marker (`Split from 1 with --after: 1 waits on this item.`), and `drover show` names it on both items.
+`show` takes the direction from the two `deps:` lines rather than that record, so a pair flipped by hand, or written by a split older than this rule, reads `--before` and notes what the split recorded.
 
-### A block the branch closed is closed, not sent back
+### Closed blocks
 
-The pass that finds every finding in the block closed says so with `drover close-changes <id>`, which replaces the section with the statement that it is closed and writes no `changes` row, only the digest of the body it wrote. `-f <file>` carries what the reviewer traced, per finding, below that statement.
+The pass that finds every finding in the block closed says so with `drover close-changes <id>`, which replaces the section with the statement that it is closed and writes no `changes` row, only the digest of the body it wrote.
+`-f <file>` carries what the reviewer traced, per finding, below that statement.
 
-Both of the other two answers are wrong. Leaving the block standing sends the next run to re-verify finished work, because the prompt outranks the run's own reading of the tree: nine settled gaps arrive as nine open ones. Saying "nothing came back" with `request-changes` writes a `changes` row inside the window after the latest review stage row, and that is the row `open-pr` reads as work still outstanding, so the reviewer refuses the branch it just passed and spends a round against `[review] max_review_rounds` doing it. The split is the one `invariant` already has: the ledger records whether a review sent work back, so the command recording the opposite records nothing there.
+Both of the other two answers are wrong.
+Leaving the block standing sends the next run to re-verify finished work, because the prompt outranks the run's own reading of the tree: nine settled gaps arrive as nine open ones.
+Saying "nothing came back" with `request-changes` writes a `changes` row inside the window after the latest review stage row, and that is the row `open-pr` reads as work still outstanding, so the reviewer refuses the branch it just passed and spends a round against `[review] max_review_rounds` doing it.
+The split is the one `invariant` already has: the ledger records whether a review sent work back, so the command recording the opposite records nothing there.
 
-`close-changes` refuses a body with no such section, where there is nothing to discharge, and refuses while the latest review's own `changes` row stands, because a block a reviewer wrote this pass is current whatever a later command says about it. One disposition per pass: send work back, or close it.
+`close-changes` refuses a body with no such section, where there is nothing to discharge, and refuses while the latest review's own `changes` row stands, because a block a reviewer wrote this pass is current whatever a later command says about it.
+One disposition per pass: send work back, or close it.
 
-While the block is open, the prompt `drover review` prints ends on drover's own instruction naming both exits, whatever the project's `review.tmpl` says. A review that runs `close-changes` and then audits reads as `passed` in a drive and merges; one that audits and does neither reads as `findings_open` and parks (see [`drive --json`](automation.md#drive---json)).
+While the block is open, the prompt `drover review` prints ends on drover's own instruction naming both exits, whatever the project's `review.tmpl` says.
+A review that runs `close-changes` and then audits reads as `passed` in a drive and merges; one that audits and does neither reads as `findings_open` and parks (see [`drive --json`](automation.md#drive---json)).
 
-### A property outlives the round that found it
+### Invariants
 
-A finding names the case that broke. What the case taught you is a property, and the body has a third section for it: `drover invariant <id> -f <file>` appends under `## Invariants` and replaces nothing, ever.
+A finding names the case that broke.
+What the case taught you is a property, and the body has a third section for it: `drover invariant <id> -f <file>` appends under `## Invariants` and replaces nothing, ever.
 
-The two other sections both lose it. Requirements are frozen once accepted, and `request-changes` refuses a write that would change their count. The findings section is replaced every round. So a property the third pass established was written as a finding, closed by a fix aimed at the case that exposed it, and deleted by the fourth pass's send-back. The fifth run meets the same guarantee as a fresh surprise: five fixes that each pass the verify command, each close one case, and each open the one beside it.
+The two other sections both lose it.
+Requirements are frozen once accepted, and `request-changes` refuses a write that would change their count.
+The findings section is replaced every round.
+So a property the third pass established was written as a finding, closed by a fix aimed at the case that exposed it, and deleted by the fourth pass's send-back.
+The fifth run meets the same guarantee as a fresh surprise: five fixes that each pass the verify command, each close one case, and each open the one beside it.
 
-Write the property, not the defect. "Replacing an object preserves whatever mode an operator set on it" belongs here; "the fix dropped the mode to 0644" is the finding that taught it and belongs in the findings section. Both prompts render this section above the findings, so every later pass reads what must hold before it reads what broke.
+Write the property, not the defect.
+"Replacing an object preserves whatever mode an operator set on it" belongs here; "the fix dropped the mode to 0644" is the finding that taught it and belongs in the findings section.
+Both prompts render this section above the findings, so every later pass reads what must hold before it reads what broke.
 
-drover holds a review to that. When a review sends back a requirement the previous review's request also named, `request-changes` refuses, exit 3, until `drover invariant` has written something since; the refusal writes nothing and records no row. A number given to `--still-open` or `--operator` is exempt, since repeating it is the point of both flags.
+drover holds a review to that.
+When a review sends back a requirement the previous review's request also named, `request-changes` refuses, exit 3, until `drover invariant` has written something since; the refusal writes nothing and records no row.
+A number given to `--still-open` or `--operator` is exempt, since repeating it is the point of both flags.
 
-An unmet requirement does not lower the audit level either way. `verified` records how hard the reviewer looked, not how the item scored, so tracing all four and returning one is still a full trace.
+An unmet requirement does not lower the audit level either way.
+`verified` records how hard the reviewer looked, not how the item scored, so tracing all four and returning one is still a full trace.
 
 The prose lives in `Destinations()` in `internal/prompts`, which `review.tmpl` and `agents.tmpl` both render; `internal/cmd/doctrine_test.go` fails when this table and that value disagree in either direction.
 
@@ -373,7 +513,8 @@ drover review B1 --runner gemini --headless   # review, before the merge
 drover audit B1 verified --code-by agent "R1-R4 traced to shipped code"
 ```
 
-`B1` is an intaken item, because `draft` only ever applies to a scaffold. A hand-written item never carried the marker and is already somebody's contract.
+`B1` is an intaken item, because `draft` only ever applies to a scaffold.
+A hand-written item never carried the marker and is already somebody's contract.
 
 | Stage    | Handed                                                                                                                                       | Records                                                                                                                |
 | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
@@ -381,17 +522,32 @@ drover audit B1 verified --code-by agent "R1-R4 traced to shipped code"
 | `run`    | The prompt: the item, its deps, the resolved specs and guides, the verify command, the inherited follow-ups.                                 | A `stage: implement` row naming the runner, before the launch. A headless run also leaves a log and a captured report. |
 | `review` | The contract, each dependency's audit level, the open follow-ups, the dependencies' saved reports, the run's own report, the verify command. | A `stage: review` row naming the runner and the session id. The level itself comes from `audit`, separately.           |
 
-Each runner comes from its own key: `[run] draft_runner`, `[run] default_runner`, `[run] review_runner`. Only the middle one is also readable from the item's `runner` frontmatter, and that is deliberate. That key names who implements the item; drafting under it would let the agent that drafted a contract be chosen to execute it, and reviewing under it would have the implementer certify its own work, which `audit` refuses to record as `verified`. Leave a stage's key unset and that command prints its prompt instead of launching, which is what a pipe gets.
+Each runner comes from its own key: `[run] draft_runner`, `[run] default_runner`, `[run] review_runner`.
+Only the middle one is also readable from the item's `runner` frontmatter, and that is deliberate.
+That key names who implements the item; drafting under it would let the agent that drafted a contract be chosen to execute it, and reviewing under it would have the implementer certify its own work, which `audit` refuses to record as `verified`.
+Leave a stage's key unset and that command prints its prompt instead of launching, which is what a pipe gets.
 
-**The one step no agent performs** is the second row: a human reads the drafted list and runs `drover accept`. Until they do, `run` refuses the item and so does `--dry-run`. That is the boundary drover does not automate, and `accept` is a command rather than a flag precisely so that no runner's argv can carry it.
+**The one step no agent performs** is the second row: a human reads the drafted list and runs `drover accept`.
+Until they do, `run` refuses the item and so does `--dry-run`.
+That is the boundary drover does not automate, and `accept` is a command rather than a flag precisely so that no runner's argv can carry it.
 
-Nor can its environment. drover exports `DROVER_ACTOR=agent` into every session it launches, and `accept` refuses there, exit 3. So do `unaccept`, `amend`, `touch`, `signoff`, `intake`, `finish`, `mark-merged`, `unmark-merged`, `open-pr`, `drive` and `supervise`, each for a reason `drover --help` prints beside it, and a launched session cannot launch another. The same values go into `.drover/session` in the tree the session works in, so a session another program opens there is sealed too. `env -u DROVER_ACTOR` defeats all of it, and `DROVER_ACTOR=operator` is how a person steering from inside a sealed tree says so: it stops a command being run because it appeared in a code block, not one being run on purpose. `audit` is deliberately exempt. A review session is independent of the implement session, drover launched both, and the actor variable cannot tell them apart. The session id in `DROVER_SESSION`, recorded on each stage row, can, and that is what `--code-by agent` resolves against.
+Nor can its environment.
+drover exports `DROVER_ACTOR=agent` into every session it launches, and `accept` refuses there, exit 3.
+So do `unaccept`, `amend`, `touch`, `signoff`, `intake`, `finish`, `mark-merged`, `unmark-merged`, `open-pr`, `drive` and `supervise`, each for a reason `drover --help` prints beside it, and a launched session cannot launch another.
+The same values go into `.drover/session` in the tree the session works in, so a session another program opens there is sealed too.
+`env -u DROVER_ACTOR` defeats all of it, and `DROVER_ACTOR=operator` is how a person steering from inside a sealed tree says so: it stops a command being run because it appeared in a code block, not one being run on purpose.
+`audit` is deliberately exempt.
+A review session is independent of the implement session, drover launched both, and the actor variable cannot tell them apart.
+The session id in `DROVER_SESSION`, recorded on each stage row, can, and that is what `--code-by agent` resolves against.
 
-`review` does not switch branches. It runs before the merge, on the branch `run` left the tree on.
+`review` does not switch branches.
+It runs before the merge, on the branch `run` left the tree on.
 
-A `--headless` review streams to `<id>-<slug>-review.<timestamp>.jsonl` in the same log directory as the run, and a `--headless` draft to `<id>-<slug>-draft.<timestamp>.jsonl`. Both are kept apart from `<id>-<slug>.<timestamp>.jsonl` so `drover report` still reads what the run reported rather than what a session about the item said.
+A `--headless` review streams to `<id>-<slug>-review.<timestamp>.jsonl` in the same log directory as the run, and a `--headless` draft to `<id>-<slug>-draft.<timestamp>.jsonl`.
+Both are kept apart from `<id>-<slug>.<timestamp>.jsonl` so `drover report` still reads what the run reported rather than what a session about the item said.
 
-Afterwards the ledger holds one stage row per launch, one completion row from `finish`, and one audit row per level naming its `--code-by`. `drover show 2` prints the two runners under its audit history:
+Afterwards the ledger holds one stage row per launch, one completion row from `finish`, and one audit row per level naming its `--code-by`.
+`drover show 2` prints the two runners under its audit history:
 
 ```text
   audit history
@@ -400,9 +556,12 @@ Afterwards the ledger holds one stage row per launch, one completion row from `f
     2026-08-26  verified     code by agent
 ```
 
-drover does not enforce that the two runners differ. An independent audit warns when the record names one runner for both stages, names both, records the row and exits 0: deciding that two sessions of one runner are one operator is not a judgment it can make, and a refusal there would teach people to record a runner they did not use.
+drover does not enforce that the two runners differ.
+An independent audit warns when the record names one runner for both stages, names both, records the row and exits 0: deciding that two sessions of one runner are one operator is not a judgment it can make, and a refusal there would teach people to record a runner they did not use.
 
-An item run with `--runner codex` while its frontmatter pins `runner: claude` carries both in its saved report, labeled apart: `- runner (requested): claude` above `- Runner codex`. The frontmatter says who the item asked for. Only the stage row says who answered.
+An item run with `--runner codex` while its frontmatter pins `runner: claude` carries both in its saved report, labeled apart: `- runner (requested): claude` above `- Runner codex`.
+The frontmatter says who the item asked for.
+Only the stage row says who answered.
 
 The run's own report:
 
@@ -411,16 +570,20 @@ drover report 2           # what the last run reported
 drover report 2 --save    # write it beside a checklist of the numbered requirements
 ```
 
-A run's own report is unverified. It misleads by omission.
+A run's own report is unverified.
+It misleads by omission.
 
-What the review finds in the item's own work goes **back to its branch**, unmet requirement and diff defect alike; see [Where a finding goes](#where-a-finding-goes). Only a pre-existing defect in code a merged item owns is filed, and against _that_ item, not absorbed:
+What the review finds in the item's own work goes **back to its branch**, unmet requirement and diff defect alike; see [Where a finding goes](#where-a-finding-goes).
+Only a pre-existing defect in code a merged item owns is filed, and against _that_ item, not absorbed:
 
 | What you found                                   | Where it goes                                                                                                                                                                            |
 | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | follow-up carried forward                        | issue: `<follow_up_label>` + `<severity_prefix>critical\|high\|medium\|low`, a sub-issue of the owning item's issue, or an `Owner: <owning id>` line in the body when that item has none |
 | a reproducible defect worth its own unit of work | issue with your tracker's bug label, then `drover intake <n>`                                                                                                                            |
 
-Ownership travels one hop. A prompt carries the issues owned by the item itself plus those owned by each id on its own `deps:` line, and nothing further. Attribute to the item that **owns** the gap, not the one that noticed it, then confirm the run you expect to close it lists that owner as a direct dependency.
+Ownership travels one hop.
+A prompt carries the issues owned by the item itself plus those owned by each id on its own `deps:` line, and nothing further.
+Attribute to the item that **owns** the gap, not the one that noticed it, then confirm the run you expect to close it lists that owner as a direct dependency.
 
 ## 6. Audit
 
@@ -429,7 +592,8 @@ drover request-changes 2 -f findings.md   # R4 unmet: back to the branch, with t
 drover audit 2 verified --code-by agent "R1-R7 traced to shipped code; R4 unmet, sent back"
 ```
 
-The review pass ends on this row, before the merge. Merging says an item shipped and says nothing about whether anyone checked it, so without a level an item backed only by its agent's own report and one whose every requirement was re-confirmed look identical.
+The review pass ends on this row, before the merge.
+Merging says an item shipped and says nothing about whether anyone checked it, so without a level an item backed only by its agent's own report and one whose every requirement was re-confirmed look identical.
 
 | Level      | Means                                                          |
 | ---------- | -------------------------------------------------------------- |
@@ -437,30 +601,51 @@ The review pass ends on this row, before the merge. Merging says an item shipped
 | `reviewed` | A review pass ran against the code.                            |
 | `verified` | **Every** numbered requirement confirmed against shipped code. |
 
-`--code-by <who>` is required and is a separate axis: who wrote the code. `<who>` is `agent` for a session drover launched, a person's name, or a comma list of them (`agent,sam`). `agent` resolves per session against the item's implement stage rows, so a review session drover launched is independent of the implement session; any other entry is compared as written against `--reviewer`. **`verified` needs an auditor who differs from every entry**, and drover refuses at the write path with exit 3, naming the entry that matched. A `FIX-IN-REVIEW` correction no numbered requirement traces to is not code the level certifies, so it does not make the session an author of it. Anything else does.
+`--code-by <who>` is required and is a separate axis: who wrote the code.
+`<who>` is `agent` for a session drover launched, a person's name, or a comma list of them (`agent,sam`).
+`agent` resolves per session against the item's implement stage rows, so a review session drover launched is independent of the implement session; any other entry is compared as written against `--reviewer`.
+**`verified` needs an auditor who differs from every entry**, and drover refuses at the write path with exit 3, naming the entry that matched.
+A `FIX-IN-REVIEW` correction no numbered requirement traces to is not code the level certifies, so it does not make the session an author of it.
+Anything else does.
 
-The ladder measures the reviewer, not the item. `verified` means every requirement was traced, including ones that turned out unmet; the gap goes back to the branch while the branch is open and is a bug filed through intake or `drover new` once it is not, and either way the level stands. Drop to `reviewed` when you could not trace a requirement, never when you traced it and disliked the answer.
+The ladder measures the reviewer, not the item.
+`verified` means every requirement was traced, including ones that turned out unmet; the gap goes back to the branch while the branch is open and is a bug filed through intake or `drover new` once it is not, and either way the level stands.
+Drop to `reviewed` when you could not trace a requirement, never when you traced it and disliked the answer.
 
-The most recent row wins, not the strongest. Correcting downward is the point, and `audit` prints `(DOWNGRADED from …)` so it is never silent.
+The most recent row wins, not the strongest.
+Correcting downward is the point, and `audit` prints `(DOWNGRADED from …)` so it is never silent.
 
 ## 7. Open the pull request, merge, then finish
 
-`drover open-pr <id>` opens the pull request, and nothing else does. It runs `[drive] merge_gate` and reads back what the last review concluded, so an open pull request means both have passed rather than that somebody finished writing. A branch whose review sent work back gets none: the fix belongs on the branch, and a document saying the branch may merge would be saying it about work that came back. `--force` opens one on your own judgment, which is what a project declaring no merge gate has instead.
+`drover open-pr <id>` opens the pull request, and nothing else does.
+It runs `[drive] merge_gate` and reads back what the last review concluded, so an open pull request means both have passed rather than that somebody finished writing.
+A branch whose review sent work back gets none: the fix belongs on the branch, and a document saying the branch may merge would be saying it about work that came back.
+`--force` opens one on your own judgment, which is what a project declaring no merge gate has instead.
 
-Then merge it however your project merges pull requests: by hand, with `gh pr merge`, or a button in a browser. drover has no opinion about how a merge happens, and `finish` records one it did not perform.
+Then merge it however your project merges pull requests: by hand, with `gh pr merge`, or a button in a browser.
+drover has no opinion about how a merge happens, and `finish` records one it did not perform.
 
-The one place drover executes a merge is `drover drive`, which merges what it drives, and even there it asks rather than decides: `[drive] merge_gate` is a command the project declares, drover reads its exit status, and the merge itself is a plain `gh pr merge` pinned to the commit the merge gate read, so the forge's branch protection still refuses anything its rules do not allow. What drover decides is _when_, never _how_, and `--no-merge` is how an operator drives the queue and keeps the _when_ for themselves.
+The one place drover executes a merge is `drover drive`, which merges what it drives, and even there it asks rather than decides: `[drive] merge_gate` is a command the project declares, drover reads its exit status, and the merge itself is a plain `gh pr merge` pinned to the commit the merge gate read, so the forge's branch protection still refuses anything its rules do not allow.
+What drover decides is _when_, never _how_, and `--no-merge` is how an operator drives the queue and keeps the _when_ for themselves.
 
-Before each merge gate run reads a pushed head, drive waits for its checks and classifies every red one, because a merge gate that sees a red check sends it back to the item whoever caused it. A failure the forge's infrastructure caused (a rate limit, a runner out of disk, a job that ran no step, a canceled run) is rerun with `gh run rerun --failed`, up to `[forge] reruns` times per head; one the trunk fails too parks the item `trunk_red` without sending anything back and stops the drive; anything else goes to the merge gate as before. A head no workflow reported on is named as such rather than read as red. See [`[forge]`](configuration.md#forge).
+Before each merge gate run reads a pushed head, drive waits for its checks and classifies every red one, because a merge gate that sees a red check sends it back to the item whoever caused it.
+A failure the forge's infrastructure caused (a rate limit, a runner out of disk, a job that ran no step, a canceled run) is rerun with `gh run rerun --failed`, up to `[forge] reruns` times per head; one the trunk fails too parks the item `trunk_red` without sending anything back and stops the drive; anything else goes to the merge gate as before.
+A head no workflow reported on is named as such rather than read as red.
+See [`[forge]`](configuration.md#forge).
 
 ### Requirements only the operator can meet
 
-A numbered requirement whose text opens with `[operator]` is a hold only a person can release, beside `protected_paths`. No session can discharge one, so drover keeps the loop from spending rounds on it:
+A numbered requirement whose text opens with `[operator]` is a hold only a person can release, beside `protected_paths`.
+No session can discharge one, so drover keeps the loop from spending rounds on it:
 
 - **The run** reads it under a separate heading telling it not to attempt it.
-- **The review** cannot send the item back over it. `drover request-changes` reads each heading in the evidence (outside code fences) as one finding and traces it through the `R<n>` it names; when every finding traces to an `[operator]` requirement, it refuses with exit 3, names them, and writes nothing. Anything else goes through to the scope check: a heading naming a session requirement and one carrying any `BRANCH-` token pass it, and a heading naming neither, with no scoped heading above it, is refused as a note that belongs in the audit. The only headings either check sets aside are those opening with `Settled`, `Holds`, `Held`, `Closed` or `Resolved`, and the operator refusal lists each one it read that way.
+- **The review** cannot send the item back over it.
+  `drover request-changes` reads each heading in the evidence (outside code fences) as one finding and traces it through the `R<n>` it names; when every finding traces to an `[operator]` requirement, it refuses with exit 3, names them, and writes nothing.
+  Anything else goes through to the scope check: a heading naming a session requirement and one carrying any `BRANCH-` token pass it, and a heading naming neither, with no scoped heading above it, is refused as a note that belongs in the audit.
+  The only headings either check sets aside are those opening with `Settled`, `Holds`, `Held`, `Closed` or `Resolved`, and the operator refusal lists each one it read that way.
 - **The pull request** opens as usual, with each one lacking a signoff listed as pending in `drover show` and `drover status`.
-- **The merge** holds. drive parks the item `awaiting_signoff` with the pull request open and emits `needs_operator` naming each requirement (the `signoff` action, at `operator` and no higher).
+- **The merge** holds.
+  drive parks the item `awaiting_signoff` with the pull request open and emits `needs_operator` naming each requirement (the `signoff` action, at `operator` and no higher).
 
 The operator meets it and records what they checked:
 
@@ -468,99 +653,176 @@ The operator meets it and records what they checked:
 drover signoff F5 6 "ssh dev-guest-1 'systemctl is-active webapp' printed active"
 ```
 
-`signoff` appends one row to the ledger and is sealed: it refuses inside any session drover launched, supervisor included, for the reason `accept` does. Once every `[operator]` requirement carries a row, merge the pull request and `drover finish` it, or let the next drive reach the merge and go through.
+`signoff` appends one row to the ledger and is sealed: it refuses inside any session drover launched, supervisor included, for the reason `accept` does.
+Once every `[operator]` requirement carries a row, merge the pull request and `drover finish` it, or let the next drive reach the merge and go through.
 
-### A check after finish
+### Checks after finish
 
-Between the review and the merge, an item whose project declares a [live check](configuration.md#live) runs it against its branch head: exit `0` goes on to the merge gate, `4` parks the item `live_unavailable` for the operator, and anything else sends the output back to the branch as a finding. `drover live <id>` runs it by hand, and `open-pr` refuses a head no run of it passed on.
+Between the review and the merge, an item whose project declares a [live check](configuration.md#live) runs it against its branch head: exit `0` goes on to the merge gate, `4` parks the item `live_unavailable` for the operator, and anything else sends the output back to the branch as a finding.
+`drover live <id>` runs it by hand, and `open-pr` refuses a head no run of it passed on.
 
-`[finish] post_check` is an argv run after every finish, by `drover finish` or by a drive finishing what it merged, while [`[supervise] post_finish_check`](configuration.md#supervise) is above `off` (its default). It runs from the project root with `DROVER_ITEM`, `DROVER_PR` (empty where no pull request was recorded) and `DROVER_SHA` (origin's trunk after the merge) in its environment. This is where a project puts a check somebody would otherwise run by hand: `ssh dev ... psql` against `schema_migrations`, or build, deploy and exercise on a dev server.
+`[finish] post_check` is an argv run after every finish, by `drover finish` or by a drive finishing what it merged, while [`[supervise] post_finish_check`](configuration.md#supervise) is above `off` (its default).
+It runs from the project root with `DROVER_ITEM`, `DROVER_PR` (empty where no pull request was recorded) and `DROVER_SHA` (origin's trunk after the merge) in its environment.
+This is where a project puts a check somebody would otherwise run by hand: `ssh dev ... psql` against `schema_migrations`, or build, deploy and exercise on a dev server.
 
 | Exit     | drover does                                                                                                    |
 | -------- | -------------------------------------------------------------------------------------------------------------- |
 | `0`      | appends a `post_finish` ledger row carrying the first line of its output                                       |
 | non-zero | files a follow-up owned by the item, prints where, and emits `needs_operator` (the `post_finish_check` action) |
 
-Neither undoes the merge or changes finish's exit: the trunk already carries the commit, and a failed check is work somebody owes on it rather than a reason to pretend the item was never finished. Under `[register] backend = "none"`, or `--no-tracker` with the tracker backend, nothing is filed and the line says so. Outside a drive, `needs_operator` reaches each [`[notify]`](configuration.md#notify) destination routing it, and nothing else. See [`[finish]`](configuration.md#finish).
+Neither undoes the merge or changes finish's exit: the trunk already carries the commit, and a failed check is work somebody owes on it rather than a reason to pretend the item was never finished.
+Under `[register] backend = "none"`, or `--no-tracker` with the tracker backend, nothing is filed and the line says so.
+Outside a drive, `needs_operator` reaches each [`[notify]`](configuration.md#notify) destination routing it, and nothing else.
+See [`[finish]`](configuration.md#finish).
 
-### The merge
+### Merge
 
-drive merges synchronously and never asks the forge for `--auto`. A merge the forge completes after drive has moved on is one nothing records: its dependents are skipped, and a push that lands before the forge acts merges a head no review read. Branch protection still applies, because the forge refuses a synchronous merge its rules do not allow, and that refusal parks the item `merge_failed`.
+drive merges synchronously and never asks the forge for `--auto`.
+A merge the forge completes after drive has moved on is one nothing records: its dependents are skipped, and a push that lands before the forge acts merges a head no review read.
+Branch protection still applies, because the forge refuses a synchronous merge its rules do not allow, and that refusal parks the item `merge_failed`.
 
-The merge gate already read the head once, after its checks finished and before the pull request opened. When the branch still points at that commit and origin's trunk has not moved past it, drive merges at once: `gh pr merge --<method> --match-head-commit <sha>`, where `<method>` is [`[git] merge_method`](configuration.md#git-merge_method). When either moved (an earlier item in the same drive merged, or something pushed to the branch), that answer is stale, and drive takes the path below. So does a head no workflow had run on when the merge gate read it: CI that triggers on `pull_request` starts only once the pull request exists, and branch protection refuses the merge until its required checks finish, so the answer was about checks that did not exist yet.
+The merge gate already read the head once, after its checks finished and before the pull request opened.
+When the branch still points at that commit and origin's trunk has not moved past it, drive merges at once: `gh pr merge --<method> --match-head-commit <sha>`, where `<method>` is [`[git] merge_method`](configuration.md#git-merge_method).
+When either moved (an earlier item in the same drive merged, or something pushed to the branch), that answer is stale, and drive takes the following path.
+So does a head no workflow had run on when the merge gate read it: CI that triggers on `pull_request` starts only once the pull request exists, and branch protection refuses the merge until its required checks finish, so the answer was about checks that did not exist yet.
 
-After `gh pr merge` returns, drive asks the forge whether the pull request merged rather than trusting the exit status, because `gh pr merge` also exits 0 when a required merge queue accepted the request and merged nothing yet. A pull request the forge reports merged is finished in the same drive, as `finish` does: the ledger row, the saved report and the tracker closes. The item reports `merged_by_drover`, and the items that depend on it run behind it in the same drive. One the forge does not report merged, or whose state drive cannot read, reads `ready_to_merge` with the reason, and the next drive's reconciliation records it once it lands.
+After `gh pr merge` returns, drive asks the forge whether the pull request merged rather than trusting the exit status, because `gh pr merge` also exits 0 when a required merge queue accepted the request and merged nothing yet.
+A pull request the forge reports merged is finished in the same drive, as `finish` does: the ledger row, the saved report and the tracker closes.
+The item reports `merged_by_drover`, and the items that depend on it run behind it in the same drive.
+One the forge does not report merged, or whose state drive cannot read, reads `ready_to_merge` with the reason, and the next drive's reconciliation records it once it lands.
 
-On the path below, drive:
+On that path, drive:
 
-1. Brings the branch level with the trunk, as below.
-2. Waits for every check run on the head commit to finish, reading them through `gh api`, and classifies each red one as [`[forge]`](configuration.md#forge) describes: an infrastructure failure is rerun and waited on again, and one the trunk fails too parks `trunk_red`. Nothing else is decided there: a head with no checks after `[forge] checks_wait`, checks still running after an hour or at `--for`/`--until`, and a forge it cannot read all go to the merge gate as they stand.
-3. Runs the merge gate against that head. The pass before the pull request opened read a different head or a different trunk, so it is not reused.
+1. Brings the branch level with the trunk, as [Keeping each branch level with the trunk](#keeping-each-branch-level-with-the-trunk) describes.
+2. Waits for every check run on the head commit to finish, reading them through `gh api`, and classifies each red one as [`[forge]`](configuration.md#forge) describes: an infrastructure failure is rerun and waited on again, and one the trunk fails too parks `trunk_red`.
+   Nothing else is decided there: a head with no checks after `[forge] checks_wait`, checks still running after an hour or at `--for`/`--until`, and a forge it cannot read all go to the merge gate as they stand.
+3. Runs the merge gate against that head.
+   The pass before the pull request opened read a different head or a different trunk, so it is not reused.
 4. On exit 0, runs `gh pr merge --<method> --match-head-commit <sha>`, so a push arriving after the merge gate read the head refuses rather than merges.
-5. Asks the forge whether the pull request merged, and finishes it as above.
+5. Asks the forge whether the pull request merged, and finishes it as `drover finish` does.
 
-A merge gate that refuses there parks the item `gate_refused` with the pull request open and the merge gate's last lines in the reason, and sends nothing back, so `fix_gate_refusal` does not apply. The exception is a head whose checks first ran on the pull request: a refusal blaming the diff there is the one the gate would have given before the pull request opened had CI run then, so it goes back to the item as described in [Sending a refused branch back](#sending-a-refused-branch-back); an exit 2 also stops the drive, as it does before the pull request opens. Any other refusal from the forge (a conflict, a branch policy, a review requirement) parks `merge_failed` as before, with the detail `checks_pending` where GitHub said the base branch policy prohibits the merge, because the forge saying no to this pull request is not the merge gate's to overrule. A finish the operator's checkout cannot take cleanly is left to the next drive's reconciliation, and the reason says so.
+A merge gate that refuses there parks the item `gate_refused` with the pull request open and the merge gate's last lines in the reason, and sends nothing back, so `fix_gate_refusal` does not apply.
+The exception is a head whose checks first ran on the pull request: a refusal blaming the diff there is the one the gate would have given before the pull request opened had CI run then, so it goes back to the item as described in [Sending a refused branch back](#sending-a-refused-branch-back); an exit 2 also stops the drive, as it does before the pull request opens.
+Any other refusal from the forge (a conflict, a branch policy, a review requirement) parks `merge_failed` as before, with the detail `checks_pending` where GitHub said the base branch policy prohibits the merge, because the forge saying no to this pull request is not the merge gate's to overrule.
+A finish the operator's checkout cannot take cleanly is left to the next drive's reconciliation, and the reason says so.
 
 ### Sending a refused branch back
 
-A merge gate exiting `1` before the pull request opens blames the diff, and a verify command that fails on a caught-up tree while the trunk passes alone does the same. Either way drive writes the output back to the item through `request-changes`, with each `code` check's failure lines and URL, as a send-back of verify's rather than a review round. What happens next is `[supervise] fix_gate_refusal`'s:
+A merge gate exiting `1` before the pull request opens blames the diff, and a verify command that fails on a caught-up tree while the trunk passes alone does the same.
+Either way drive writes the output back to the item through `request-changes`, with each `code` check's failure lines and URL, as a send-back of verify's rather than a review round.
+What happens next is `[supervise] fix_gate_refusal`'s:
 
-- **`auto`** (the default): the item goes back to the head of the queue at its implement stage, keeping its worktree, and the next free slot runs another implement session, then its review, its push and the merge gate again. It takes a new place in the trunk stage's order, because its first turn there is spent. Once per item per drive: a second refusal in the same drive parks `gate_refused` and hands off to the operator, so a check no session can turn green costs one more round rather than one per head. A drive that is stopping parks it instead of requeuing.
+- **`auto`** (the default): the item goes back to the head of the queue at its implement stage, keeping its worktree, and the next free slot runs another implement session, then its review, its push and the merge gate again.
+  It takes a new place in the trunk stage's order, because its first turn there is spent.
+  Once per item per drive: a second refusal in the same drive parks `gate_refused` and hands off to the operator, so a check no session can turn green costs one more round rather than one per head.
+  A drive that is stopping parks it instead of requeuing.
 - **`supervisor`** and **`operator`**: it parks `gate_refused` at once, with a `needs_supervisor` or `needs_operator` event naming the action.
 - **`off`**: it parks `gate_refused` with no hand-off, as drive did before the action existed.
 
-An item already at `[review] max_review_rounds` has the send-back itself refused by `request-changes`, so it parks with nothing written and no session started, whatever the policy. The review after the requeued round has to clear the sent-back block with `drover close-changes`, as it would a reviewer's.
+An item already at `[review] max_review_rounds` has the send-back itself refused by `request-changes`, so it parks with nothing written and no session started, whatever the policy.
+The review after the requeued round has to clear the sent-back block with `drover close-changes`, as it would a reviewer's.
 
-The session that gets the item back can fix only what it can reproduce. Where CI runs tests the verify command does not, see [The verify command and CI](configuration.md#verify).
+The session that gets the item back can fix only what it can reproduce.
+Where CI runs tests the verify command does not, see [The verify command and CI](configuration.md#verify).
 
 ### Keeping each branch level with the trunk
 
-Every merge moves the trunk under each item after it in the same drive, and a merge gate that requires an up-to-date branch would refuse every one of them. So before the merge gate reads a branch, drive fetches origin's trunk and, if the branch does not already contain it, merges it into the branch, pushes, and waits for the new head's checks. The merge is a merge rather than a rebase so the push is a fast-forward: nothing is ever force-pushed. A conflict aborts the merge and parks the item `trunk_conflict` naming the files, with the branch on the remote where the last push left it.
+Every merge moves the trunk under each item after it in the same drive, and a merge gate that requires an up-to-date branch would refuse every one of them.
+So before the merge gate reads a branch, drive fetches origin's trunk and, if the branch does not already contain it, merges it into the branch, pushes, and waits for the new head's checks.
+The merge is a merge rather than a rebase so the push is a fast-forward: nothing is ever force-pushed.
+A conflict aborts the merge and parks the item `trunk_conflict` naming the files, with the branch on the remote where the last push left it.
 
-The merge makes a tree no session tested, and a forge whose CI runs only on pull requests and on the trunk registers no checks for a push to an item branch, so waiting on checks proves nothing about it. Two items that each add a file the other makes invalid merge without a textual conflict and fail together. So after the merge and before the push, drive runs the item's own verify command on the merged tree, in the item's worktree: the verify command `SelectGate` picks for the item's frontmatter, run as `sh -c` with `DROVER_ROOT` set, as the item's run was told to run it. stderr names the verify command and the two trunk commits before it runs, and its exit status and duration after.
+The merge makes a tree no session tested, and a forge whose CI runs only on pull requests and on the trunk registers no checks for a push to an item branch, so waiting on checks proves nothing about it.
+Two items that each add a file the other makes invalid merge without a textual conflict and fail together.
+So after the merge and before the push, drive runs the item's own verify command on the merged tree, in the item's worktree: the verify command `SelectGate` picks for the item's frontmatter, run as `sh -c` with `DROVER_ROOT` set, as the item's run was told to run it.
+stderr names the verify command and the two trunk commits before it runs, and its exit status and duration after.
 
-- **It passes:** the push and the checks follow, as above.
-- **It fails:** drive runs the same verify command once on origin's trunk alone, in a temporary worktree detached at the merged commit, given `[drive] worktree_links` and `[drive] worktree_setup` like an item's and removed afterwards. The answer is kept for the rest of the drive by trunk commit and verify command, so a second item updated to the same commit does not pay for it again.
-  - **The trunk passes alone:** the failure comes from the branch meeting what the trunk gained. drive pushes the merge commit, so the next run starts from the tree that failed, and sends the item back with the trunk's range (up to 20 commit subjects) and the verify command's output. The item goes back to its implementing session as [Sending a refused branch back](#sending-a-refused-branch-back) describes, or parks `gate_refused` with no pull request opened. Its `changes` row names `verify` as its source, so it is not a round under `[review] max_review_rounds`, which counts a review's send-backs alone; an item already at the cap still has the send-back refused, and the park reason says so.
-  - **The trunk fails alone:** no item can fix it. The item parks `trunk_red`, nothing is sent back, the merge is undone and not pushed, and the drive stops.
+- **It passes:** the push and the checks follow, as in [Merge](#merge).
+- **It fails:** drive runs the same verify command once on origin's trunk alone, in a temporary worktree detached at the merged commit, given `[drive] worktree_links` and `[drive] worktree_setup` like an item's and removed afterwards.
+  The answer is kept for the rest of the drive by trunk commit and verify command, so a second item updated to the same commit does not pay for it again.
+  - **The trunk passes alone:** the failure comes from the branch meeting what the trunk gained.
+    drive pushes the merge commit, so the next run starts from the tree that failed, and sends the item back with the trunk's range (up to 20 commit subjects) and the verify command's output.
+    The item goes back to its implementing session as [Sending a refused branch back](#sending-a-refused-branch-back) describes, or parks `gate_refused` with no pull request opened.
+    Its `changes` row names `verify` as its source, so it is not a round under `[review] max_review_rounds`, which counts a review's send-backs alone; an item already at the cap still has the send-back refused, and the park reason says so.
+  - **The trunk fails alone:** no item can fix it.
+    The item parks `trunk_red`, nothing is sent back, the merge is undone and not pushed, and the drive stops.
   - **The trunk's worktree will not set up:** the item parks `gate_unrunnable`, and the merge is undone and not pushed.
-- **No verify command applies:** drive says so on stderr and carries on as if it had passed. A project with no `[verify]` has chosen no verify command.
+- **No verify command applies:** drive says so on stderr and carries on as if it had passed.
+  A project with no `[verify]` has chosen no verify command.
 
-An interrupt during either run parks the item `interrupted`, undoes the merge and keeps the item's worktree as the verify command left it. A branch already level with the trunk runs none of this: its own sessions ran its verify command. When the merge goes through the path above, the branch update before it does the same, with the pull request already open: a failure parks `gate_refused` with the pull request left open and unmerged, so `--match-head-commit` never sees a head the verify command failed. The row's `update_branch` field records what happened; see [`drover drive --json`](automation.md).
+An interrupt during either run parks the item `interrupted`, undoes the merge and keeps the item's worktree as the verify command left it.
+A branch already level with the trunk runs none of this: its own sessions ran its verify command.
+When the merge goes through the slower path in [Merge](#merge), the branch update before it does the same, with the pull request already open: a failure parks `gate_refused` with the pull request left open and unmerged, so `--match-head-commit` never sees a head the verify command failed.
+The row's `update_branch` field records what happened; see [`drover drive --json`](automation.md).
 
-origin's trunk is the reference rather than the local one, because the local trunk can carry the operator's unpushed commits and merging them into an item's branch would publish them under that item. A project with no `[drive] merge_gate` gets no branch update, since nothing would read the result. One with a merge gate gets it under `--no-merge` as well, the `[verify]` rerun included, since the merge gate still reads the branch and an item left on its branch should be green on the tree it was left with.
+origin's trunk is the reference rather than the local one, because the local trunk can carry the operator's unpushed commits and merging them into an item's branch would publish them under that item.
+A project with no `[drive] merge_gate` gets no branch update, since nothing would read the result.
+One with a merge gate gets it under `--no-merge` as well, the `[verify]` rerun included, since the merge gate still reads the branch and an item left on its branch should be green on the tree it was left with.
 
-What the branch changed is measured from where it left the trunk, with origin's trunk counted alongside the local one. The branch update moves origin's trunk into the branch and leaves the local trunk where it was, so a diff against the local trunk alone would charge the item with every file origin gained since: a `protected_paths` hold would park it for a `Makefile` it never touched. The `protected_paths` hold, the review's scope count and its recent-commits list all read from that base.
+What the branch changed is measured from where it left the trunk, with origin's trunk counted alongside the local one.
+The branch update moves origin's trunk into the branch and leaves the local trunk where it was, so a diff against the local trunk alone would charge the item with every file origin gained since: a `protected_paths` hold would park it for a `Makefile` it never touched.
+The `protected_paths` hold, the review's scope count and its recent-commits list all read from that base.
 
 ### Updating the branch at dispatch
 
-The branch update above runs after the review, so without another one a branch a sibling's merge left behind would be implemented and reviewed on the stale tree first, then conflict, then park for a person. So before each implement session, and before a `--review-only` review, drive merges origin's trunk into the item's branch in its worktree, while `[supervise] resolve_conflict` is anything but `off`. A lost review's rerun and a drive resumed at the review boundary skip it, because each is about the head it already had.
+The branch update in [Keeping each branch level with the trunk](#keeping-each-branch-level-with-the-trunk) runs after the review, so without another one a branch a sibling's merge left behind would be implemented and reviewed on the stale tree first, then conflict, then park for a person.
+So before each implement session, and before a `--review-only` review, drive merges origin's trunk into the item's branch in its worktree, while `[supervise] resolve_conflict` is anything but `off`.
+A lost review's rerun and a drive resumed at the review boundary skip it, because each is about the head it already had.
 
 - **A branch already holding the trunk** merges nothing.
-- **A worktree holding uncommitted work or an unconcluded merge** is never merged into, since the merge would refuse and the abort after it would discard the work. When the branch is level, the round goes on as it would without the branch update; otherwise, and always when `MERGE_HEAD` is present, drive merges nothing and the item parks `uncommitted_work`, its worktree as it stood.
-- **A clean merge** is committed and the session starts on it. Nothing is pushed until the session's own push.
-- **A conflict at `auto`** is left in the worktree, conflict markers and `MERGE_HEAD` in place, and becomes the implementing session's first task. Its prompt names the trunk commit merged, each conflicted file, and for each file the items whose trunk commits since the branch's merge base touched it, read from the ledger's head and completion rows, with their numbered requirements. The session is told to resolve every conflict keeping both sides, to commit the merge before any other work, and to name in its report what each side kept. The review of that round gets the same list and reads every conflicted hunk against both parents: a resolution that drops a behavior one of those items requires is a `BRANCH-REGRESSION`. The review reads that list from the ledger and the branch, not from the drive that found the conflict, so a lost review's rerun, a re-drive after a drive stopped before the review, and a resumed drive each get it, until a review of the item concludes. A `--review-only` round that conflicts becomes an implement round, since the review has nothing to read until the merge is resolved. A session that ends with the merge unconcluded parks `uncommitted_work`.
-- **The bound at `auto`.** One conflict round per item per drive: a second conflict parks `trunk_conflict` with a `needs_operator` naming the files and the worktree. A conflict round writes a ledger `changes` row whose source is `trunk_conflict`, which is not a round under `[review] max_review_rounds`: that cap counts a review's send-backs alone. An item already at the cap parks the same way instead of starting one, because its findings wait on the operator.
+- **A worktree holding uncommitted work or an unconcluded merge** is never merged into, since the merge would refuse and the abort after it would discard the work.
+  When the branch is level, the round goes on as it would without the branch update; otherwise, and always when `MERGE_HEAD` is present, drive merges nothing and the item parks `uncommitted_work`, its worktree as it stood.
+- **A clean merge** is committed and the session starts on it.
+  Nothing is pushed until the session's own push.
+- **A conflict at `auto`** is left in the worktree, conflict markers and `MERGE_HEAD` in place, and becomes the implementing session's first task.
+  Its prompt names the trunk commit merged, each conflicted file, and for each file the items whose trunk commits since the branch's merge base touched it, read from the ledger's head and completion rows, with their numbered requirements.
+  The session is told to resolve every conflict keeping both sides, to commit the merge before any other work, and to name in its report what each side kept.
+  The review of that round gets the same list and reads every conflicted hunk against both parents: a resolution that drops a behavior one of those items requires is a `BRANCH-REGRESSION`.
+  The review reads that list from the ledger and the branch, not from the drive that found the conflict, so a lost review's rerun, a re-drive after a drive stopped before the review, and a resumed drive each get it, until a review of the item concludes.
+  A `--review-only` round that conflicts becomes an implement round, since the review has nothing to read until the merge is resolved.
+  A session that ends with the merge unconcluded parks `uncommitted_work`.
+- **The bound at `auto`.**
+  One conflict round per item per drive: a second conflict parks `trunk_conflict` with a `needs_operator` naming the files and the worktree.
+  A conflict round writes a ledger `changes` row whose source is `trunk_conflict`, which is not a round under `[review] max_review_rounds`: that cap counts a review's send-backs alone.
+  An item already at the cap parks the same way instead of starting one, because its findings wait on the operator.
 - **A conflict at `supervisor` or `operator`** aborts the merge, launches nothing and parks `trunk_conflict`, with a `needs_supervisor` or `needs_operator` naming the branch, the files and the worktree, which is left standing for whoever resolves it.
 
 Each dispatch branch update emits an `update_branch` stage event with a `result`; see [`drive --events`](automation.md#drive---events).
 
 ### Updating the other open pull requests
 
-A merge moves the trunk under every pull request drive left open as well: one held for the operator by `protected_paths`, `--no-merge` or a split-out dependency, one parked `gate_refused` at the merge, and one a required merge queue still holds. Those items are past their turn at the trunk stage, so nothing above reaches them again. After each merge drive makes or finishes, reconciliation's included, and while `[supervise] update_open_prs` is `auto`, drive walks every item whose ledger records a pull request on the branch the item renders today, that is not merged, and that the forge still reports open. One at a time, inside the trunk stage the merge already holds, it merges origin's trunk into each one's branch in the item's worktree, runs the item's verify command on the merged tree and pushes, never forced: the same steps as the item's own branch update, without the wait for checks. The item stays where it was.
+A merge moves the trunk under every pull request drive left open as well: one held for the operator by `protected_paths`, `--no-merge` or a split-out dependency, one parked `gate_refused` at the merge, and one a required merge queue still holds.
+Those items are past their turn at the trunk stage, so neither branch update reaches them again.
+After each merge drive makes or finishes, reconciliation's included, and while `[supervise] update_open_prs` is `auto`, drive walks every item whose ledger records a pull request on the branch the item renders today, that is not merged, and that the forge still reports open.
+One at a time, inside the trunk stage the merge already holds, it merges origin's trunk into each one's branch in the item's worktree, runs the item's verify command on the merged tree and pushes, never forced: the same steps as the item's own branch update, without the wait for checks.
+The item stays where it was.
 
 - **A branch already holding the trunk** is left alone.
 - **A local branch that disagrees with origin's**, a worktree holding uncommitted work, or a worktree another drive holds is left alone and named on stderr.
-- **A verify command that fails** while the trunk alone passes pushes the merge and sends the item back, as above. A trunk that fails alone pushes nothing and stops the drive.
-- **A conflict**, found with `git merge-tree` before anything is checked out, merges and pushes nothing and goes to whoever `[supervise] resolve_conflict` names: at `supervisor` a `needs_supervisor` event, at `operator` a `needs_operator` event, each naming the branch, the files and the worktree left standing to resolve in; at `off` the item parks `trunk_conflict` and a clean worktree is removed. At `auto` nothing parks and no session starts, because the branch update runs inside the trunk stage: the clean worktree is removed and the item's next dispatch, in this drive under `--follow` or in the next one, takes the conflict to its session as [Updating the branch at dispatch](#updating-the-branch-at-dispatch) describes.
+- **A verify command that fails** while the trunk alone passes pushes the merge and sends the item back, as [Keeping each branch level with the trunk](#keeping-each-branch-level-with-the-trunk) describes.
+  A trunk that fails alone pushes nothing and stops the drive.
+- **A conflict**, found with `git merge-tree` before anything is checked out, merges and pushes nothing and goes to whoever `[supervise] resolve_conflict` names: at `supervisor` a `needs_supervisor` event, at `operator` a `needs_operator` event, each naming the branch, the files and the worktree left standing to resolve in; at `off` the item parks `trunk_conflict` and a clean worktree is removed.
+  At `auto` nothing parks and no session starts, because the branch update runs inside the trunk stage: the clean worktree is removed and the item's next dispatch, in this drive under `--follow` or in the next one, takes the conflict to its session as [Updating the branch at dispatch](#updating-the-branch-at-dispatch) describes.
 
-`drover drive --update-branches` does the same over every open drive pull request and exits, for a merge made outside drive. It launches nothing and takes no ids. `update_open_prs` at `supervisor` or `operator` emits one hand-off per merge instead of updating the branch.
+`drover drive --update-branches` does the same over every open drive pull request and exits, for a merge made outside drive.
+It launches nothing and takes no ids.
+`update_open_prs` at `supervisor` or `operator` emits one hand-off per merge instead of updating the branch.
 
-`[drive] merge_gate` exiting `4` says the head is behind the trunk and nothing else was asked. While `[supervise] retry_moved_trunk` is `auto`, drive updates the branch as above and runs the merge gate once more, before the pull request opens and at the merge alike. A second `4` parks `gate_refused` with nothing sent back; at any other policy the first `4` parks it, after the hand-off. drive does not need the `4` to find this out: before it accepts an exit `1` it fetches the trunk and tests whether `origin/<trunk>` is an ancestor of the head, and a head that does not hold it is handled as a `4`, with the reason saying the merge gate exited 1 on a head behind the trunk. It also fetches just before each merge gate run and updates a branch the trunk moved past while its checks settled; that update counts as the one retry, so a trunk that moves on every attempt parks rather than loops, and a fetch that finds it moved once the retry is spent parks without running the merge gate. At any policy other than `auto` a behind answer still parks with the hand-off, whether or not that update already ran. Exit `4` is the faster path, not the only one.
+`[drive] merge_gate` exiting `4` says the head is behind the trunk and nothing else was asked.
+While `[supervise] retry_moved_trunk` is `auto`, drive updates the branch as [Keeping each branch level with the trunk](#keeping-each-branch-level-with-the-trunk) describes and runs the merge gate once more, before the pull request opens and at the merge alike.
+A second `4` parks `gate_refused` with nothing sent back; at any other policy the first `4` parks it, after the hand-off.
+drive does not need the `4` to find this out: before it accepts an exit `1` it fetches the trunk and tests whether `origin/<trunk>` is an ancestor of the head, and a head that does not hold it is handled as a `4`, with the reason saying the merge gate exited 1 on a head behind the trunk.
+It also fetches just before each merge gate run and updates a branch the trunk moved past while its checks settled; that update counts as the one retry, so a trunk that moves on every attempt parks rather than loops, and a fetch that finds it moved once the retry is spent parks without running the merge gate.
+At any policy other than `auto` a behind answer still parks with the hand-off, whether or not that update already ran.
+Exit `4` is the faster path, not the only one.
 
 ### Following what a finish unblocks
 
-`drover drive --follow` re-reads the ready queue after each finish and appends, in queue order, the items that list the finished item in `deps` and that the drive has not already listed. A chain of dependent items then runs in one drive, bounded by `--max-items`, `--for` and `--until` as any other queue is. Only a finish in the same drive counts, which means a `merged_by_drover` item. A merge a required merge queue holds completes after drive has moved on, so nothing waiting on it is unblocked until the next drive's reconciliation records it. Without `--follow` the list drive started with is the list it walks.
+`drover drive --follow` re-reads the ready queue after each finish and appends, in queue order, the items that list the finished item in `deps` and that the drive has not already listed.
+A chain of dependent items then runs in one drive, bounded by `--max-items`, `--for` and `--until` as any other queue is.
+Only a finish in the same drive counts, which means a `merged_by_drover` item.
+A merge a required merge queue holds completes after drive has moved on, so nothing waiting on it is unblocked until the next drive's reconciliation records it.
+Without `--follow` the list drive started with is the list it walks.
 
 ```bash
 drover finish                    # the checked-out branch's item
@@ -569,21 +831,32 @@ drover finish 2 --delete-branch  # and drop the local branch once the trunk has 
 drover finish 2 --no-tracker     # record the merge, close nothing
 ```
 
-`--no-tracker` records the merge and writes to no issue. The `closes` numbers whose dispositions are still unapplied are named, with `drover finish <id>` to apply them later; nothing is lost, because the disposition rows are what the tracker write reads and they stay where they were. `drover drive`'s reconciliation finishes under this flag always: closing an issue is visible to whoever filed it, and adopting a merge some earlier drive left behind is recovery rather than a finish anyone asked for. The one finish drive makes with the tracker included is a merge it performed itself on the merge gate's word, moments earlier, which is the finish an operator would have typed next.
+`--no-tracker` records the merge and writes to no issue.
+The `closes` numbers whose dispositions are still unapplied are named, with `drover finish <id>` to apply them later; nothing is lost, because the disposition rows are what the tracker write reads and they stay where they were.
+`drover drive`'s reconciliation finishes under this flag always: closing an issue is visible to whoever filed it, and adopting a merge some earlier drive left behind is recovery rather than a finish anyone asked for.
+The one finish drive makes with the tracker included is a merge it performed itself on the merge gate's word, moments earlier, which is the finish an operator would have typed next.
 
-`--delete-branch` runs last, after the ledger row, the saved report and the return to the trunk. It is a safe delete: git refuses a branch whose commits are nowhere else, and `finish` reports `branch kept` with the reason rather than failing, so an item finished under `--force` on an authority that turned out to be wrong still has its work on disk.
+`--delete-branch` runs last, after the ledger row, the saved report and the return to the trunk.
+It is a safe delete: git refuses a branch whose commits are nowhere else, and `finish` reports `branch kept` with the reason rather than failing, so an item finished under `--force` on an authority that turned out to be wrong still has its work on disk.
 
-`finish` appends the completion row, saves the report, applies whatever the reviewer recorded against the item's `closes` issues, and returns the tree to the trunk. It **refuses on a branch it cannot see merged** and exits 3, because recording a completion for work still sitting on a branch makes the ledger state something the tree does not support. Work that merged under a name the branch template does not render needs `--force`.
+`finish` appends the completion row, saves the report, applies whatever the reviewer recorded against the item's `closes` issues, and returns the tree to the trunk.
+It **refuses on a branch it cannot see merged** and exits 3, because recording a completion for work still sitting on a branch makes the ledger state something the tree does not support.
+Work that merged under a name the branch template does not render needs `--force`.
 
 ### Finishing while a drive is running
 
-It finishes. A drive runs its items in worktrees of their own, so what it does in your checkout is move the trunk ref, push branches, and add and remove worktrees. A merge made outside the drive, by hand or by a merge queue, is yours to finish at once.
+It finishes.
+A drive runs its items in worktrees of their own, so what it does in your checkout is move the trunk ref, push branches, and add and remove worktrees.
+A merge made outside the drive, by hand or by a merge queue, is yours to finish at once.
 
 Three collisions remain, and `finish` handles each:
 
-- **A session in your checkout.** `run`, `draft` and `review` work in it, so `finish` reads [the checkout lease](automation.md#the-checkout-lease) first, refuses while one of them holds it, and exits 3 before it fetches or switches anything.
-- **A session in the item's worktree.** Finishing removes that tree, so `finish` refuses, exit 3, while a live session holds its lease, and names the pid and the path.
-- **Two fast-forwards of the trunk.** The drive's sync before it branches an item and finish's return to the trunk take one lock, and each waits up to 30 seconds for the other rather than refusing.
+- **A session in your checkout.**
+  `run`, `draft` and `review` work in it, so `finish` reads [the checkout lease](automation.md#checkout-lease) first, refuses while one of them holds it, and exits 3 before it fetches or switches anything.
+- **A session in the item's worktree.**
+  Finishing removes that tree, so `finish` refuses, exit 3, while a live session holds its lease, and names the pid and the path.
+- **Two fast-forwards of the trunk.**
+  The drive's sync before it branches an item and finish's return to the trunk take one lock, and each waits up to 30 seconds for the other rather than refusing.
 
 The drive recording the same merge is not a collision: whichever of the two writes the completion row second finds the first one's row and writes none.
 
@@ -595,29 +868,44 @@ Wait for it to finish, or stop it: kill 41234
 
 Those are the two answers, and there is no third: no `--force` here, because nothing is stale for one to rescue, and no `--wait`, because the holder runs in hours and the merge you were finishing is still merged when it finishes.
 
-`drover status` reports the same holder and refuses nothing. A second checkout of the same repository (`git worktree add`) has its own lease and its own answer, so two trees never block each other; that is also why each item a drive works on holds the lease of its own worktree, and the operator's checkout is never the tree a session is editing.
+`drover status` reports the same holder and refuses nothing.
+A second checkout of the same repository (`git worktree add`) has its own lease and its own answer, so two trees never block each other; that is also why each item a drive works on holds the lease of its own worktree, and the operator's checkout is never the tree a session is editing.
 
-`finish` removes the item's worktree, if a drive left one, before it deletes the branch. git refuses to remove a worktree holding uncommitted work, and `finish` leaves that one, and its branch, where they are.
+`finish` removes the item's worktree, if a drive left one, before it deletes the branch.
+git refuses to remove a worktree holding uncommitted work, and `finish` leaves that one, and its branch, where they are.
 
 ### What "cannot see merged" means
 
 The forge answers first, then git ancestry:
 
-1. [`[git] merge_check`](configuration.md#git-merge_check), the command a project on GitLab, Gitea or a self-hosted remote declares. Exit 0 is merged.
+1. [`[git] merge_check`](configuration.md#git-merge_check), the command a project on GitLab, Gitea or a self-hosted remote declares.
+   Exit 0 is merged.
 2. `gh` when no `merge_check` is set: a merged pull request for the branch.
 3. Git ancestry, whenever that first answer was no, whether because `gh` was unreachable or because it looked and found nothing.
 
-Ancestry runs last and never alone. A squash or rebase merge replaces the branch's commits, so `git branch --merged` reports a merged branch unmerged forever; its no proves nothing. Its yes catches a branch merged by direct push to the trunk, where there is no pull request to find. The refusal and the ✓ both name which authority answered, so a wrong answer points at the source that produced it rather than at `finish`.
+Ancestry runs last and never alone.
+A squash or rebase merge replaces the branch's commits, so `git branch --merged` reports a merged branch unmerged forever; its no proves nothing.
+Its yes catches a branch merged by direct push to the trunk, where there is no pull request to find.
+The refusal and the ✓ both name which authority answered, so a wrong answer points at the source that produced it rather than at `finish`.
 
-Its yes has one false positive, and the ledger is what closes it. A branch nobody committed to sits at or behind the trunk, which `git branch --merged` lists the same way it lists one whose work went in, so a run that ended without committing reads as merged. drover records the branch and its head before every push, only when that head is off the trunk (see [the ledger](concepts.md#the-ledger)), and an ancestry yes stands only for a branch one of those rows vouches for and that still holds the recorded commit. Without one the answer is no, and the source string says the branch never started. Work committed outside any drover launch reads that way too, which costs `--force` rather than a completion recorded for code that is not on the trunk.
+Its yes has one false positive, and the ledger is what closes it.
+A branch nobody committed to sits at or behind the trunk, which `git branch --merged` lists the same way it lists one whose work went in, so a run that ended without committing reads as merged.
+drover records the branch and its head before every push, only when that head is off the trunk (see [the ledger](concepts.md#ledger)), and an ancestry yes stands only for a branch one of those rows vouches for and that still holds the recorded commit.
+Without one the answer is no, and the source string says the branch never started.
+Work committed outside any drover launch reads that way too, which costs `--force` rather than a completion recorded for code that is not on the trunk.
 
-That leaves two refusals, and they are not the same. A branch name this project's `[run] branch` template does not render is benign, and `--force` is the answer. A branch git ancestry calls merged that no row shows carrying a commit is the other one, and `finish` says so in its own words: the work may not be on the trunk at all, so `--force` records it on your reading rather than drover's, and a run that died before its first commit wants re-running instead. Reconciliation names such an item and leaves it alone rather than attempting a finish that would refuse.
+That leaves two refusals, and they are not the same.
+A branch name this project's `[run] branch` template does not render is benign, and `--force` is the answer.
+A branch git ancestry calls merged that no row shows carrying a commit is the other one, and `finish` says so in its own words: the work may not be on the trunk at all, so `--force` records it on your reading rather than drover's, and a run that died before its first commit wants re-running instead.
+Reconciliation names such an item and leaves it alone rather than attempting a finish that would refuse.
 
-Without `merge_check`, a squash-merging forge that is not GitHub leaves ancestry as the only authority, and every item then needs `--force`. `--force` is for the branch that merged under a name the template does not render; a refusal overridden every time has stopped protecting anything.
+Without `merge_check`, a squash-merging forge that is not GitHub leaves ancestry as the only authority, and every item then needs `--force`.
+`--force` is for the branch that merged under a name the template does not render; a refusal overridden every time has stopped protecting anything.
 
 ### Closing the issues the item resolves
 
-An item's `closes` key names the tracker issues its work is meant to resolve. `finish` is the only place drover writes to them, and it writes only what a reviewer already recorded:
+An item's `closes` key names the tracker issues its work is meant to resolve.
+`finish` is the only place drover writes to them, and it writes only what a reviewer already recorded:
 
 ```text
 drover resolve 2 47 fixed --code-by agent "traced to the handler"
@@ -628,11 +916,16 @@ drover finish 2
   ! #103: no disposition recorded — left open
 ```
 
-An issue nobody judged is named and skipped, never guessed at. The applied rows make a second `finish` a no-op, and a tracker that cannot be reached costs the tracker write rather than the finish. `drover check` reports `NO DISPOSITION` for anything still unanswered after the merge. The full model, and why the pull request's own `Closes #N` keywords are not enough, is in [issue dispositions](concepts.md#issue-dispositions).
+An issue nobody judged is named and skipped, never guessed at.
+The applied rows make a second `finish` a no-op, and a tracker that cannot be reached costs the tracker write rather than the finish.
+`drover check` reports `NO DISPOSITION` for anything still unanswered after the merge.
+The full model, and why the pull request's own `Closes #N` keywords are not enough, is in [issue dispositions](concepts.md#issue-dispositions).
 
 ### Commits merged after the last review
 
-A review pass row names the branch head the review read, and `finish` compares it with the head the merged pull request carried. Every commit between the two is one no review read, typically a fix made by hand after a drive parked the item and merged through `gh`. `finish` still records the merge, lists those commits, and writes both heads and the list onto the completion row:
+A review pass row names the branch head the review read, and `finish` compares it with the head the merged pull request carried.
+Every commit between the two is one no review read, typically a fix made by hand after a drive parked the item and merged through `gh`.
+`finish` still records the merge, lists those commits, and writes both heads and the list onto the completion row:
 
 ```text
 drover finish 7
@@ -643,21 +936,36 @@ drover finish 7
       drover audit 7 reviewed --head 9b1e44a20c3d5f6a7b8c9d0e1f2a3b4c5d6e7f80 --code-by <who> [--reviewer <name>] "<what you read>"
 ```
 
-The list leaves out a merge from the trunk and a commit whose subject opens with `review:`: the first is the trunk's code, the second the reviewer's own. A merge counts as the trunk's when every commit it brought in lies on the trunk's first-parent history, here or at origin. Any other merge is listed itself, since a merge can carry a change of its own, and a side branch merged into the item keeps its commits on the list. The baseline is the latest review that passed by the reading `open-pr` applies: a pass row reading `passed`, or a review with no request for changes, no sent-back block standing, and an audit at `reviewed` or `verified` that names a head. For the latest review the block is read from the item file as `open-pr` reads it; for an earlier one the ledger answers, and a request for changes stands until `close-changes` or a passing drive review clears it. A review that sent work back leaves the earlier passing head standing, whatever level its audit recorded. `drover check` reports `UNREVIEWED MERGE` for the item, and `drover unaudited` lists it with the commits, until an audit at `reviewed` or `verified` names the merged head with `--head`. A `claimed` audit does not clear it, being the author's word. An item finished before pass rows named a head carries none and is never reported.
+The list leaves out a merge from the trunk and a commit whose subject opens with `review:`: the first is the trunk's code, the second the reviewer's own.
+A merge counts as the trunk's when every commit it brought in lies on the trunk's first-parent history, here or at origin.
+Any other merge is listed itself, since a merge can carry a change of its own, and a side branch merged into the item keeps its commits on the list.
+The baseline is the latest review that passed by the reading `open-pr` applies: a pass row reading `passed`, or a review with no request for changes, no sent-back block standing, and an audit at `reviewed` or `verified` that names a head.
+For the latest review the block is read from the item file as `open-pr` reads it; for an earlier one the ledger answers, and a request for changes stands until `close-changes` or a passing drive review clears it.
+A review that sent work back leaves the earlier passing head standing, whatever level its audit recorded.
+`drover check` reports `UNREVIEWED MERGE` for the item, and `drover unaudited` lists it with the commits, until an audit at `reviewed` or `verified` names the merged head with `--head`.
+A `claimed` audit does not clear it, being the author's word.
+An item finished before pass rows named a head carries none and is never reported.
 
-The same comparison runs before the merge. `open-pr` refuses a branch holding such commits, naming them and `drover review <id>`, and `--force` opens it anyway and prints what it waved through. Under `merge_drive_pr` a supervising session merges by running `finish`, which compares the head of the pull request the forge holds open before it merges anything, refuses one holding such commits with the same list and `drover review <id>`, and otherwise merges it bound to that head with `--match-head-commit`. The policy covers what drive's review read and nothing more.
+The same comparison runs before the merge.
+`open-pr` refuses a branch holding such commits, naming them and `drover review <id>`, and `--force` opens it anyway and prints what it waved through.
+Under `merge_drive_pr` a supervising session merges by running `finish`, which compares the head of the pull request the forge holds open before it merges anything, refuses one holding such commits with the same list and `drover review <id>`, and otherwise merges it bound to that head with `--match-head-commit`.
+The policy covers what drive's review read and nothing more.
 
-A completion `mark-merged` wrote carries no heads. A `finish` after it appends one row holding the merged head, the reviewed head and the commits between them, which `check` reads as it reads a completion row's own, and a second `finish` adds nothing. A comparison `finish` could not make, a head no clone or forge can supply being the usual cause, prints why and records nothing, so `check` stays silent on that item rather than reporting it clean.
+A completion `mark-merged` wrote carries no heads.
+A `finish` after it appends one row holding the merged head, the reviewed head and the commits between them, which `check` reads as it reads a completion row's own, and a second `finish` adds nothing.
+A comparison `finish` could not make, a head no clone or forge can supply being the usual cause, prints why and records nothing, so `check` stays silent on that item rather than reporting it clean.
 
 ### What finish says about the follow-up list
 
-A follow-up owned by an item goes orphaned the instant that item merges: every owner has merged, so no run is scheduled to carry it. `finish` is that instant, and it is the one command holding both facts at once, so it prints them:
+A follow-up owned by an item goes orphaned the instant that item merges: every owner has merged, so no run is scheduled to carry it.
+`finish` is that instant, and it is the one command holding both facts at once, so it prints them:
 
 ```text
   · 7 follow-ups owned by 11 are now orphaned (worst H): nothing carries them until an item declares deps: 11 (drover follow-ups 11)
 ```
 
-The severity is the worst among the orphaned rows, in the letters `drover follow-ups` and `drover unaudited` rank with, because seven `L` rows and one `H` row are different situations. What discharges them is named in the line rather than left to `follow-ups --help`: another item declaring this id on its `deps:` line inherits the rows.
+The severity is the worst among the orphaned rows, in the letters `drover follow-ups` and `drover unaudited` rank with, because seven `L` rows and one `H` row are different situations.
+What discharges them is named in the line rather than left to `follow-ups --help`: another item declaring this id on its `deps:` line inherits the rows.
 
 A read that stopped at the page limit says so, in the words `drover check` uses for the same condition off the same index:
 
@@ -671,15 +979,23 @@ That line prints on a zero too, and it is the only zero here that prints anythin
   · no follow-up owned by 11 counted as orphaned, and the follow-up list hit the 300-issue page limit, so the orphaned count is a floor
 ```
 
-Silence after a complete read means the merge stranded nothing. Silence after a page cut short would mean nobody counted, which is a different answer wearing the same face.
+Silence after a complete read means the merge stranded nothing.
+Silence after a page cut short would mean nobody counted, which is a different answer wearing the same face.
 
-It is a line and not a refusal. Carrying a follow-up past a merge is legitimate and common, and a refusal here would make `--force` the ordinary path. Nothing `finish` learns about the follow-up list can stop it recording a merge that already happened: zero owned rows print nothing off a whole read, a project declaring no follow-up list is told nothing, and an unreachable one drops the line and says why rather than reporting zero.
+It is a line and not a refusal.
+Carrying a follow-up past a merge is legitimate and common, and a refusal here would make `--force` the ordinary path.
+Nothing `finish` learns about the follow-up list can stop it recording a merge that already happened: zero owned rows print nothing off a whole read, a project declaring no follow-up list is told nothing, and an unreachable one drops the line and says why rather than reporting zero.
 
-`mark-merged` is the subset of `finish`: the ledger row alone, for a merge recorded by hand. Running it first does not block `finish`, which skips the row it finds and does the other four steps.
+`mark-merged` is the subset of `finish`: the ledger row alone, for a merge recorded by hand.
+Running it first does not block `finish`, which skips the row it finds and does the other four steps.
 
-Both take `--runner` to name who to credit, the same flag `run`, `draft` and `review` take, and checked differently here. Those three refuse a name `[runners]` does not declare, because the value picks the executable to launch. `finish` and `mark-merged` take it as given and only warn, because an agent that ran the item outside drover has no `[runners]` entry to match. The warning names the value and the declared set, so a typo and an outside run are told apart by the operator, who is the only one who can.
+Both take `--runner` to name who to credit, the same flag `run`, `draft` and `review` take, and checked differently here.
+Those three refuse a name `[runners]` does not declare, because the value picks the executable to launch.
+`finish` and `mark-merged` take it as given and only warn, because an agent that ran the item outside drover has no `[runners]` entry to match.
+The warning names the value and the declared set, so a typo and an outside run are told apart by the operator, who is the only one who can.
 
-A project with [`[git] enabled = false`](configuration.md#git) has no merge to verify, so `finish` refuses and exits 3 rather than asking git a question with no answer. `drover mark-merged <id>` then `drover audit <id> <level> --code-by <who>` is the whole of it there, and the refusal names both.
+A project with [`[git] enabled = false`](configuration.md#git) has no merge to verify, so `finish` refuses and exits 3 rather than asking git a question with no answer.
+`drover mark-merged <id>` then `drover audit <id> <level> --code-by <who>` is the whole of it there, and the refusal names both.
 
 A withdrawal is an append, never a rewrite:
 
@@ -687,30 +1003,47 @@ A withdrawal is an append, never a rewrite:
 drover unmark-merged 2    # appends {"merged":false}, keeping the audit history intact
 ```
 
-`finish` deliberately does not audit. Finishing is mechanical; auditing is judgment, and a command that did both would let the thing that merged the work also certify it.
+`finish` deliberately does not audit.
+Finishing is mechanical; auditing is judgment, and a command that did both would let the thing that merged the work also certify it.
 
 ## Retiring an item nobody will do
 
-drover has no close state for an item that never ran. `finish` and `mark-merged` write a completion row and `unmark-merged` takes it back, and all three describe work that happened. An item written, reviewed and deliberately not going to be done is a fourth thing, and recording it as complete would be a false entry in an append-only ledger.
+drover has no close state for an item that never ran.
+`finish` and `mark-merged` write a completion row and `unmark-merged` takes it back, and all three describe work that happened.
+An item written, reviewed and deliberately not going to be done is a fourth thing, and recording it as complete would be a false entry in an append-only ledger.
 
-The mechanism is a directory. Name one in `[paths] shelf` and move the body into it:
+The mechanism is a directory.
+Name one in `[paths] shelf` and move the body into it:
 
 ```bash
 drover shelve F3
 drover unshelve F3                # if it turns out to be worth doing after all
 ```
 
-Moving the file costs nothing, keeps the text, keeps the id spent, and invents no frontmatter key every command would then have to act on. The filename crosses unchanged, so the id and the slug survive the round trip and the branch the item would run on is the same one it always had.
+Moving the file costs nothing, keeps the text, keeps the id spent, and invents no frontmatter key every command would then have to act on.
+The filename crosses unchanged, so the id and the slug survive the round trip and the branch the item would run on is the same one it always had.
 
-`shelve` refuses three states rather than letting `check` report them afterwards. A project with no `[paths] shelf` is told which key to set. An id that would end up holding a body in both directories is the `SHELF CLASH` state below, and `unshelve` refuses the mirror image of it. An id another item still declares on its `deps:` line is refused with those dependents named, because shelving it would trade one retired item for a `MISSING DEP` finding against each of them.
+`shelve` refuses three states rather than letting `check` report them afterwards.
+A project with no `[paths] shelf` is told which key to set.
+An id that would end up holding a body in both directories is the `SHELF CLASH` state, and `unshelve` refuses the mirror image of it.
+An id another item still declares on its `deps:` line is refused with those dependents named, because shelving it would trade one retired item for a `MISSING DEP` finding against each of them.
 
-What it does not refuse is a body that will not parse. Retiring one is the case the verb exists for, so `shelve` moves the file by path, the way `unshelve` already moves a body nothing has parsed. An id with no file behind it is still refused: there is nothing to move.
+What it does not refuse is a body that will not parse.
+Retiring one is the case the verb exists for, so `shelve` moves the file by path, the way `unshelve` already moves a body nothing has parsed.
+An id with no file behind it is still refused: there is nothing to move.
 
-The shelf is read for ids and never for content. `intake` allocates above the highest id in either directory, so a namespace whose only bodies are shelved does not start reissuing them, and `check` reports `SHELF CLASH` if one id ends up in both places, which is the state where reviving a body would silently take over a live item's identity. Nothing else consults it. A shelved item does not appear in `status` under any flag and does not move a count, because a backlog that lists work nobody intends to do is what the shelf exists to avoid.
+The shelf is read for ids and never for content.
+`intake` allocates above the highest id in either directory, so a namespace whose only bodies are shelved does not start reissuing them, and `check` reports `SHELF CLASH` if one id ends up in both places, which is the state where reviving a body would silently take over a live item's identity.
+Nothing else consults it.
+A shelved item does not appear in `status` under any flag and does not move a count, because a backlog that lists work nobody intends to do is what the shelf exists to avoid.
 
-It is also how a completed item leaves the backlog. `check` reports `ORPHAN ROW` for a ledger id with no body, which is what stops a completion being recorded against nothing; shelve the body rather than deleting it and the row keeps something to point at. Deleting it is still a finding, because that record is gone.
+It is also how a completed item leaves the backlog.
+`check` reports `ORPHAN ROW` for a ledger id with no body, which is what stops a completion being recorded against nothing; shelve the body rather than deleting it and the row keeps something to point at.
+Deleting it is still a finding, because that record is gone.
 
-A dependency on a shelved item stays a `MISSING DEP` finding. It blocks its dependent as hard as an item nobody ever wrote; `check` says which, because the fix is `drover unshelve` rather than an afternoon of writing. Reaching that state now takes a hand-run `mv`, since `shelve` names the dependents and refuses.
+A dependency on a shelved item stays a `MISSING DEP` finding.
+It blocks its dependent as hard as an item nobody ever wrote; `check` says which, because the fix is `drover unshelve` rather than an afternoon of writing.
+Reaching that state now takes a hand-run `mv`, since `shelve` names the dependents and refuses.
 
 ## Standing reports
 
@@ -722,11 +1055,13 @@ drover follow-ups    # the open follow-up list, all of it
 drover follow-ups 2  # what one item owns
 ```
 
-`unaudited` ranks by how many items transitively depend on the uninspected one, because that is how much rework a defect there would cost. It is the one report that walks the graph transitively; prompts deliberately do not.
+`unaudited` ranks by how many items transitively depend on the uninspected one, because that is how much rework a defect there would cost.
+It is the one report that walks the graph transitively; prompts deliberately do not.
 
 ## Without `gh`
 
-Everything local stays exact. Completion, audit levels and the dependency graph are local reads and need no network.
+Everything local stays exact.
+Completion, audit levels and the dependency graph are local reads and need no network.
 
 | Command                 | Without `gh`                                                                                               |
 | ----------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -736,11 +1071,13 @@ Everything local stays exact. Completion, audit levels and the dependency graph 
 | `finish`                | Every step, exit code unchanged; the orphaned follow-up line is dropped and a reason printed in its place. |
 | `follow-ups` / `intake` | Refuse with a message.                                                                                     |
 
-The `?` is deliberate. "Nobody filed one" and "nobody could ask" rank the same item very differently.
+The `?` is deliberate.
+"Nobody filed one" and "nobody could ask" rank the same item very differently.
 
 ## Telling an agent all of this
 
-Do not hand-write it. `drover agents` generates the instructions filled from this project's config: its paths, its verify command table, its label vocabulary, its frontmatter schema.
+Do not hand-write it.
+`drover agents` generates the instructions filled from this project's config: its paths, its verify command table, its label vocabulary, its frontmatter schema.
 
 ```bash
 drover agents                       # to stdout
@@ -748,6 +1085,9 @@ drover agents --write DROVER.md     # replace the marked block, touch nothing el
 drover agents --pointer DROVER.md   # the stanza AGENTS.md needs to reach it
 ```
 
-Set `[agents] principles` to the bar a reviewer holds the code to. It is the one thing that cannot be read off the rest of the config, and it lives there rather than as a hand-edit so that regenerating cannot lose it.
+Set `[agents] principles` to the bar a reviewer holds the code to.
+It is the one thing that cannot be read off the rest of the config, and it lives there rather than as a hand-edit so that regenerating cannot lose it.
 
-An agent that never read the generated block still has the binary. `drover --help` groups the commands in the order of this page and names the safety classes; each command's own `--help` carries a worked `Examples:` block and a `Safety:` line naming what it writes, with the paths of the project it is read in. [Automation](automation.md) describes that surface.
+An agent that never read the generated block still has the binary.
+`drover --help` groups the commands in the order of this page and names the safety classes; each command's own `--help` carries a worked `Examples:` block and a `Safety:` line naming what it writes, with the paths of the project it is read in.
+[Automation](automation.md) describes that surface.

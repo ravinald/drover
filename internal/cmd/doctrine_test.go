@@ -247,12 +247,12 @@ var auditPositionCopies = []struct {
 	drawn             bool // the shape diagram draws bare steps; the rest write commands
 }{
 	{name: "docs/lifecycle.md shape", path: lifecycleDoc, start: "write ", end: regexp.MustCompile("^```$"), drawn: true},
-	{name: "docs/lifecycle.md loop table", path: lifecycleDoc, start: "### The whole loop", end: regexp.MustCompile(`^#{1,6} `)},
+	{name: "docs/lifecycle.md loop table", path: lifecycleDoc, start: "**The whole loop", end: regexp.MustCompile(`^#{1,6} `)},
 	{name: "docs/lifecycle.md three runners", path: lifecycleDoc, start: "### Three stages, three runners", end: regexp.MustCompile(`^#{1,6} `)},
-	{name: "docs/agent-guide.md loop table", path: guideDoc, start: "## The loop, end to end", end: regexp.MustCompile(`^## `)},
+	{name: "docs/agent-guide.md loop table", path: guideDoc, start: "## Loop, end to end", end: regexp.MustCompile(`^## `)},
 	{name: "README.md item sequence", path: readmeDoc, start: "drover new bug", end: regexp.MustCompile("^```$")},
 	{name: "docs/getting-started.md step 8", path: gettingStartedDoc, start: "## 8. Run, review", end: regexp.MustCompile(`^## `)},
-	{name: "docs/playbook.md whole split", path: playbookDoc, start: "### The whole split, end to end", end: regexp.MustCompile(`^#{1,6} `)},
+	{name: "docs/playbook.md whole split", path: playbookDoc, start: "### Full split, end to end", end: regexp.MustCompile(`^#{1,6} `)},
 }
 
 // stepIndex is where a copy first names one step. -1 means it does not, which
