@@ -1,8 +1,12 @@
 # Agent guide
 
-For a coding agent driving drover. Flat and imperative, with the exit code against every refusal. A person wants [Lifecycle](lifecycle.md) instead, which is the same material with the reasoning behind each rule.
+For a coding agent driving drover.
+Flat and imperative, with the exit code against every refusal.
+A person wants [Lifecycle](lifecycle.md) instead, which is the same material with the reasoning behind each rule.
 
-**Read the generated instructions before this page.** `drover agents` renders this project's own paths, verify command table, label vocabulary and frontmatter schema from its `.drover.toml`. This page is what is true of drover everywhere; `drover agents` is what is true here, and it cannot describe a command surface the installed binary lacks.
+**Read the generated instructions before this page.**
+`drover agents` renders this project's own paths, verify command table, label vocabulary and frontmatter schema from its `.drover.toml`.
+This page is what is true of drover everywhere; `drover agents` is what is true here, and it cannot describe a command surface the installed binary lacks.
 
 ```bash
 drover agents          # this project's instructions, from its config
@@ -20,13 +24,17 @@ Test for the file, at the repository root:
 test -e "$(git rev-parse --show-toplevel)/.drover.toml" && echo "drover project"
 ```
 
-Do not probe with `drover check`. A missing binary exits 127 and a project with findings exits 2, so the exit code answers a different question.
+Do not probe with `drover check`.
+A missing binary exits 127 and a project with findings exits 2, so the exit code answers a different question.
 
 The binary walks up to `.drover.toml` on its own, so once the file is there you can run `drover` from anywhere in the tree.
 
 ## Ids
 
-Bare in every command: `1`, `2b`, `B1`. [Item ids](concepts.md#item-ids) explains the namespaces. Zero-padded in filenames only (`B01-<slug>.md`), so reading a filename and typing what you saw is the reliable way to get it wrong. `drover status` prints the form to type, and a padded id is refused with the bare form spelled out rather than guessed at.
+Bare in every command: `1`, `2b`, `B1`.
+[Item ids](concepts.md#item-ids) explains the namespaces.
+Zero-padded in filenames only (`B01-<slug>.md`), so reading a filename and typing what you saw is the reliable way to get it wrong.
+`drover status` prints the form to type, and a padded id is refused with the bare form spelled out rather than guessed at.
 
 ## What you may run
 
@@ -40,9 +48,15 @@ Bare in every command: `1`, `2b`, `B1`. [Item ids](concepts.md#item-ids) explain
 
 ## What you may not run, and what stops you
 
-drover exports `DROVER_ACTOR=agent` into every session it launches, so these refuse where you are and exit 3. You will not have to remember the list; the refusal names the command and the reason.
+drover exports `DROVER_ACTOR=agent` into every session it launches, so these refuse where you are and exit 3.
+You will not have to remember the list; the refusal names the command and the reason.
 
-The variable reaches only a session drover started itself. So drover also writes `.drover/session` into the tree each session works in, a JSON object naming the same actor, session id and project root, and every command reads it, walking up from the working directory, whenever `DROVER_ACTOR` is unset. A session another program opened in that tree (a sandbox thread, an agent a person started by hand in a drive's worktree) is sealed the same way, and `audit --code-by agent` reads its session id from the marker. The walk stops at the first `.drover/session` or `.drover.toml`, so a marker in a parent repository does not seal a project checked out below it. A refusal the marker caused says so, naming the file, its session and whether the drover that wrote it is still running, with the way out for each. A launch is refused only while that drover runs, and then with the text of the occupied-tree refusal rather than the nested-launch one, because the process reading the marker may be a person; a marker whose drover is gone still seals the operator commands until someone removes it, but the next launch into that tree replaces it.
+The variable reaches only a session drover started itself.
+So drover also writes `.drover/session` into the tree each session works in, a JSON object naming the same actor, session id and project root, and every command reads it, walking up from the working directory, whenever `DROVER_ACTOR` is unset.
+A session another program opened in that tree (a sandbox thread, an agent a person started by hand in a drive's worktree) is sealed the same way, and `audit --code-by agent` reads its session id from the marker.
+The walk stops at the first `.drover/session` or `.drover.toml`, so a marker in a parent repository does not seal a project checked out below it.
+A refusal the marker caused says so, naming the file, its session and whether the drover that wrote it is still running, with the way out for each.
+A launch is refused only while that drover runs, and then with the text of the occupied-tree refusal rather than the nested-launch one, because the process reading the marker may be a person; a marker whose drover is gone still seals the operator commands until someone removes it, but the next launch into that tree replaces it.
 
 | Refuses inside a session        | Why it is not yours                                                                                                                           |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -56,17 +70,32 @@ The variable reaches only a session drover started itself. So drover also writes
 | `signoff`                       | It certifies a requirement the session was told not to attempt.                                                                               |
 | `drive` / `supervise`           | Each launches sessions unattended on the operator's behalf, and no launched session may start that.                                           |
 
-Separately, **a launched session cannot launch another.** `run`, `draft --runner`, `review --runner`, `t3 run`, `t3 thread --new` and `t3 thread --from-event` refuse where you are, because nesting spends a session nobody asked for and the operator sees one run while paying for two. Report what you found and let them start the next one. `run --dry-run` stays open, and is how you see what a run would carry. `t3 run` is the one runner that is drover itself: drover launches it as the session, and it runs as that session only when its parent process is the drover that wrote the tree's `.drover/session`. Run from inside any session, it is a nested launch like the others.
+Separately, **a launched session cannot launch another.**
+`run`, `draft --runner`, `review --runner`, `t3 run`, `t3 thread --new` and `t3 thread --from-event` refuse where you are, because nesting spends a session nobody asked for and the operator sees one run while paying for two.
+Report what you found and let them start the next one.
+`run --dry-run` stays open, and is how you see what a run would carry.
+`t3 run` is the one runner that is drover itself: drover launches it as the session, and it runs as that session only when its parent process is the drover that wrote the tree's `.drover/session`.
+Run from inside any session, it is a nested launch like the others.
 
-`finish --force` exists and is not an escape hatch. Its refusal on a branch it cannot see merged is the design.
+`finish --force` exists and is not an escape hatch.
+Its refusal on a branch it cannot see merged is the design.
 
-**`audit` is deliberately open, at every level.** A review session is independent of the session that implemented the work, drover launched both, and the actor variable cannot tell them apart. `--code-by agent` can: drover gives every launched session its own id, records it on the stage row, and resolves `agent` against the item's implement rows, so a review session drover launched counts as independent and the implement session auditing its own code does not. A `FIX-IN-REVIEW` correction no numbered requirement traces to is not code the level certifies, so it does not make the session an author of it; anything else does. drover refuses `verified` from a session that matches a `--code-by` entry and exits 3, naming the entry.
+**`audit` is deliberately open, at every level.**
+A review session is independent of the session that implemented the work, drover launched both, and the actor variable cannot tell them apart.
+`--code-by agent` can: drover gives every launched session its own id, records it on the stage row, and resolves `agent` against the item's implement rows, so a review session drover launched counts as independent and the implement session auditing its own code does not.
+A `FIX-IN-REVIEW` correction no numbered requirement traces to is not code the level certifies, so it does not make the session an author of it; anything else does.
+drover refuses `verified` from a session that matches a `--code-by` entry and exits 3, naming the entry.
 
-`init`, `init --user`, `shelve` and `unshelve` are open too. They write, but they certify nothing, and running `init --verify "go test ./..."` with a verify command the operator supplied is doing what you were told.
+`init`, `init --user`, `shelve` and `unshelve` are open too.
+They write, but they certify nothing, and running `init --verify "go test ./..."` with a verify command the operator supplied is doing what you were told.
 
 **What the check is not.**
 
-A boundary. The seal has two signals, the variable and the marker, and one opt-out: `DROVER_ACTOR=operator`, which a person exports to steer from inside a sealed tree and which reads as nobody launched, whatever the marker says. `env -u DROVER_ACTOR` defeats the variable and deleting the marker defeats the file, and drover does not pretend otherwise. It exists to stop a command being run because it appeared in a code block, not to stop one being run on purpose. If you find yourself reaching for the bypass, that is the signal to stop and report instead: the operator is cheaper to ask than a false ledger row is to unwind.
+A boundary.
+The seal has two signals, the variable and the marker, and one opt-out: `DROVER_ACTOR=operator`, which a person exports to steer from inside a sealed tree and which reads as nobody launched, whatever the marker says.
+`env -u DROVER_ACTOR` defeats the variable and deleting the marker defeats the file, and drover does not pretend otherwise.
+It exists to stop a command being run because it appeared in a code block, not to stop one being run on purpose.
+If you find yourself reaching for the bypass, that is the signal to stop and report instead: the operator is cheaper to ask than a false ledger row is to unwind.
 
 ## Exit codes
 
@@ -79,7 +108,8 @@ A boundary. The seal has two signals, the variable and the marker, and one opt-o
 
 ## Refusals you will hit
 
-Each of these is deliberate. The message names the next step; do not work around it.
+Each of these is deliberate.
+The message names the next step; do not work around it.
 
 | Attempt                                                                                                                                               | Exit | What to do                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -136,13 +166,16 @@ Each of these is deliberate. The message names the next step; do not work around
 
 ## Parse `--json`, never the table
 
-`--json` is on `status`, `show`, `unaudited`, `drive`, `drives`, `attach`, `check`, `follow-ups`, `intake --list`, `projects`, `skills`, `t3 discover` and `report`. Each prints a sample object under `Examples:` in its own `--help`, and [Automation](automation.md) carries every format with the field meanings.
+`--json` is on `status`, `show`, `unaudited`, `drive`, `drives`, `attach`, `check`, `follow-ups`, `intake --list`, `projects`, `skills`, `t3 discover` and `report`.
+Each prints a sample object under `Examples:` in its own `--help`, and [Automation](automation.md) carries every format with the field meanings.
 
-A degraded read says so rather than reporting a zero. `drover unaudited` with `gh` down prints `follow-ups unavailable, ranked on blast radius alone`; treat that as unknown, never as none.
+A degraded read says so rather than reporting a zero.
+`drover unaudited` with `gh` down prints `follow-ups unavailable, ranked on blast radius alone`; treat that as unknown, never as none.
 
 ## Loop, end to end
 
-Where an agent sits in each step. The operator runs the steps marked _operator_; everything else is yours.
+Where an agent sits in each step.
+The operator runs the steps marked _operator_; everything else is yours.
 
 | Step                                           | Command                                                 | Yours                                                                                                              |
 | ---------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -162,31 +195,78 @@ Where an agent sits in each step. The operator runs the steps marked _operator_;
 | Record the merge, write the tracker            | `drover finish <id>`                                    | operator                                                                                                           |
 | Confirm nothing was left unjudged              | `drover check`                                          | yes                                                                                                                |
 
-You can carry an item from a tracker issue to an audited review without the operator touching anything but `intake`, `accept`, the two launches, the merge and `finish`. Those six are the boundary: each either certifies work somebody else has to trust, or reaches a tracker other people read.
+You can carry an item from a tracker issue to an audited review without the operator touching anything but `intake`, `accept`, the two launches, the merge and `finish`.
+Those six are the boundary: each either certifies work somebody else has to trust, or reaches a tracker other people read.
 
-Between `review` and `merge` there is a loop, not a straight line. A requirement the review finds unmet goes back to the branch rather than to the tracker; see step 4 of [Reviewing a finished item](#reviewing-a-finished-item).
+Between `review` and `merge` there is a loop, not a straight line.
+A requirement the review finds unmet goes back to the branch rather than to the tracker; see step 4 of [Reviewing a finished item](#reviewing-a-finished-item).
 
 **A runner out of budget.**
 
-A session refused for a spent account parks its item `runner_fault` and ends the drive, unless the runner named the instant it serves again and that instant falls inside the drive's `--for` or `--until`, in which case drive sleeps until then and relaunches. Claude Code states its reset twice: as an epoch on the last `rate_limit_event` before its result, which drive reads first, and as a sentence such as `resets Oct 25 at 8pm (America/Los_Angeles)`, read in the zone it names when the event carries none. A weekly limit resets days out, and `--until` takes a time of day, so it never reaches past the next 24 hours: only `--for` (`--for 48h`) can cover such a reset. The park quotes the instant either way, so the operator can relaunch at it.
+A session refused for a spent account parks its item `runner_fault` and ends the drive, unless the runner named the instant it serves again and that instant falls inside the drive's `--for` or `--until`, in which case drive sleeps until then and relaunches.
+Claude Code states its reset twice: as an epoch on the last `rate_limit_event` before its result, which drive reads first, and as a sentence such as `resets Oct 25 at 8pm (America/Los_Angeles)`, read in the zone it names when the event carries none.
+A weekly limit resets days out, and `--until` takes a time of day, so it never reaches past the next 24 hours: only `--for` (`--for 48h`) can cover such a reset.
+The park quotes the instant either way, so the operator can relaunch at it.
 
 ## Reviewing a finished item
 
-Start with `drover review <id>`. It assembles six things a reviewer would otherwise gather from as many commands: the numbered contract, each dependency with how well it is audited, the open follow-ups, each dependency's saved report, the run's self-report, and the verify command. The failure mode of gathering them by hand is skipping one silently.
+Start with `drover review <id>`.
+It assembles six things a reviewer would otherwise gather from as many commands: the numbered contract, each dependency with how well it is audited, the open follow-ups, each dependency's saved report, the run's self-report, and the verify command.
+The failure mode of gathering them by hand is skipping one silently.
 
 Then do the part no tool can:
 
-1. **Check the code, not the summary.** Read the run's requirement-to-test map before anything else: one line per numbered requirement naming the test that fails without the change. A requirement with no test is unmet. The self-report is unverified and it lies by omission. A requirement met by something unreachable, unowned or unconsumed is not met.
-2. **Treat a flagged dependency as unproven.** `review` marks any dependency nobody independently confirmed.
-3. **Re-run the verify command yourself, unless a merge gate runs it.** `review` prints the command. Under `[drive] merge_gate` the merge already waits on a green head, so the brief asks for a build and the touched packages' tests instead.
-4. **Send each finding to its owner.** Four questions, in this order: does a numbered requirement reach it, would it break something in use, can you correct it here without the verify command noticing, and does any existing item own it. `git diff <trunk>...HEAD` names what this run answers for, which decides who caused a defect rather than whether the pull request should stay open. Read them all before filing one; picking wrong costs in both directions, a backlog of rows nothing closes or a pull request that collects round after round.
-   - `BRANCH-REQUIREMENT`: **a numbered requirement of the item you are reviewing, unmet, goes back to the branch.** Do not file it. Review runs before the merge, so the branch is still open and no pull request exists yet: report which requirement failed and how you know, and the operator re-runs `drover run <id>`, which returns to that branch. Then this review runs again. Severity does not enter here: the numbered list is the contract. An unmet requirement filed as an issue merges the item incomplete and leaves a report whose only owner just shipped.
-   - `BRANCH-REGRESSION`: **a defect this branch's diff introduced that would break something in use goes back the same way**, its heading marked `BRANCH-REGRESSION`, whether or not a requirement names it and on any pass. Anything smaller is `FIX-IN-REVIEW` or `REPORT-ONLY` and costs no round; `request-changes` refuses a finding that names neither a requirement nor this token. An unmerged item has no bugs: a defect in its own work is unfinished implementation, and it is never filed. A typo, a stale comment or a dead link is still `FIX-IN-REVIEW` by that row's own definition. Put one in the report and it evaporates; file it against another item and it falls on somebody who did not cause it.
-   - `SPLIT-OUT`: **a finding whose fix changes a contract this item's numbered requirements never named goes to its own item, and this one blocks on it.** Another subsystem, every caller of an interface, a storage or wire format. `drover split <id> --into <kind> "<title>" -f <proposal>` writes the scaffold and the dependency; the operator accepts it, because a session cannot accept its own contract. This item stays blocked and unmerged until that one merges. The finding and the blame stay where they were sent and only the implementation moves. Read the bar before reaching for this: a wider diff is not a different contract, a fix touching three files because the requirement reaches three files is still this item, and work you could describe as one more requirement on this list belongs on this list.
-   - `FIX-IN-REVIEW`: **a defect no numbered requirement traces to, that no verify command can observe, and that you can correct in the file you found it in, is fixed in this pass.** A typo, a stale comment, two sentences of prose that contradict each other, a dead link. Trace every requirement first, so the files a requirement reaches are written down before you edit anything. Confirm `git rev-parse --abbrev-ref HEAD` is the item's branch, because `review` never switches branches and a session standing elsewhere would commit onto the trunk. Re-run the checks that cover the fix after making it, commit it alone with a `review:` subject, push, and name every one in the audit note. Touch anything a requirement traces to and you wrote the code you are auditing: the honest row names you in `--code-by`, which cannot record `verified`.
-   - `BRANCH-BLOCKER`: **a pre-existing defect blocking a numbered requirement is fixed here.** It is somebody else's code and this run's problem anyway, because the contract cannot be discharged without touching it. The pull request says why the diff is wider than the requirements name.
-   - `FOLLOW-UP-TO-OWNER`: **a pre-existing defect outside the diff that blocks no requirement here, in code a merged item owns, is filed against _that_ item** and named in your report. An unmerged item owns nothing filed: its gaps go back to its own branch. Attribute to the item that owns the gap, not the one that noticed it. Ownership travels one hop, so confirm the run you expect to close it lists that owner as a direct dependency: `drover run <id> --dry-run | grep -A20 'Open follow-ups'`. An unowned row reaches no run.
-   - `NEW-ITEM`: **a gap in merged code that no existing item owns and that blocks no requirement here is written as a new item**, never a defect this branch's diff introduced. `drover new <kind> "<title>" -f <file>` scaffolds it, without `--found-in` because the gap predates this branch, and you name the new id in your report and the audit note. The `-f` file is the finding, written for whoever writes the requirements: the file and line, the command that reproduces it with its actual output, and what is wrong. The audit note names the new id and does not carry the description. The scaffold is inert until a human writes the requirements and runs `drover accept`, and `accept` is one of the commands a launched session cannot run, so nothing you file here can schedule itself. A project with no intake stop marker has no inert scaffold, `new` refuses, and the finding is `REPORT-ONLY`.
+1. **Check the code, not the summary.**
+   Read the run's requirement-to-test map before anything else: one line per numbered requirement naming the test that fails without the change.
+   A requirement with no test is unmet.
+   The self-report is unverified and it lies by omission.
+   A requirement met by something unreachable, unowned or unconsumed is not met.
+2. **Treat a flagged dependency as unproven.**
+   `review` marks any dependency nobody independently confirmed.
+3. **Re-run the verify command yourself, unless a merge gate runs it.**
+   `review` prints the command.
+   Under `[drive] merge_gate` the merge already waits on a green head, so the brief asks for a build and the touched packages' tests instead.
+4. **Send each finding to its owner.**
+   Four questions, in this order: does a numbered requirement reach it, would it break something in use, can you correct it here without the verify command noticing, and does any existing item own it.
+   `git diff <trunk>...HEAD` names what this run answers for, which decides who caused a defect rather than whether the pull request should stay open.
+   Read them all before filing one; picking wrong costs in both directions, a backlog of rows nothing closes or a pull request that collects round after round.
+   - `BRANCH-REQUIREMENT`: **a numbered requirement of the item you are reviewing, unmet, goes back to the branch.**
+     Do not file it.
+     Review runs before the merge, so the branch is still open and no pull request exists yet: report which requirement failed and how you know, and the operator re-runs `drover run <id>`, which returns to that branch.
+     Then this review runs again.
+     Severity does not enter here: the numbered list is the contract.
+     An unmet requirement filed as an issue merges the item incomplete and leaves a report whose only owner just shipped.
+   - `BRANCH-REGRESSION`: **a defect this branch's diff introduced that would break something in use goes back the same way**, its heading marked `BRANCH-REGRESSION`, whether or not a requirement names it and on any pass.
+     Anything smaller is `FIX-IN-REVIEW` or `REPORT-ONLY` and costs no round; `request-changes` refuses a finding that names neither a requirement nor this token.
+     An unmerged item has no bugs: a defect in its own work is unfinished implementation, and it is never filed.
+     A typo, a stale comment or a dead link is still `FIX-IN-REVIEW` by that row's own definition.
+     Put one in the report and it evaporates; file it against another item and it falls on somebody who did not cause it.
+   - `SPLIT-OUT`: **a finding whose fix changes a contract this item's numbered requirements never named goes to its own item, and this one blocks on it.**
+     Another subsystem, every caller of an interface, a storage or wire format.
+     `drover split <id> --into <kind> "<title>" -f <proposal>` writes the scaffold and the dependency; the operator accepts it, because a session cannot accept its own contract.
+     This item stays blocked and unmerged until that one merges.
+     The finding and the blame stay where they were sent and only the implementation moves.
+     Read the bar before reaching for this: a wider diff is not a different contract, a fix touching three files because the requirement reaches three files is still this item, and work you could describe as one more requirement on this list belongs on this list.
+   - `FIX-IN-REVIEW`: **a defect no numbered requirement traces to, that no verify command can observe, and that you can correct in the file you found it in, is fixed in this pass.**
+     A typo, a stale comment, two sentences of prose that contradict each other, a dead link.
+     Trace every requirement first, so the files a requirement reaches are written down before you edit anything.
+     Confirm `git rev-parse --abbrev-ref HEAD` is the item's branch, because `review` never switches branches and a session standing elsewhere would commit onto the trunk.
+     Re-run the checks that cover the fix after making it, commit it alone with a `review:` subject, push, and name every one in the audit note.
+     Touch anything a requirement traces to and you wrote the code you are auditing: the honest row names you in `--code-by`, which cannot record `verified`.
+   - `BRANCH-BLOCKER`: **a pre-existing defect blocking a numbered requirement is fixed here.**
+     It is somebody else's code and this run's problem anyway, because the contract cannot be discharged without touching it.
+     The pull request says why the diff is wider than the requirements name.
+   - `FOLLOW-UP-TO-OWNER`: **a pre-existing defect outside the diff that blocks no requirement here, in code a merged item owns, is filed against _that_ item** and named in your report.
+     An unmerged item owns nothing filed: its gaps go back to its own branch.
+     Attribute to the item that owns the gap, not the one that noticed it.
+     Ownership travels one hop, so confirm the run you expect to close it lists that owner as a direct dependency: `drover run <id> --dry-run | grep -A20 'Open follow-ups'`.
+     An unowned row reaches no run.
+   - `NEW-ITEM`: **a gap in merged code that no existing item owns and that blocks no requirement here is written as a new item**, never a defect this branch's diff introduced.
+     `drover new <kind> "<title>" -f <file>` scaffolds it, without `--found-in` because the gap predates this branch, and you name the new id in your report and the audit note.
+     The `-f` file is the finding, written for whoever writes the requirements: the file and line, the command that reproduces it with its actual output, and what is wrong.
+     The audit note names the new id and does not carry the description.
+     The scaffold is inert until a human writes the requirements and runs `drover accept`, and `accept` is one of the commands a launched session cannot run, so nothing you file here can schedule itself.
+     A project with no intake stop marker has no inert scaffold, `new` refuses, and the finding is `REPORT-ONLY`.
    - `REPORT-ONLY`: **anything you would not spend a run on, would not file, and cannot correct in this pass goes in the report and nowhere else.**
 5. **Write anything going back to the branch into the item body.**
 
@@ -194,15 +274,22 @@ Then do the part no tool can:
    drover request-changes <id> -f findings.md
    ```
 
-   That file is the whole prompt the next run reads: your report is not in it, and neither is the audit note. Give it the file and line, the command that reproduces the gap and its actual output, and the outline of the fix. Every finding carries a test that fails on the branch as it stands, as a fenced block or the path and name of a test already on the branch; the next run commits it unchanged and makes it pass. `request-changes` replaces the section rather than appending, so say which findings are now settled; it refuses to change the numbered requirements and demotes a top-level `N.` in your evidence to a bullet, because the body reads one as a requirement.
+   That file is the whole prompt the next run reads: your report is not in it, and neither is the audit note.
+   Give it the file and line, the command that reproduces the gap and its actual output, and the outline of the fix.
+   Every finding carries a test that fails on the branch as it stands, as a fenced block or the path and name of a test already on the branch; the next run commits it unchanged and makes it pass.
+   `request-changes` replaces the section rather than appending, so say which findings are now settled; it refuses to change the numbered requirements and demotes a top-level `N.` in your evidence to a bullet, because the body reads one as a requirement.
 
-   **A property the code must keep goes in with `drover invariant <id> -f <file>` instead.** That section appends and is never replaced, so it is where what this round taught you survives the next round's findings:
+   **A property the code must keep goes in with `drover invariant <id> -f <file>` instead.**
+   That section appends and is never replaced, so it is where what this round taught you survives the next round's findings:
 
    ```bash
    drover invariant <id> -f invariants.md
    ```
 
-   The difference decides whether the loop terminates. "The fix dropped the mode to 0644" is a finding and closes when the mode is restored. "Replacing an object preserves whatever mode an operator set" is an invariant, and the next four fixes are all judged against it. A loop that files only findings sends back five corrections that each pass the verify command and each break the property the one before it established.
+   The difference decides whether the loop terminates.
+   "The fix dropped the mode to 0644" is a finding and closes when the mode is restored.
+   "Replacing an object preserves whatever mode an operator set" is an invariant, and the next four fixes are all judged against it.
+   A loop that files only findings sends back five corrections that each pass the verify command and each break the property the one before it established.
 
    **A block whose findings this branch closed gets closed out**, and closing it does not send anything back:
 
@@ -210,39 +297,67 @@ Then do the part no tool can:
    drover close-changes <id>
    ```
 
-   That replaces the section with the statement that it is closed and writes no ledger row. Leave it standing instead and the next run reads settled gaps as current instructions, because the prompt outranks its own reading of the tree. Say "nothing came back" with `request-changes` instead and the row that writes falls inside this review, where `open-pr` reads it as work still outstanding and `[review] max_review_rounds` counts the round: you refuse the branch you just closed out. `-f <file>` carries what you traced, per finding.
+   That replaces the section with the statement that it is closed and writes no ledger row.
+   Leave it standing instead and the next run reads settled gaps as current instructions, because the prompt outranks its own reading of the tree.
+   Say "nothing came back" with `request-changes` instead and the row that writes falls inside this review, where `open-pr` reads it as work still outstanding and `[review] max_review_rounds` counts the round: you refuse the branch you just closed out.
+   `-f <file>` carries what you traced, per finding.
 
-   One disposition per pass. `close-changes` refuses while this pass's own `request-changes` row stands, and refuses a body with no such section at all: a review that found nothing on a first pass records the look with `audit` and writes no body.
+   One disposition per pass.
+   `close-changes` refuses while this pass's own `request-changes` row stands, and refuses a body with no such section at all: a review that found nothing on a first pass records the look with `audit` and writes no body.
 
-6. **Judge each issue the item says it resolves.** The prompt lists them from the item's `closes` key, read from the tracker as it was assembled. Record one disposition each:
+6. **Judge each issue the item says it resolves.**
+   The prompt lists them from the item's `closes` key, read from the tracker as it was assembled.
+   Record one disposition each:
 
    ```bash
    drover resolve <id> <number> <fixed|partial|unrelated> --code-by <who> "<what shipped, and what did not>"
    ```
 
-   This writes one ledger row and writes to no tracker; `finish` does the close or the comment after the operator merges. Do not touch the tracker yourself. An issue you leave unjudged is one `finish` names and skips, and `drover check` reports as `NO DISPOSITION` afterwards.
+   This writes one ledger row and writes to no tracker; `finish` does the close or the comment after the operator merges.
+   Do not touch the tracker yourself.
+   An issue you leave unjudged is one `finish` names and skips, and `drover check` reports as `NO DISPOSITION` afterwards.
 
-   An issue this run fixed that the `closes` key never named is not one of these: `resolve` exits 3 on it, because a number no item declared would otherwise end up as a comment on a stranger's report. Link it first, or in the same step:
+   An issue this run fixed that the `closes` key never named is not one of these: `resolve` exits 3 on it, because a number no item declared would otherwise end up as a comment on a stranger's report.
+   Link it first, or in the same step:
 
    ```bash
    drover link <id> <number>
    drover resolve <id> <number> fixed --code-by agent --link "<what shipped>"
    ```
 
-   Both check the number against the tracker and refuse one owned by another item. Reporting it instead is what leaves a fix and the report it answered as strangers: `drover check` names that state `UNLINKED` while the branch is open, and after the merge nothing does.
+   Both check the number against the tracker and refuse one owned by another item.
+   Reporting it instead is what leaves a fix and the report it answered as strangers: `drover check` names that state `UNLINKED` while the branch is open, and after the merge nothing does.
 
-7. **Record what you checked**, at the level your authorship allows. The note is the value: name what you re-checked and what you found, not that you looked. The most recent row wins rather than the strongest, so a level can be corrected in either direction. An over-claimed `verified` is worse than `UNAUDITED`, which is at least honest about what nobody knows.
-8. **Stop at the merge point.** A project whose `[supervise] merge_drive_pr` is `supervisor` lets a supervising session merge a pull request drive opened once its review passed and its checks are green; the generated instructions spell out the conditions. An agent session never merges.
+7. **Record what you checked**, at the level your authorship allows.
+   The note is the value: name what you re-checked and what you found, not that you looked.
+   The most recent row wins rather than the strongest, so a level can be corrected in either direction.
+   An over-claimed `verified` is worse than `UNAUDITED`, which is at least honest about what nobody knows.
+8. **Stop at the merge point.**
+   A project whose `[supervise] merge_drive_pr` is `supervisor` lets a supervising session merge a pull request drive opened once its review passed and its checks are green; the generated instructions spell out the conditions.
+   An agent session never merges.
 
 ## Writing an item
 
-`drover new <kind> "<title>"` scaffolds one. The scaffold is inert until a human accepts it, which is the point: requirements lifted mechanically out of a bug report are checkboxes nobody can falsify.
+`drover new <kind> "<title>"` scaffolds one.
+The scaffold is inert until a human accepts it, which is the point: requirements lifted mechanically out of a bug report are checkboxes nobody can falsify.
 
-- **The numbered list is the contract.** `report --save` turns every top-level line opening with a number, a period and a space into an audit checkbox. A requirement written as prose is on no checklist and nobody will ever confirm it. `drover check` reports `NO REQUIREMENTS` on an accepted item without one, until it merges.
-- **Cite files and lines.** An item saying "improve the handler" produces a run that improves something; one citing `path/to/file.go:120-145` produces a run that can be checked.
-- **Cite files, not directories.** `drive --jobs` never runs two items whose bodies cite an overlapping path side by side, and a directory overlaps every path below it (see [Running items side by side](automation.md#running-items-side-by-side)). The dispatcher cannot tell a directory named for context from one the item will edit, so a directory in backticks holds the item apart from every item citing any file under it. Name a directory that is context only in plain prose, without backticks and without a file name after it. `drover accept` prints a note for each directory a body cites, and the exit stays 0.
-- **Frontmatter is a closed schema.** An undeclared key is a parse error, because a typo'd `deps` would read as no dependencies and render a blocked item READY. `drover schema --frontmatter` prints this project's contract.
+- **The numbered list is the contract.**
+  `report --save` turns every top-level line opening with a number, a period and a space into an audit checkbox.
+  A requirement written as prose is on no checklist and nobody will ever confirm it.
+  `drover check` reports `NO REQUIREMENTS` on an accepted item without one, until it merges.
+- **Cite files and lines.**
+  An item saying "improve the handler" produces a run that improves something; one citing `path/to/file.go:120-145` produces a run that can be checked.
+- **Cite files, not directories.**
+  `drive --jobs` never runs two items whose bodies cite an overlapping path side by side, and a directory overlaps every path below it (see [Running items side by side](automation.md#running-items-side-by-side)).
+  The dispatcher cannot tell a directory named for context from one the item will edit, so a directory in backticks holds the item apart from every item citing any file under it.
+  Name a directory that is context only in plain prose, without backticks and without a file name after it.
+  `drover accept` prints a note for each directory a body cites, and the exit stays 0.
+- **Frontmatter is a closed schema.**
+  An undeclared key is a parse error, because a typo'd `deps` would read as no dependencies and render a blocked item READY.
+  `drover schema --frontmatter` prints this project's contract.
 
 ## Where doctrine belongs
 
-Per-item, in `[prompts] implement` and `[prompts] review`, which reach the item, its dependencies, the selected verify command and the open follow-ups. A rule that lives only in `AGENTS.md` applies to whoever remembered to read `AGENTS.md`. See [Prompt templates](prompts.md).
+Per-item, in `[prompts] implement` and `[prompts] review`, which reach the item, its dependencies, the selected verify command and the open follow-ups.
+A rule that lives only in `AGENTS.md` applies to whoever remembered to read `AGENTS.md`.
+See [Prompt templates](prompts.md).

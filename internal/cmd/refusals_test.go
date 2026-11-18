@@ -595,8 +595,36 @@ func docLines(t *testing.T, doc string) []string {
 	if err != nil {
 		t.Fatalf("%s: %v", doc, err)
 	}
-	return strings.Split(string(b), "\n")
+	return joinSentenceLines(strings.Split(string(b), "\n"))
 }
+
+// joinSentenceLines folds a prose paragraph written one sentence per line back
+// into one line, so a check reading a sentence or a paragraph matches however the
+// prose breaks. Table rows, headings and fenced blocks keep their own lines.
+func joinSentenceLines(lines []string) []string {
+	var out []string
+	fenced, prose := false, false
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "```") {
+			fenced = !fenced
+			prose = false
+			out = append(out, l)
+			continue
+		}
+		structural := fenced || t == "" || strings.HasPrefix(t, "|") || strings.HasPrefix(t, "#") ||
+			strings.HasPrefix(t, "- ") || strings.HasPrefix(t, "* ") || listItem.MatchString(t)
+		if prose && !structural {
+			out[len(out)-1] += " " + t
+			continue
+		}
+		out = append(out, l)
+		prose = !fenced && t != "" && !strings.HasPrefix(t, "|") && !strings.HasPrefix(t, "#")
+	}
+	return out
+}
+
+var listItem = regexp.MustCompile(`^\d+[.)] `)
 
 // cells splits a table row on its pipes, dropping the empty edges.
 func cells(line string) []string {
