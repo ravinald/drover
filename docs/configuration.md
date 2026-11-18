@@ -88,7 +88,7 @@ Two sections, two standards, and the difference is the whole point of splitting 
 
 A third section appears where either file declares a key nothing here reads, each named with the file it sits in, because whoever wrote that file chose the value and that file is where it comes out. A `schema_version` line opens the report where the project's file declares none or one this build does not read. Both are commented or stand alone; neither is part of the paste.
 
-A `[supervise]` section lists every supervised action neither file sets, one pasteable line each at its default policy (`resolve_conflict = "supervisor"`). `[supervise]` is an open table, so the key sections above would see it as one table and never name an action in it. The header names the actions that default to `supervisor`, says each of those parks as `needs_supervisor` unless a `drover supervise` session is running, and points at `drover init supervise`, which writes the table interactively. A project that sets every action, in either file, gets no such section. `drover check` reports the same gap as `SUPERVISOR UNSET` once the ledger records a drive and neither file has a `[supervise]` table.
+A `[supervise]` section lists every supervised action neither file sets, one pasteable line each at its default policy (`resolve_conflict = "supervisor"`). `[supervise]` is an open table, so the per-key sections of this page would see it as one table and never name an action in it. The header names the actions that default to `supervisor`, says each of those parks as `needs_supervisor` unless a `drover supervise` session is running, and points at `drover init supervise`, which writes the table interactively. A project that sets every action, in either file, gets no such section. `drover check` reports the same gap as `SUPERVISOR UNSET` once the ledger records a drive and neither file has a `[supervise]` table.
 
 The headers name where each line goes rather than being part of the paste. A stanza for a table the file does not have yet appends whole; one for a table it already declares does not, because TOML refuses the second header.
 
@@ -103,7 +103,7 @@ Without `--diff` the whole file is printed, from the same generator `drover init
 - A key the project declared prints at the project's value.
 - A key the per-user config supplies and the project does not is left out, so the print stays a file that inherits rather than one that pins today's global value.
 - A key neither file declares prints commented, at the value `drover init` would write. Uncommenting it is a decision; printing it live would make that decision for you, and a copy carrying it would resolve differently from its source the moment the per-user config or drover's own default moved.
-- A table the project opened and left empty prints as a bare header, with nothing under it. The header is itself a setting: `[severity]` with no keys is what makes `[severity] key` a thing drover checks, so a copy assembled from values alone reported the project clean where its source reported `UNDECLARED KEY`. The leaves stay out for the reason above, since filling them would pin today's default where the original inherits.
+- A table the project opened and left empty prints as a bare header, with nothing under it. The header is itself a setting: `[severity]` with no keys is what makes `[severity] key` a thing drover checks, so a copy assembled from values alone reported the project clean where its source reported `UNDECLARED KEY`. The leaves stay out for the same reason, since filling them would pin today's default where the original inherits.
 
 So a copy of the print, loaded beside the same per-user config, resolves to the settings its source does, and keeps doing so when that per-user config changes.
 
@@ -154,7 +154,7 @@ Two things the command will not do:
 
 It validates nothing, which is what lets it answer at all: an unknown `schema_version` and every key this build does not read are both errors at load, so a command reading the config the ordinary way would refuse the very files worth asking about. `drover check` does the validating.
 
-### The release stamp
+## Release stamp
 
 `schema_version` catches a breaking change. Nothing else in a config says which release it was last read against, and a key added since reads as its zero value, which looks the same as a decision. `drover_version` records that review, and every project command refuses (exit 3) while it is missing or names an older minor release than the binary:
 
@@ -182,7 +182,7 @@ A build carrying no version of its own cannot place a stamped block, and treats 
 | Key              | Required | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ---------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `schema_version` | yes      | Config format. This build understands `2` and refuses anything else, rather than misread a format it does not know. Each file answers for its own line: a per-user config declaring another version is refused whatever the project declares, since a current project would otherwise mask it and the reader would be told a key does not exist rather than that the format differs. A per-user config declaring none is not stale. The refusal names the file that declared the version, which is the per-user file when the project declares none and inherits one. |
-| `drover_version` | no       | The release this config was last reviewed against, as `vX.Y.Z`. Written by `drover init` and `drover config --stamp`. Missing, or older by a minor release than the binary, every project command refuses until it is stamped; see [The release stamp](#the-release-stamp).                                                                                                                                                                                                                                                                                           |
+| `drover_version` | no       | The release this config was last reviewed against, as `vX.Y.Z`. Written by `drover init` and `drover config --stamp`. Missing, or older by a minor release than the binary, every project command refuses until it is stamped; see [The release stamp](#release-stamp).                                                                                                                                                                                                                                                                                               |
 | `project`        | yes      | Names the log directory and the status banner.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 ## `[paths]`
@@ -225,7 +225,7 @@ Prefixes must be uppercase ASCII, since they become filename components. Longer 
 
 The **kind** is matched against tracker labels by `intake`, so it must be the label's exact text.
 
-### Allocation
+**Allocation.**
 
 Under `"local"` an id is the highest number in the backlog and on the shelf, plus one. `new`, `intake` and `split` read that number and create the body under one exclusive lock on the backlog directory, and create the file with `O_EXCL`, so two commands running at once on one host (two review sessions under `drive --jobs 2`, whose worktrees link back to this backlog) never write two bodies under one id. On a platform without `flock` the lock is a no-op and only the `O_EXCL` create remains, which catches a collision on the full filename and not one on the id alone.
 
@@ -263,9 +263,9 @@ Six of these keys drover reads for itself rather than passing through to a templ
 
 `severity` is read through a setting rather than a name, so it is the one you may omit deliberately: leave it out of both lists and no item can rank, which is a supported configuration rather than a broken one. See [`[severity]`](#severity). `[run] runner_key` works the same way one table over. Set either one to a key `[frontmatter]` does not declare and `drover check` reports `UNDECLARED KEY`; leave either at its default and nothing is said, because a project that ranks nothing or pins no runner has failed nothing.
 
-### `[frontmatter] shape`
+## `[frontmatter] shape`
 
-The lists above close which keys may appear. They say nothing about what a key may hold, so without the table below every value is a string and a typo is a value: `severity: Z` ranks as `Unranked` and renders identically to a body that declared no rank at all.
+The `[frontmatter]` lists close which keys may appear. They say nothing about what a key may hold, so without the following table every value is a string and a typo is a value: `severity: Z` ranks as `Unranked` and renders identically to a body that declared no rank at all.
 
 ```toml
 [frontmatter.shape]
@@ -325,7 +325,7 @@ drover hands the selected verify command to the implementing session through the
 | `index`         | The href of the cross-project index `builtin:html` links its header back to. Absent by default.        |
 | `render`        | `{ template, path }` pairs `status` renders to files. Empty by default.                                |
 
-`column` names one of your own [`[frontmatter]`](#frontmatter) keys, and drover never interprets what it holds: the value prints verbatim beside the id and is read by nothing, since `deps` alone decides what runs and no flag filters on this column. Which axis it carries is the project's to pick (a wave, a phase, the subsystem an item touches), so `wave` above is an example, not a key drover knows.
+`column` names one of your own [`[frontmatter]`](#frontmatter) keys, and drover never interprets what it holds: the value prints verbatim beside the id and is read by nothing, since `deps` alone decides what runs and no flag filters on this column. Which axis it carries is the project's to pick (a wave, a phase, the subsystem an item touches), so `wave` in the `column_prefix` row is an example, not a key drover knows.
 
 An item with no value for `column` falls back to its namespace kind, which is what lets one setting serve both a planned backlog and an intake queue.
 
@@ -401,9 +401,9 @@ ranks = { Critical = "red", High = "orange" }
 
 Color reaches the status table only when `[status] column` names this same key. `drover show` colors the line regardless. An absent, empty or unrecognized value is never an error anywhere: it renders as written, sorts last under `--by-sev`, and is selected by `--sev none`.
 
-### `--sev`
+## `--sev`
 
-Three commands spell a flag `--sev` and mean the vocabulary above. They differ in arity, and the difference follows from what each one does, so the three are described here once rather than in each command's own section.
+Three commands spell a flag `--sev` and mean the vocabulary in [`[severity]`](#severity). They differ in arity, and the difference follows from what each one does, so the three are described here once rather than in each command's own section.
 
 | Flag                          | Arity                       | Accepts                                                    | Omitted                           |
 | ----------------------------- | --------------------------- | ---------------------------------------------------------- | --------------------------------- |
@@ -463,14 +463,14 @@ The `[severity]` colors are applied through the same mechanism and draw on the s
 
 ## `[run]`
 
-| Key              | Default   | Meaning                                                                                                                                                                                                                                                           |
-| ---------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `branch`         | see below | Template over the prompt data, minus `.FollowUps`.                                                                                                                                                                                                                |
-| `default_runner` | `claude`  | Used when neither the flag nor the item names one.                                                                                                                                                                                                                |
-| `runner_key`     | `runner`  | Frontmatter key that pins a runner per item. Set it to a key `[frontmatter]` does not declare and no item can carry it: `run` falls back to `default_runner` and says nothing about the pin it ignored, which is what `drover check` reports as `UNDECLARED KEY`. |
-| `review_runner`  | unset     | Runner `drover review` hands the prompt to. Unset means review prints it.                                                                                                                                                                                         |
-| `draft_runner`   | unset     | Runner `drover draft` hands the drafting prompt to. Unset means draft prints it.                                                                                                                                                                                  |
-| `trunk`          | detected  | The branch work merges into, and the point `run` and `drive` create an item's branch from. Empty asks `origin/HEAD`, then falls back to `main`. Also read by the review prompt's diff range, `reconcile` and the merge gate.                                      |
+| Key              | Default  | Meaning                                                                                                                                                                                                                                                           |
+| ---------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `branch`         | see text | Template over the prompt data, minus `.FollowUps`.                                                                                                                                                                                                                |
+| `default_runner` | `claude` | Used when neither the flag nor the item names one.                                                                                                                                                                                                                |
+| `runner_key`     | `runner` | Frontmatter key that pins a runner per item. Set it to a key `[frontmatter]` does not declare and no item can carry it: `run` falls back to `default_runner` and says nothing about the pin it ignored, which is what `drover check` reports as `UNDECLARED KEY`. |
+| `review_runner`  | unset    | Runner `drover review` hands the prompt to. Unset means review prints it.                                                                                                                                                                                         |
+| `draft_runner`   | unset    | Runner `drover draft` hands the drafting prompt to. Unset means draft prints it.                                                                                                                                                                                  |
+| `trunk`          | detected | The branch work merges into, and the point `run` and `drive` create an item's branch from. Empty asks `origin/HEAD`, then falls back to `main`. Also read by the review prompt's diff range, `reconcile` and the merge gate.                                      |
 
 ```toml
 branch = "{{ if .Planned }}{{ .Slug }}{{ else }}{{ lower .Stem }}-{{ .Slug }}{{ end }}"
@@ -478,7 +478,7 @@ branch = "{{ if .Planned }}{{ .Slug }}{{ else }}{{ lower .Stem }}-{{ .Slug }}{{ 
 
 The default prefixes a namespaced item with its padded id because an issue-derived slug collides far more readily than a hand-picked one, and ending up on somebody else's branch is silent.
 
-`.Kind` is what the item is, and a project wanting its branches grouped by that puts it in front of the id rather than in place of it, for the reason above:
+`.Kind` is what the item is, and a project wanting its branches grouped by that puts it in front of the id rather than in place of it, for the same reason:
 
 ```toml
 branch = "{{ with .Kind }}{{ . }}/{{ end }}{{ if .Planned }}{{ .Slug }}{{ else }}{{ lower .Stem }}-{{ .Slug }}{{ end }}"
@@ -486,7 +486,7 @@ branch = "{{ with .Kind }}{{ . }}/{{ end }}{{ if .Planned }}{{ .Slug }}{{ else }
 
 which renders `bug/b07-login-redirect-loops` and `feature/f03-export-to-csv`. The kind is the item's own frontmatter `kind` where it declares one, else the kind its id's namespace maps to in [`[ids]`](#ids), and empty when neither answers. `with` rather than `if` is what makes that last case render the plainer name: a branch template that errors takes the item out of the branch lookup without a word, while `run` and `finish` on the same id refuse with the template error, so `drover status` reports that no item owns a branch the item is standing on.
 
-`.FollowUps` is the one field this template cannot reach, because a name derived from the tracker would change the moment `gh` went unreachable. See [the prompt data](prompts.md#the-branch-template-sees-less).
+`.FollowUps` is the one field this template cannot reach, because a name derived from the tracker would change the moment `gh` went unreachable. See [the prompt data](prompts.md#branch-template-data).
 
 `review_runner` and `draft_runner` are read from the project alone. No frontmatter key selects a reviewer or a drafter, and `runner_key` is never consulted for either: it names who implements an item. Reviewing under that name would have the implementer certify its own work, which `drover audit` refuses to record as `verified`, and an item with no requirements yet has nothing to say about who should draft them. `--runner` covers the exception on both commands. See [the three stages](lifecycle.md#three-stages-three-runners).
 
@@ -538,13 +538,13 @@ The terminal event is also where token counts come from. `claude` and `t3` repor
 
 A runner writing none of these formats is launched, runs, and reads as silence. `drover report` finds no report, `drover status` leaves the item `READY` rather than `implemented`, and `drover drive` parks it as `unreadable`, naming the runner and the log path. That is a distinct park from `died`, which is a session that stopped: an empty log, or a stream drover reads that ended before its terminal event. No flag makes a fourth format readable: a runner drover does not know needs a schema in `internal/runlog/runlog.go`, which is one entry naming the key its events carry, every kind they use, which of those kinds end a session, and how to read one.
 
-`drover check` reports a `[runners]` entry whose binary is on PATH and whose argv that binary cannot use, as `BAD RUNNER`, and carries the argv that works. It judges only the binaries drover ships knowledge of, so a wrapper is silent there; a wrapper's output is judged where the output exists, which is the park above.
+`drover check` reports a `[runners]` entry whose binary is on PATH and whose argv that binary cannot use, as `BAD RUNNER`, and carries the argv that works. It judges only the binaries drover ships knowledge of, so a wrapper is silent there; a wrapper's output is judged where the output exists, which is the `unreadable` park.
 
-drover tees the stream to the log and renders assistant text and tool markers as a live feed, reading all four formats above. Discovery is by filename, so any runner writing into the log directory is discoverable whether or not drover knows what produced it.
+drover tees the stream to the log and renders assistant text and tool markers as a live feed, reading all four formats in [What drover reads back](#what-drover-reads-back). Discovery is by filename, so any runner writing into the log directory is discoverable whether or not drover knows what produced it.
 
 ### T3 Code threads
 
-A runner can be drover's own bridge to a [T3 Code](https://github.com/pingdotgg/t3code) server: `drover t3 run` launches each stage as a T3 Code thread over the server's MCP endpoint, follows it to the end, and prints the `t3` format above. The argv shape is the one every runner has, so `run`, `review --runner` and every `drive` stage use it unchanged:
+A runner can be drover's own bridge to a [T3 Code](https://github.com/pingdotgg/t3code) server: `drover t3 run` launches each stage as a T3 Code thread over the server's MCP endpoint, follows it to the end, and prints the `t3` format in [What drover reads back](#what-drover-reads-back). The argv shape is the one every runner has, so `run`, `review --runner` and every `drive` stage use it unchanged:
 
 ```toml
 [runners]
@@ -560,7 +560,7 @@ review_runner  = "t3-codex"
 
 `drover check` judges a bridge argv as `BAD RUNNER`: it must be `drover t3 run`, and `-p` must be last. Where the host holds `[t3] provider_logs`, it also reports `BRIDGE SIGNED OUT`, `BRIDGE UNREACHABLE` and `BRIDGE VERSION`; see [`[t3]`](#t3). [Operating](operating.md#t3-code-threads) covers setting the host up.
 
-Omitting the section entirely gives you the built-in `claude` runner above.
+Omitting the section entirely gives you the built-in `claude` runner.
 
 ## `[prompts]`
 
@@ -604,7 +604,7 @@ The escape is `drover request-changes --over-limit`, and it refuses inside a ses
 
 `drover drive` walks the ready queue unattended: implement, review, remediate until the review stops sending work back, then ask the merge gate and merge what it passes. The first two keys here are about the last step, and `merge_gate` is not optional: running `drive` is the operator saying the code may merge, so a project that declares no merge gate is refused before the first launch. `--no-merge` is the run that needs none.
 
-`merge_gate` runs in the item's worktree with the branch and the trunk appended as the last two arguments, as [`[git] merge_check`](#git) does, and with `DROVER_ROOT` set to the project root and `DROVER_GATE_MERGED` set as described below the exit codes. A relative argv resolves inside the worktree, so a merge gate script your project keeps outside version control has to be reachable through `worktree_links`. Whether a head may merge is the merge gate's answer alone: a required-check list and how long a run may take are each a property of the project, and the whole answer a loop needs is an exit status. A merge gate that has to wait waits in its own process, where the project already knows what it is waiting for. What drive does first is wait for the head's checks to finish and classify any red one, rerunning a failure the forge's infrastructure caused and parking one the trunk fails too, so the merge gate is not the one to send them back; see [`[forge]`](#forge).
+`merge_gate` runs in the item's worktree with the branch and the trunk appended as the last two arguments, as [`[git] merge_check`](#git) does, and with `DROVER_ROOT` set to the project root and `DROVER_GATE_MERGED` set as described after the exit codes in this section. A relative argv resolves inside the worktree, so a merge gate script your project keeps outside version control has to be reachable through `worktree_links`. Whether a head may merge is the merge gate's answer alone: a required-check list and how long a run may take are each a property of the project, and the whole answer a loop needs is an exit status. A merge gate that has to wait waits in its own process, where the project already knows what it is waiting for. What drive does first is wait for the head's checks to finish and classify any red one, rerunning a failure the forge's infrastructure caused and parking one the trunk fails too, so the merge gate is not the one to send them back; see [`[forge]`](#forge).
 
 **It runs before any pull request exists, so it cannot ask about one.** drover opens a pull request only for a branch this merge gate has passed, which means a merge gate reading `gh pr checks` would need the document its own answer decides. What it can read is the branch head: drover pushes what it drives, so the commit is on the remote and its check runs are readable. A project whose CI fires on `pull_request` alone has nothing there to read and needs its merge gate to answer some other way. The reference merge gate, [`scripts/merge-gate.sh`](https://github.com/ravinald/drover/blob/main/scripts/merge-gate.sh), waits up to `MERGE_GATE_WAIT` for an answer, which has to exceed the project's longest run: CI starts on the push and usually finishes during the review, but a `FIX-IN-REVIEW` commit moves the head and starts it again.
 
@@ -709,7 +709,7 @@ Some files carry a number whose order matters after the merge: database migratio
 
 The same check runs on the branch head before `drive` opens a pull request, against origin's trunk, or the local trunk where there is no origin. That is the case the branch update never sees: a branch cut after the trunk already held `000113`, whose branch update merged nothing, still has its `000112` compared. A clash among the trunk's own files, with no file of the branch's in it, is no branch's to fix, so `drive` stops as it does for a trunk that is red on its own. `drover check` reports two tracked files sharing a number as `SEQUENCE CLASH`, which is how a clash a hand merge put on the trunk gets found. `drover drive --dry-run` prints each sequence with the trunk's highest number and the one the next item would have to use.
 
-drover checks and never renumbers. A migration's content can refer to its own version: a down file named to match, a row written into a version table, a test naming the migration it exercises. Renaming the file leaves each of those pointing at the old number, and only the session that wrote the file can say where they are. Reserving numbers up front, as [`[ids] allocator`](#allocation) does for ids, is the wrong tool too: it makes numbers unique, and it cannot make them increase in merge order. The trunk stage is the one place that knows the right number, and `drive` already runs it one item at a time.
+drover checks and never renumbers. A migration's content can refer to its own version: a down file named to match, a row written into a version table, a test naming the migration it exercises. Renaming the file leaves each of those pointing at the old number, and only the session that wrote the file can say where they are. Reserving numbers up front, as [`[ids] allocator`](#ids) does for ids, is the wrong tool too: it makes numbers unique, and it cannot make them increase in merge order. The trunk stage is the one place that knows the right number, and `drive` already runs it one item at a time.
 
 ## `[agents]`
 
@@ -766,7 +766,7 @@ merge_check = ["sh", "scripts/merged-on-gitlab.sh"]
 
 `finish` refuses a branch it cannot see merged. `gh` is the only thing that can see a squash or rebase merge on GitHub, and on GitLab, Gitea or a self-hosted remote it sees nothing at all, which leaves git ancestry, which reports every squash-merged branch unmerged forever. `merge_check` is that forge's authority.
 
-drover runs it from the project root with **the branch and the trunk appended as the last two arguments**, so the example above is invoked as `sh scripts/merged-on-gitlab.sh e10-merge-detection main`. The first element is resolved on `PATH`, the way a `[runners]` binary is; a script living in the repo gets there as an argument to its interpreter, which is why the example names `sh`. Exit 0 means merged. Any non-zero exit means **not merged**, not an error: a check that needs to report a failure writes it to stderr and exits non-zero anyway, and `finish` then falls through to ancestry the same as it would for a no from `gh`. A `merge_check` whose binary is not on `PATH` is a misconfiguration and fails loudly, because answering "not merged" to a typo produces a refusal nobody can explain.
+drover runs it from the project root with **the branch and the trunk appended as the last two arguments**, so the preceding example is invoked as `sh scripts/merged-on-gitlab.sh e10-merge-detection main`. The first element is resolved on `PATH`, the way a `[runners]` binary is; a script living in the repo gets there as an argument to its interpreter, which is why the example names `sh`. Exit 0 means merged. Any non-zero exit means **not merged**, not an error: a check that needs to report a failure writes it to stderr and exits non-zero anyway, and `finish` then falls through to ancestry the same as it would for a no from `gh`. A `merge_check` whose binary is not on `PATH` is a misconfiguration and fails loudly, because answering "not merged" to a typo produces a refusal nobody can explain.
 
 Ancestry is consulted after any no and never on its own. Its yes stands: that is what catches a branch merged by direct push to the trunk, which leaves no pull request and no merge request behind. See [the merge check](lifecycle.md#what-cannot-see-merged-means).
 
@@ -781,7 +781,7 @@ Set it back to `true` after `git init`, or write `[git] enabled = true` in a pro
 merge_method = "merge"
 ```
 
-The flag `drover drive` hands `gh pr merge`: `--merge`, `--squash` or `--rebase`. drive passes it with `--match-head-commit` on every merge it makes on [`[drive] merge_gate`](#drive)'s word (see [The merge](lifecycle.md#the-merge)). Unset is `squash`. Any other value is refused at load.
+The flag `drover drive` hands `gh pr merge`: `--merge`, `--squash` or `--rebase`. drive passes it with `--match-head-commit` on every merge it makes on [`[drive] merge_gate`](#drive)'s word (see [The merge](lifecycle.md#merge)). Unset is `squash`. Any other value is refused at load.
 
 It is a fact about the repository rather than about whoever drives it, so only the project's `.drover.toml` may set it. A value in the per-user config is refused at load, naming the project file it belongs in: one line there would squash every project on the machine, including one whose history depends on merge commits.
 
@@ -879,7 +879,7 @@ Each classification is a ledger row (`{"id","head","check","class","evidence","r
 
 With `weekly_budget` as well, the report gains `budget` and `budget_used`, and both built-in templates show the fraction in their footer, in the warning color from 0.8 and the critical color from 1.0. The budget is your estimate of the limit in drover's weighting (`input + output + cache_create + 0.1 * cache_read`), not a figure the service publishes: the counts are tokens as the API reported them, not the subscription's quota accounting, so calibrate it against a week whose limit you hit. A good first value is the weighted total `status --json` shows for the week the limit last refused a run. `weekly_budget` without `reset` is refused at load, because a budget measured over a rolling window would never line up with the week the limit counts.
 
-The limit is per account, so `budget_used` sums every project in the [project registry](#the-project-registry), not only the one `status` runs in, counting each ledger once. A registered project whose config or ledger would not read is named in `budget_unread` and left out of the fraction, rather than counted as zero; a registered root that is gone is not a project and is skipped, as `status --all-projects` skips it. Set the table in the per-user file, where one budget serves every project, unless a project wants its own thresholds.
+The limit is per account, so `budget_used` sums every project in the [project registry](#project-registry), not only the one `status` runs in, counting each ledger once. A registered project whose config or ledger would not read is named in `budget_unread` and left out of the fraction, rather than counted as zero; a registered root that is gone is not a project and is skipped, as `status --all-projects` skips it. Set the table in the per-user file, where one budget serves every project, unless a project wants its own thresholds.
 
 `session_max_hours` and `context_warn` decide which sessions `status` names under [`long_sessions`](automation.md#usage), and both templates list them under "Needs you", under Long sessions, with the reason each one qualified and a state: `ended` for a session whose every usage row is `headless`, and otherwise `last seen` with how long ago its latest row places it. Neither says "open", because the ledger has no row for a session still running: a headless row is written when it exits and an interactive row when its day ends. Live work is under Running drive. A session open for days at a context near a million tokens is the opposite of the short, well-defined unit of work drover hands a run.
 
@@ -933,7 +933,7 @@ With this file, a drive whose newest reading says the week has 18% left sends on
 
 ### Running one project on credit
 
-The per-user file above pauses every project at 5% of the week left. One project is meant to keep running on purchased credit, so it switches the pause off for itself and sets the mode:
+The per-user file in this example pauses every project at 5% of the week left. One project is meant to keep running on purchased credit, so it switches the pause off for itself and sets the mode:
 
 ```toml
 # .drover.toml of the project that runs on credit
@@ -967,7 +967,7 @@ drover reads the follow-up list from one place, and everything above that read (
 
 An absent `backend` is `github`, which is what nearly every project wants and the only backend needing no declaration. Two settings that disagree are refused at load: `backend = "file"` with [`[github] repo`](#github) set is one author saying two things, and picking one silently is how a project reads a follow-up list it thought it had configured somewhere else.
 
-### The file register
+**The file register.**
 
 One JSON object per line, appended, never rewritten. It matches the ledger's discipline for the same reasons: it lives in a git-tracked documentation tree whose purpose is auditable history, closing a row must not delete the line that opened it, and an agent with no binary and no network can record one by appending a line.
 
@@ -986,7 +986,7 @@ One JSON object per line, appended, never rewritten. It matches the ledger's dis
 | `state`    | `open` or `closed`. Anything else fails the read.                                                                                                                                                                                                    |
 | `date`     | When the event was recorded.                                                                                                                                                                                                                         |
 
-The read folds newest-wins per `number` and drops anything whose latest state is `closed`, so the third line above closes the first and #1 leaves the index while its history stays. A missing or empty file is an empty follow-up list rather than an unreadable one ("nobody filed one" and "nobody could ask" rank the same item very differently), and a line that does not parse fails the whole read, naming the file and the line number. Answering with the rows that happened to parse would report a shorter list as a whole one.
+The read folds newest-wins per `number` and drops anything whose latest state is `closed`, so the third line of the example closes the first and #1 leaves the index while its history stays. A missing or empty file is an empty follow-up list rather than an unreadable one ("nobody filed one" and "nobody could ask" rank the same item very differently), and a line that does not parse fails the whole read, naming the file and the line number. Answering with the rows that happened to parse would report a shorter list as a whole one.
 
 Nothing here paginates, so the `page_limit` notice cannot fire against a file: a file holding `page_limit` rows was read whole.
 
@@ -1008,7 +1008,7 @@ Under `github` and `none` it refuses with exit 3, naming the backend that is con
 | `fold_max`         | `12`    | The most numbered requirements `drover fold` may leave on one item. Load refuses a negative one, and `0` reads as the default.     |
 | `max_requirements` | `8`     | The most numbered requirements `drover accept` takes on one item without `--yes`. An absent key means `8`, and `0` means no limit. |
 
-Under `github`, `accept` opens an issue per accepted item carrying its title and numbered requirements, writes the number into the item's `issue:` key, and keeps a `drover:<state>` label, an open or closed state and blocked-by links in step with the backlog. The file stays the contract and drover never reads the issue back. [The mirror](concepts.md#the-mirror) covers what each command writes and how `drover check` reports a write that did not go through.
+Under `github`, `accept` opens an issue per accepted item carrying its title and numbered requirements, writes the number into the item's `issue:` key, and keeps a `drover:<state>` label, an open or closed state and blocked-by links in step with the backlog. The file stays the contract and drover never reads the issue back. [The mirror](concepts.md#mirror) covers what each command writes and how `drover check` reports a write that did not go through.
 
 Publishing makes item text readable to everyone who can read the repository, so the default is `none` and a project whose items must stay private keeps it there. Two settings are refused at load. The per-user config may not set the key, since one value there would publish every project on the machine. And `github` needs `issue` declared in [`[frontmatter]`](#frontmatter): an item that cannot record its issue number would be published again by every `accept`.
 
@@ -1018,10 +1018,10 @@ Publishing makes item text readable to everyone who can read the repository, so 
 
 A drive runs unattended, and what it parks still needs somebody: a conflict after a sibling merged, a scaffold a review filed, a review session that died. `[supervise]` says, per action, who that is.
 
-| Key          | Default             | Meaning                                                                                                                                                                                                                  |
-| ------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `template`   | unset               | The template [`drover supervise`](automation.md#the-supervisor) renders its prompt from, resolved like [`[prompts]`](#prompts) `implement`. Unset uses the built-in one; `drover supervise --dry-run` prints the result. |
-| _action key_ | the catalog default | The policy for one action below.                                                                                                                                                                                         |
+| Key          | Default             | Meaning                                                                                                                                                                                                              |
+| ------------ | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `template`   | unset               | The template [`drover supervise`](automation.md#supervisor) renders its prompt from, resolved like [`[prompts]`](#prompts) `implement`. Unset uses the built-in one; `drover supervise --dry-run` prints the result. |
+| _action key_ | the catalog default | The policy for one action in the catalog.                                                                                                                                                                            |
 
 `[supervise]` takes neither a `notify` argv nor an `ntfy` table: [`[notify]`](#notify) destinations do that work, and a config carrying either is refused at load with an error naming the key and `scripts/migrate-notify.sh`, which rewrites it in place.
 
@@ -1082,7 +1082,7 @@ A drive judges every finding its sessions file when it notices it, after each it
 
 A follow-up at `blocked`, `orphaned` or `unowned` goes through `triage_finding`, naming the row, the item that filed it and its coverage: `needs_operator` at `operator`, `needs_supervisor` at `supervisor`, and nothing at `off`. A scaffold stops under `write_scaffold_requirements` alone. Nothing stores coverage: `status --json` (`findings_needing_triage`) and `drover follow-ups --coverage` judge every row again from the ledger, the follow-up list and the backlog on each read.
 
-The shipped defaults keep every merge with a person. `merge_drive_pr` at `supervisor` lets a `drover supervise` session merge a pull request drive opened for an item, with `[git] merge_method`, and then run `drover finish <id>`, when the ledger names the pull request on a row drive wrote, the item's latest review pass is `passed` and came from a session drover launched, every check on the head is green, and the forge reports it mergeable. `finish` under a supervisor checks the two ledger conditions and refuses with exit `3`, naming the one that failed; the forge conditions are the session's to read before it merges. `finish --force` is refused to a supervisor at any policy. `merge_protected_paths` at `supervisor` extends that to a pull request touching a `[drive] protected_paths` file, once the session has read the diff of each denied file and named each in its report. At any other policy, `finish` under a supervisor also refuses with exit `3` when the ledger holds a `protected_paths` park for the item newer than its latest drive pull request row, so the operator merges and finishes it. [`drover agents --write <file> --permissive-merge`](agents.md#the-merge-policy) sets both to `supervisor` and renders the agent instructions under that policy, and `--restrictive-merge` sets both back to `operator`.
+The shipped defaults keep every merge with a person. `merge_drive_pr` at `supervisor` lets a `drover supervise` session merge a pull request drive opened for an item, with `[git] merge_method`, and then run `drover finish <id>`, when the ledger names the pull request on a row drive wrote, the item's latest review pass is `passed` and came from a session drover launched, every check on the head is green, and the forge reports it mergeable. `finish` under a supervisor checks the two ledger conditions and refuses with exit `3`, naming the one that failed; the forge conditions are the session's to read before it merges. `finish --force` is refused to a supervisor at any policy. `merge_protected_paths` at `supervisor` extends that to a pull request touching a `[drive] protected_paths` file, once the session has read the diff of each denied file and named each in its report. At any other policy, `finish` under a supervisor also refuses with exit `3` when the ledger holds a `protected_paths` park for the item newer than its latest drive pull request row, so the operator merges and finishes it. [`drover agents --write <file> --permissive-merge`](agents.md#merge-policy) sets both to `supervisor` and renders the agent instructions under that policy, and `--restrictive-merge` sets both back to `operator`.
 
 Both keys work in the per-user config like every other `[supervise]` key: one `merge_drive_pr = "supervisor"` line there reaches every project that sets none, and a project restricts it again with its own `merge_drive_pr = "operator"`.
 
@@ -1118,14 +1118,14 @@ A drive runs unattended, so what it does has to reach somebody who is not watchi
 | -------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `coalesce`     | duration | `"0s"`  | Events of one kind for one destination that arrive within this window go out as one message listing their ids, such as `filed: B91 B91 B92`. `0s` is off. `needs_operator`, `needs_supervisor` and `exit` are never coalesced or delayed.                                                                                                                                |
 | `quiet_hours`  | string   | unset   | `"HH:MM-HH:MM"` in local time, which may cross midnight. Messages routed below `high` are held until the window ends, then sent as one message per destination. `needs_operator`, `needs_supervisor` and `exit` are never held. A drive that exits inside the window folds what it held into its exit message, sent at `min` unless `exit` is routed at `high` or above. |
-| `destinations` | table    | none    | One `[notify.destinations.<name>]` table per destination, keyed below. A drive with none sends nothing.                                                                                                                                                                                                                                                                  |
+| `destinations` | table    | none    | One `[notify.destinations.<name>]` table per destination, with the following keys. A drive with none sends nothing.                                                                                                                                                                                                                                                      |
 
 Each destination takes:
 
 | Key          | Type     | Applies to | Default  | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ------------ | -------- | ---------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `type`       | string   | both       | required | `ntfy` POSTs each routed event to an [ntfy](https://ntfy.sh) topic; `command` runs an argv with each routed event on stdin.                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `events`     | table    | both       | required | An inline table mapping each event the destination takes to an ntfy priority: `min`, `low`, `default`, `high` or `urgent`. An event the table does not name is not sent there. Any event a drive emits may be named, and `exit_undone`, described below.                                                                                                                                                                                                                                                                                        |
+| `events`     | table    | both       | required | An inline table mapping each event the destination takes to an ntfy priority: `min`, `low`, `default`, `high` or `urgent`. An event the table does not name is not sent there. Any event a drive emits may be named, and `exit_undone`, described in [Sending](#sending).                                                                                                                                                                                                                                                                       |
 | `url`        | string   | `ntfy`     | required | The topic URL, such as `https://ntfy.sh/<topic>`. It must be `https://` unless the host is a loopback address, must name a topic in its path, and may not carry credentials.                                                                                                                                                                                                                                                                                                                                                                    |
 | `token_file` | string   | `ntfy`     | unset    | A file holding the access token, sent as `Authorization: Bearer <token>`. It must start with `/` or `~/`, and is read at every send, so a rotated token takes effect on the next message. Unset sends no token.                                                                                                                                                                                                                                                                                                                                 |
 | `argv`       | array    | `command`  | required | The command, run from the project root with 30 seconds to finish. It reads the event as one JSON line on stdin with `priority`, `message` (the body an ntfy destination would send) and, for a coalesced or held message, `folded` added, `reminder` on a reminder, and on a `needs_operator` or `needs_supervisor` for an item this drive already opened a T3 Code thread for, that thread's `thread` and `url`. A `thread_opened` line it prints is recorded in the drive's event file. See [`drive --events`](automation.md#drive---events). |
@@ -1150,7 +1150,7 @@ An ntfy message carries `Title: drover: <project> <id>` (`drover: <project>` for
 | `needs_operator`, `needs_supervisor` | `<action>: <run>`, the action and the command to run. A `usage_admission` `needs_operator` carries `holds`, each usage hold the reading crosses with its `window`, `reason` and `resets_at`, the one taken first; with two or more, `run` says what each resume releases. |
 | `usage_warning`                      | The window, the percent of it left and its reset in local time.                                                                                                                                                                                                           |
 | `thread_opened`                      | `T3 Code thread opened: <url>`.                                                                                                                                                                                                                                           |
-| `exit`                               | The summary below.                                                                                                                                                                                                                                                        |
+| `exit`                               | The summary in [Sending](#sending).                                                                                                                                                                                                                                       |
 | any other                            | A line naming what happened: the stage, the check, the finding, the position.                                                                                                                                                                                             |
 
 Where the event concerns a pull request drover recorded, the message sets ntfy's `Click` header to that pull request's URL, so tapping it opens the pull request. The repository address comes from one `gh repo view` per drive, the first time a message needs it. Where it names no pull request (or the address would not resolve) and a command destination running [`drover t3 thread --from-event`](operating.md#operator-sessions) opened a T3 Code thread for the item during this drive, `Click` is that thread's `t3-thread://` link instead, so a reminder, the item's `parked` or its `merged` opens the thread that answers it. The first `needs_operator` itself goes out before the thread exists and carries no thread link.
@@ -1317,7 +1317,7 @@ default   = "ruff check . && ruff format --check . && pytest"
 migration = "python manage.py makemigrations --check --dry-run && ruff check . && pytest"
 ```
 
-## The project registry
+## Project registry
 
 The first drover command run in a project appends one line to `projects.jsonl`, beside the per-user config, and later commands append nothing:
 

@@ -56,7 +56,7 @@ Write each requirement as a result someone can observe: under this condition, th
 | Improve performance.      | On the named fixture, one lookup makes at most one backend request; a counting fake asserts the bound.               |
 | Add tests.                | A regression test reproduces the reported input and fails against the old implementation.                            |
 
-Use distinct top-level `1. `, `2. `, `3. ` lines. drover reads them anywhere in the body, not only under a "Requirements" heading, so write background steps as bullets or they become requirements too. Keep the whole claim on the first line: the audit checklist carries that line, and the lines under it stay in the body only.
+Use distinct top-level `1.`, `2.`, `3.` lines. drover reads them anywhere in the body, not only under a "Requirements" heading, so write background steps as bullets or they become requirements too. Keep the whole claim on the first line: the audit checklist carries that line, and the lines under it stay in the body only.
 
 Mandatory behavior goes in the numbered list. A compatibility promise under "Notes" has no number, so no review traces it and no audit confirms it. When an operator's words prompted the item, the requirement carries their wording and placement, not only the title.
 
@@ -90,7 +90,7 @@ Changes belong in `internal/auth/login.go` and its tests.
 
 The marker covers the paragraph it opens, up to the next blank line, and the paths in it do not hold the item apart from anything. A numbered requirement line inside that paragraph still counts. The marker only changes scheduling; the session still reads the file and the review still checks the citation.
 
-### A body that runs well
+### Bodies that run well
 
 The following example is a fictional resolver bug. Swap in your own paths, symbols, reproduction and commands, and leave the project's stop marker where it is until the operator accepts the item.
 
@@ -251,7 +251,7 @@ The escape is `drover request-changes --over-limit`, and it is yours rather than
 
 **Still worth running:** this is worth much more than nothing. The failure it does not catch is the one the model is systematically wrong about. The failures it does catch (dropped requirements, an untested branch, a verify command nobody re-ran) are most of them.
 
-### A different runner for the review
+### Different runner for review
 
 `drover run B1 --runner claude` then `drover review B1 --runner codex`.
 
@@ -268,7 +268,7 @@ The escape is `drover request-changes --over-limit`, and it is yours rather than
 
 **What it still misses:** two agents are not two people. Both may carry the same misconception about a library from the same training data, so independence here is a gradient rather than a switch. `verified` records that someone traced every requirement to shipped code. It does not record that they were right.
 
-### The strongest form
+### Strongest form
 
 A person records the last rung, and `--reviewer` names them so the record does not read as an anonymous session:
 
@@ -288,7 +288,7 @@ review_runner  = "codex"
 
 `review_runner` has no default. Unset, `drover review` prints the prompt and launches nothing, which is what a pipe gets and what a human reviewer wants. Naming a second binary there is what keeps the level honest without anyone having to remember a flag. `draft_runner` is the same key for the drafting stage, and only `default_runner` is also readable from an item's own frontmatter.
 
-### The whole split, end to end
+### Full split, end to end
 
 ```bash
 drover intake 12                             # scaffold, marker planted
@@ -358,6 +358,6 @@ If you find yourself reaching for it every night, the thing to fix is the merge 
 ## Where to go next
 
 - [Lifecycle](lifecycle.md): every step, and what each one refuses to do for you.
-- [Concepts](concepts.md#the-audit-ladder): what each level means and why the ladder measures the reviewer rather than the item.
+- [Concepts](concepts.md#audit-ladder): what each level means and why the ladder measures the reviewer rather than the item.
 - [Configuration](configuration.md#runners): declaring a runner, and every key named on this page.
 - [Prompt templates](prompts.md): the data a template reaches, if the built-in prompts say the wrong thing for your project.

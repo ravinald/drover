@@ -20,7 +20,7 @@ Instructions copied from boilerplate with `<angle brackets>` for a human to fill
 
 Generated instructions cannot describe a command surface the installed binary does not have.
 
-## The one thing it cannot infer
+## What it cannot infer
 
 The bar a reviewer holds the code to. Put it in config:
 
@@ -31,7 +31,7 @@ principles = "migrations append-only, permissions per object via the host's own 
 
 It lives there rather than as a hand-edit in the generated file so regenerating cannot lose it. Left unset, the output carries a placeholder that says so, which is the honest rendering: a review step that quietly loses its standard reads as a review with no standard.
 
-## The project addendum
+## Project addendum
 
 Anything longer than the principles goes in a file of the project's own, named in config:
 
@@ -86,13 +86,13 @@ The command names come off the same actor table each command's `Actor:` line rea
 
 Five findings. `BAD ADDENDUM` fires whenever a configured addendum cannot be read; the other four stay silent for a project that generated no block at all, since `init` suggests writing one rather than requiring it.
 
-| Finding        | Means                                                                                                                                                                                                                                                                                                     |
-| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `STALE BLOCK`  | The block differs from what this binary, this config and the addendum would produce. The comparison is on the rendered text, so a config change or an addendum edit goes stale exactly the way a binary upgrade does.                                                                                     |
-| `STALE POLICY` | The block's policy line records a `[supervise]` policy the config does not hold. It names each action and whether it widened or narrowed, and stands in for `STALE BLOCK` on that file, since the fix is the same command plus `--yes` when an action widened. See [The merge policy](#the-merge-policy). |
-| `BAD ADDENDUM` | The file `[agents] addendum` names is missing, unreadable or a directory, or holds a marker line or an unclosed code fence that would end the block early. No block is compared until it renders.                                                                                                         |
-| `NO POINTER`   | The block lives outside `AGENTS.md`, and `AGENTS.md` never names the file holding it. A project with no `AGENTS.md` at all is not this: it told its agents some other way.                                                                                                                                |
-| `BAD MARKERS`  | The markers are unclosed or inverted, so `--write` refuses to regenerate in place rather than guess which half to keep.                                                                                                                                                                                   |
+| Finding        | Means                                                                                                                                                                                                                                                                                                 |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STALE BLOCK`  | The block differs from what this binary, this config and the addendum would produce. The comparison is on the rendered text, so a config change or an addendum edit goes stale exactly the way a binary upgrade does.                                                                                 |
+| `STALE POLICY` | The block's policy line records a `[supervise]` policy the config does not hold. It names each action and whether it widened or narrowed, and stands in for `STALE BLOCK` on that file, since the fix is the same command plus `--yes` when an action widened. See [The merge policy](#merge-policy). |
+| `BAD ADDENDUM` | The file `[agents] addendum` names is missing, unreadable or a directory, or holds a marker line or an unclosed code fence that would end the block early. No block is compared until it renders.                                                                                                     |
+| `NO POINTER`   | The block lives outside `AGENTS.md`, and `AGENTS.md` never names the file holding it. A project with no `AGENTS.md` at all is not this: it told its agents some other way.                                                                                                                            |
+| `BAD MARKERS`  | The markers are unclosed or inverted, so `--write` refuses to regenerate in place rather than guess which half to keep.                                                                                                                                                                               |
 
 `check` finds the block by its markers rather than by filename, since `--write` takes any path and a check keyed on `AGENTS.md` would report nothing about the projects that took the suggestion. It scans markdown at the project root only, and a marker counts only as a whole line outside any fence: the same rule the stop marker is matched by, and for the same reason. Prose quotes a marker inline or in a code block, and a changelog that does so is not a block host.
 
@@ -106,7 +106,7 @@ An opening marker with no closing one after it is refused rather than repaired, 
 
 `--bare` omits the markers and the generated-by note, for piping into something that will wrap it itself.
 
-## The merge policy
+## Merge policy
 
 Merging a pull request is the operator's by default, and the generated review loop ends on "Stop at the merge point". An operator running drover for their own projects can hand one kind of merge to a supervising session:
 
@@ -120,7 +120,7 @@ That sets [`[supervise]`](configuration.md#supervise) `merge_drive_pr` and `merg
 
 drover does not rewrite `.drover.toml`, so either flag appends a `[supervise]` table when the file has none. When it has one, the flag prints the two lines to set in it and exits `3` without writing the block, so the config and the block cannot disagree. With neither flag, `--write` renders whatever the config says, so a later regeneration keeps the choice.
 
-### The policy line
+**The policy line.**
 
 Each block carries one line recording the policy of every `[supervise]` action it was rendered under, sorted by key:
 

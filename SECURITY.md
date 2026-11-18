@@ -1,5 +1,7 @@
 # Security
 
+How to report a vulnerability in drover, which releases receive fixes, and what is out of scope.
+
 ## Reporting
 
 Report privately through GitHub: **[open a draft advisory](https://github.com/ravinald/drover/security/advisories/new)**. It goes to the maintainer and nobody else, and it stays unreadable until there is a fix to publish alongside it.

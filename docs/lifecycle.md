@@ -20,7 +20,7 @@ write ─> check ─> run ─> review ─> audit ─> open-pr ─> merge ─> fi
 
 **Review sits before the merge, and the arrow back is the point of putting it there.** A requirement the review finds unmet is this item unfinished, not a new defect: the branch is still open and no pull request exists yet, so `drover run <id>` returns to the same branch and the review runs again. Only a defect owned by a _different_ item becomes a tracker row. Filing an unmet requirement instead of returning it merges the item incomplete and leaves an issue whose only owner just shipped, which is how a backlog fills with rows nothing closes.
 
-### The whole loop, and who may run each step
+**The whole loop, and who may run each step.**
 
 | Step                                               | Command                                                 | A launched session may run it                                                                  |
 | -------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -140,7 +140,7 @@ Both name a state rather than a transition, so both are idempotent: `accept` on 
 
 The marker is matched as a whole line outside any fenced block. An item quoting it in a config sample, which is routine in a backlog of items about intake, is somebody's accepted contract and not a scaffold.
 
-#### What accept checks
+### What accept checks
 
 `accept` is the last look before a body becomes the contract, so it reads the body for what a lint can see:
 
@@ -335,7 +335,7 @@ Every one of the three prints the same remedy, naming the ids: `drop B2 from the
 
 The scaffold records the direction in a line under the stop marker (`Split from 1 with --after: 1 waits on this item.`), and `drover show` names it on both items. `show` takes the direction from the two `deps:` lines rather than that record, so a pair flipped by hand, or written by a split older than this rule, reads `--before` and notes what the split recorded.
 
-### A block the branch closed is closed, not sent back
+### Closed blocks
 
 The pass that finds every finding in the block closed says so with `drover close-changes <id>`, which replaces the section with the statement that it is closed and writes no `changes` row, only the digest of the body it wrote. `-f <file>` carries what the reviewer traced, per finding, below that statement.
 
@@ -345,7 +345,7 @@ Both of the other two answers are wrong. Leaving the block standing sends the ne
 
 While the block is open, the prompt `drover review` prints ends on drover's own instruction naming both exits, whatever the project's `review.tmpl` says. A review that runs `close-changes` and then audits reads as `passed` in a drive and merges; one that audits and does neither reads as `findings_open` and parks (see [`drive --json`](automation.md#drive---json)).
 
-### A property outlives the round that found it
+### Invariants
 
 A finding names the case that broke. What the case taught you is a property, and the body has a third section for it: `drover invariant <id> -f <file>` appends under `## Invariants` and replaces nothing, ever.
 
@@ -470,7 +470,7 @@ drover signoff F5 6 "ssh dev-guest-1 'systemctl is-active webapp' printed active
 
 `signoff` appends one row to the ledger and is sealed: it refuses inside any session drover launched, supervisor included, for the reason `accept` does. Once every `[operator]` requirement carries a row, merge the pull request and `drover finish` it, or let the next drive reach the merge and go through.
 
-### A check after finish
+### Checks after finish
 
 Between the review and the merge, an item whose project declares a [live check](configuration.md#live) runs it against its branch head: exit `0` goes on to the merge gate, `4` parks the item `live_unavailable` for the operator, and anything else sends the output back to the branch as a finding. `drover live <id>` runs it by hand, and `open-pr` refuses a head no run of it passed on.
 
@@ -483,21 +483,21 @@ Between the review and the merge, an item whose project declares a [live check](
 
 Neither undoes the merge or changes finish's exit: the trunk already carries the commit, and a failed check is work somebody owes on it rather than a reason to pretend the item was never finished. Under `[register] backend = "none"`, or `--no-tracker` with the tracker backend, nothing is filed and the line says so. Outside a drive, `needs_operator` reaches each [`[notify]`](configuration.md#notify) destination routing it, and nothing else. See [`[finish]`](configuration.md#finish).
 
-### The merge
+### Merge
 
 drive merges synchronously and never asks the forge for `--auto`. A merge the forge completes after drive has moved on is one nothing records: its dependents are skipped, and a push that lands before the forge acts merges a head no review read. Branch protection still applies, because the forge refuses a synchronous merge its rules do not allow, and that refusal parks the item `merge_failed`.
 
-The merge gate already read the head once, after its checks finished and before the pull request opened. When the branch still points at that commit and origin's trunk has not moved past it, drive merges at once: `gh pr merge --<method> --match-head-commit <sha>`, where `<method>` is [`[git] merge_method`](configuration.md#git-merge_method). When either moved (an earlier item in the same drive merged, or something pushed to the branch), that answer is stale, and drive takes the path below. So does a head no workflow had run on when the merge gate read it: CI that triggers on `pull_request` starts only once the pull request exists, and branch protection refuses the merge until its required checks finish, so the answer was about checks that did not exist yet.
+The merge gate already read the head once, after its checks finished and before the pull request opened. When the branch still points at that commit and origin's trunk has not moved past it, drive merges at once: `gh pr merge --<method> --match-head-commit <sha>`, where `<method>` is [`[git] merge_method`](configuration.md#git-merge_method). When either moved (an earlier item in the same drive merged, or something pushed to the branch), that answer is stale, and drive takes the following path. So does a head no workflow had run on when the merge gate read it: CI that triggers on `pull_request` starts only once the pull request exists, and branch protection refuses the merge until its required checks finish, so the answer was about checks that did not exist yet.
 
 After `gh pr merge` returns, drive asks the forge whether the pull request merged rather than trusting the exit status, because `gh pr merge` also exits 0 when a required merge queue accepted the request and merged nothing yet. A pull request the forge reports merged is finished in the same drive, as `finish` does: the ledger row, the saved report and the tracker closes. The item reports `merged_by_drover`, and the items that depend on it run behind it in the same drive. One the forge does not report merged, or whose state drive cannot read, reads `ready_to_merge` with the reason, and the next drive's reconciliation records it once it lands.
 
-On the path below, drive:
+On that path, drive:
 
-1. Brings the branch level with the trunk, as below.
+1. Brings the branch level with the trunk, as [Keeping each branch level with the trunk](#keeping-each-branch-level-with-the-trunk) describes.
 2. Waits for every check run on the head commit to finish, reading them through `gh api`, and classifies each red one as [`[forge]`](configuration.md#forge) describes: an infrastructure failure is rerun and waited on again, and one the trunk fails too parks `trunk_red`. Nothing else is decided there: a head with no checks after `[forge] checks_wait`, checks still running after an hour or at `--for`/`--until`, and a forge it cannot read all go to the merge gate as they stand.
 3. Runs the merge gate against that head. The pass before the pull request opened read a different head or a different trunk, so it is not reused.
 4. On exit 0, runs `gh pr merge --<method> --match-head-commit <sha>`, so a push arriving after the merge gate read the head refuses rather than merges.
-5. Asks the forge whether the pull request merged, and finishes it as above.
+5. Asks the forge whether the pull request merged, and finishes it as `drover finish` does.
 
 A merge gate that refuses there parks the item `gate_refused` with the pull request open and the merge gate's last lines in the reason, and sends nothing back, so `fix_gate_refusal` does not apply. The exception is a head whose checks first ran on the pull request: a refusal blaming the diff there is the one the gate would have given before the pull request opened had CI run then, so it goes back to the item as described in [Sending a refused branch back](#sending-a-refused-branch-back); an exit 2 also stops the drive, as it does before the pull request opens. Any other refusal from the forge (a conflict, a branch policy, a review requirement) parks `merge_failed` as before, with the detail `checks_pending` where GitHub said the base branch policy prohibits the merge, because the forge saying no to this pull request is not the merge gate's to overrule. A finish the operator's checkout cannot take cleanly is left to the next drive's reconciliation, and the reason says so.
 
@@ -519,14 +519,14 @@ Every merge moves the trunk under each item after it in the same drive, and a me
 
 The merge makes a tree no session tested, and a forge whose CI runs only on pull requests and on the trunk registers no checks for a push to an item branch, so waiting on checks proves nothing about it. Two items that each add a file the other makes invalid merge without a textual conflict and fail together. So after the merge and before the push, drive runs the item's own verify command on the merged tree, in the item's worktree: the verify command `SelectGate` picks for the item's frontmatter, run as `sh -c` with `DROVER_ROOT` set, as the item's run was told to run it. stderr names the verify command and the two trunk commits before it runs, and its exit status and duration after.
 
-- **It passes:** the push and the checks follow, as above.
+- **It passes:** the push and the checks follow, as in [Merge](#merge).
 - **It fails:** drive runs the same verify command once on origin's trunk alone, in a temporary worktree detached at the merged commit, given `[drive] worktree_links` and `[drive] worktree_setup` like an item's and removed afterwards. The answer is kept for the rest of the drive by trunk commit and verify command, so a second item updated to the same commit does not pay for it again.
   - **The trunk passes alone:** the failure comes from the branch meeting what the trunk gained. drive pushes the merge commit, so the next run starts from the tree that failed, and sends the item back with the trunk's range (up to 20 commit subjects) and the verify command's output. The item goes back to its implementing session as [Sending a refused branch back](#sending-a-refused-branch-back) describes, or parks `gate_refused` with no pull request opened. Its `changes` row names `verify` as its source, so it is not a round under `[review] max_review_rounds`, which counts a review's send-backs alone; an item already at the cap still has the send-back refused, and the park reason says so.
   - **The trunk fails alone:** no item can fix it. The item parks `trunk_red`, nothing is sent back, the merge is undone and not pushed, and the drive stops.
   - **The trunk's worktree will not set up:** the item parks `gate_unrunnable`, and the merge is undone and not pushed.
 - **No verify command applies:** drive says so on stderr and carries on as if it had passed. A project with no `[verify]` has chosen no verify command.
 
-An interrupt during either run parks the item `interrupted`, undoes the merge and keeps the item's worktree as the verify command left it. A branch already level with the trunk runs none of this: its own sessions ran its verify command. When the merge goes through the path above, the branch update before it does the same, with the pull request already open: a failure parks `gate_refused` with the pull request left open and unmerged, so `--match-head-commit` never sees a head the verify command failed. The row's `update_branch` field records what happened; see [`drover drive --json`](automation.md).
+An interrupt during either run parks the item `interrupted`, undoes the merge and keeps the item's worktree as the verify command left it. A branch already level with the trunk runs none of this: its own sessions ran its verify command. When the merge goes through the slower path in [Merge](#merge), the branch update before it does the same, with the pull request already open: a failure parks `gate_refused` with the pull request left open and unmerged, so `--match-head-commit` never sees a head the verify command failed. The row's `update_branch` field records what happened; see [`drover drive --json`](automation.md).
 
 origin's trunk is the reference rather than the local one, because the local trunk can carry the operator's unpushed commits and merging them into an item's branch would publish them under that item. A project with no `[drive] merge_gate` gets no branch update, since nothing would read the result. One with a merge gate gets it under `--no-merge` as well, the `[verify]` rerun included, since the merge gate still reads the branch and an item left on its branch should be green on the tree it was left with.
 
@@ -534,7 +534,7 @@ What the branch changed is measured from where it left the trunk, with origin's 
 
 ### Updating the branch at dispatch
 
-The branch update above runs after the review, so without another one a branch a sibling's merge left behind would be implemented and reviewed on the stale tree first, then conflict, then park for a person. So before each implement session, and before a `--review-only` review, drive merges origin's trunk into the item's branch in its worktree, while `[supervise] resolve_conflict` is anything but `off`. A lost review's rerun and a drive resumed at the review boundary skip it, because each is about the head it already had.
+The branch update in [Keeping each branch level with the trunk](#keeping-each-branch-level-with-the-trunk) runs after the review, so without another one a branch a sibling's merge left behind would be implemented and reviewed on the stale tree first, then conflict, then park for a person. So before each implement session, and before a `--review-only` review, drive merges origin's trunk into the item's branch in its worktree, while `[supervise] resolve_conflict` is anything but `off`. A lost review's rerun and a drive resumed at the review boundary skip it, because each is about the head it already had.
 
 - **A branch already holding the trunk** merges nothing.
 - **A worktree holding uncommitted work or an unconcluded merge** is never merged into, since the merge would refuse and the abort after it would discard the work. When the branch is level, the round goes on as it would without the branch update; otherwise, and always when `MERGE_HEAD` is present, drive merges nothing and the item parks `uncommitted_work`, its worktree as it stood.
@@ -547,16 +547,16 @@ Each dispatch branch update emits an `update_branch` stage event with a `result`
 
 ### Updating the other open pull requests
 
-A merge moves the trunk under every pull request drive left open as well: one held for the operator by `protected_paths`, `--no-merge` or a split-out dependency, one parked `gate_refused` at the merge, and one a required merge queue still holds. Those items are past their turn at the trunk stage, so nothing above reaches them again. After each merge drive makes or finishes, reconciliation's included, and while `[supervise] update_open_prs` is `auto`, drive walks every item whose ledger records a pull request on the branch the item renders today, that is not merged, and that the forge still reports open. One at a time, inside the trunk stage the merge already holds, it merges origin's trunk into each one's branch in the item's worktree, runs the item's verify command on the merged tree and pushes, never forced: the same steps as the item's own branch update, without the wait for checks. The item stays where it was.
+A merge moves the trunk under every pull request drive left open as well: one held for the operator by `protected_paths`, `--no-merge` or a split-out dependency, one parked `gate_refused` at the merge, and one a required merge queue still holds. Those items are past their turn at the trunk stage, so neither branch update reaches them again. After each merge drive makes or finishes, reconciliation's included, and while `[supervise] update_open_prs` is `auto`, drive walks every item whose ledger records a pull request on the branch the item renders today, that is not merged, and that the forge still reports open. One at a time, inside the trunk stage the merge already holds, it merges origin's trunk into each one's branch in the item's worktree, runs the item's verify command on the merged tree and pushes, never forced: the same steps as the item's own branch update, without the wait for checks. The item stays where it was.
 
 - **A branch already holding the trunk** is left alone.
 - **A local branch that disagrees with origin's**, a worktree holding uncommitted work, or a worktree another drive holds is left alone and named on stderr.
-- **A verify command that fails** while the trunk alone passes pushes the merge and sends the item back, as above. A trunk that fails alone pushes nothing and stops the drive.
+- **A verify command that fails** while the trunk alone passes pushes the merge and sends the item back, as [Keeping each branch level with the trunk](#keeping-each-branch-level-with-the-trunk) describes. A trunk that fails alone pushes nothing and stops the drive.
 - **A conflict**, found with `git merge-tree` before anything is checked out, merges and pushes nothing and goes to whoever `[supervise] resolve_conflict` names: at `supervisor` a `needs_supervisor` event, at `operator` a `needs_operator` event, each naming the branch, the files and the worktree left standing to resolve in; at `off` the item parks `trunk_conflict` and a clean worktree is removed. At `auto` nothing parks and no session starts, because the branch update runs inside the trunk stage: the clean worktree is removed and the item's next dispatch, in this drive under `--follow` or in the next one, takes the conflict to its session as [Updating the branch at dispatch](#updating-the-branch-at-dispatch) describes.
 
 `drover drive --update-branches` does the same over every open drive pull request and exits, for a merge made outside drive. It launches nothing and takes no ids. `update_open_prs` at `supervisor` or `operator` emits one hand-off per merge instead of updating the branch.
 
-`[drive] merge_gate` exiting `4` says the head is behind the trunk and nothing else was asked. While `[supervise] retry_moved_trunk` is `auto`, drive updates the branch as above and runs the merge gate once more, before the pull request opens and at the merge alike. A second `4` parks `gate_refused` with nothing sent back; at any other policy the first `4` parks it, after the hand-off. drive does not need the `4` to find this out: before it accepts an exit `1` it fetches the trunk and tests whether `origin/<trunk>` is an ancestor of the head, and a head that does not hold it is handled as a `4`, with the reason saying the merge gate exited 1 on a head behind the trunk. It also fetches just before each merge gate run and updates a branch the trunk moved past while its checks settled; that update counts as the one retry, so a trunk that moves on every attempt parks rather than loops, and a fetch that finds it moved once the retry is spent parks without running the merge gate. At any policy other than `auto` a behind answer still parks with the hand-off, whether or not that update already ran. Exit `4` is the faster path, not the only one.
+`[drive] merge_gate` exiting `4` says the head is behind the trunk and nothing else was asked. While `[supervise] retry_moved_trunk` is `auto`, drive updates the branch as [Keeping each branch level with the trunk](#keeping-each-branch-level-with-the-trunk) describes and runs the merge gate once more, before the pull request opens and at the merge alike. A second `4` parks `gate_refused` with nothing sent back; at any other policy the first `4` parks it, after the hand-off. drive does not need the `4` to find this out: before it accepts an exit `1` it fetches the trunk and tests whether `origin/<trunk>` is an ancestor of the head, and a head that does not hold it is handled as a `4`, with the reason saying the merge gate exited 1 on a head behind the trunk. It also fetches just before each merge gate run and updates a branch the trunk moved past while its checks settled; that update counts as the one retry, so a trunk that moves on every attempt parks rather than loops, and a fetch that finds it moved once the retry is spent parks without running the merge gate. At any policy other than `auto` a behind answer still parks with the hand-off, whether or not that update already ran. Exit `4` is the faster path, not the only one.
 
 ### Following what a finish unblocks
 
@@ -581,7 +581,7 @@ It finishes. A drive runs its items in worktrees of their own, so what it does i
 
 Three collisions remain, and `finish` handles each:
 
-- **A session in your checkout.** `run`, `draft` and `review` work in it, so `finish` reads [the checkout lease](automation.md#the-checkout-lease) first, refuses while one of them holds it, and exits 3 before it fetches or switches anything.
+- **A session in your checkout.** `run`, `draft` and `review` work in it, so `finish` reads [the checkout lease](automation.md#checkout-lease) first, refuses while one of them holds it, and exits 3 before it fetches or switches anything.
 - **A session in the item's worktree.** Finishing removes that tree, so `finish` refuses, exit 3, while a live session holds its lease, and names the pid and the path.
 - **Two fast-forwards of the trunk.** The drive's sync before it branches an item and finish's return to the trunk take one lock, and each waits up to 30 seconds for the other rather than refusing.
 
@@ -609,7 +609,7 @@ The forge answers first, then git ancestry:
 
 Ancestry runs last and never alone. A squash or rebase merge replaces the branch's commits, so `git branch --merged` reports a merged branch unmerged forever; its no proves nothing. Its yes catches a branch merged by direct push to the trunk, where there is no pull request to find. The refusal and the ✓ both name which authority answered, so a wrong answer points at the source that produced it rather than at `finish`.
 
-Its yes has one false positive, and the ledger is what closes it. A branch nobody committed to sits at or behind the trunk, which `git branch --merged` lists the same way it lists one whose work went in, so a run that ended without committing reads as merged. drover records the branch and its head before every push, only when that head is off the trunk (see [the ledger](concepts.md#the-ledger)), and an ancestry yes stands only for a branch one of those rows vouches for and that still holds the recorded commit. Without one the answer is no, and the source string says the branch never started. Work committed outside any drover launch reads that way too, which costs `--force` rather than a completion recorded for code that is not on the trunk.
+Its yes has one false positive, and the ledger is what closes it. A branch nobody committed to sits at or behind the trunk, which `git branch --merged` lists the same way it lists one whose work went in, so a run that ended without committing reads as merged. drover records the branch and its head before every push, only when that head is off the trunk (see [the ledger](concepts.md#ledger)), and an ancestry yes stands only for a branch one of those rows vouches for and that still holds the recorded commit. Without one the answer is no, and the source string says the branch never started. Work committed outside any drover launch reads that way too, which costs `--force` rather than a completion recorded for code that is not on the trunk.
 
 That leaves two refusals, and they are not the same. A branch name this project's `[run] branch` template does not render is benign, and `--force` is the answer. A branch git ancestry calls merged that no row shows carrying a commit is the other one, and `finish` says so in its own words: the work may not be on the trunk at all, so `--force` records it on your reading rather than drover's, and a run that died before its first commit wants re-running instead. Reconciliation names such an item and leaves it alone rather than attempting a finish that would refuse.
 
@@ -702,7 +702,7 @@ drover unshelve F3                # if it turns out to be worth doing after all
 
 Moving the file costs nothing, keeps the text, keeps the id spent, and invents no frontmatter key every command would then have to act on. The filename crosses unchanged, so the id and the slug survive the round trip and the branch the item would run on is the same one it always had.
 
-`shelve` refuses three states rather than letting `check` report them afterwards. A project with no `[paths] shelf` is told which key to set. An id that would end up holding a body in both directories is the `SHELF CLASH` state below, and `unshelve` refuses the mirror image of it. An id another item still declares on its `deps:` line is refused with those dependents named, because shelving it would trade one retired item for a `MISSING DEP` finding against each of them.
+`shelve` refuses three states rather than letting `check` report them afterwards. A project with no `[paths] shelf` is told which key to set. An id that would end up holding a body in both directories is the `SHELF CLASH` state, and `unshelve` refuses the mirror image of it. An id another item still declares on its `deps:` line is refused with those dependents named, because shelving it would trade one retired item for a `MISSING DEP` finding against each of them.
 
 What it does not refuse is a body that will not parse. Retiring one is the case the verb exists for, so `shelve` moves the file by path, the way `unshelve` already moves a body nothing has parsed. An id with no file behind it is still refused: there is nothing to move.
 

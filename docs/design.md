@@ -2,7 +2,7 @@
 
 drover runs items. It does not decide what they should be. An item is only as good as the design behind it: one written against an interface nobody settled sends the review loop after a moving target, and the loop then argues the design one finding at a time, two sessions per round. This page covers the work before the first `drover new`, which is getting from an idea to a design, from the design to a few items, and back to the design as those items ship.
 
-## The loop
+## Loop
 
 The work goes in this order, and the last step returns to the first:
 
@@ -81,7 +81,7 @@ The implementing prompt then opens with "Before writing code, read: docs/design/
 
 The design doc is context, not contract. A behavior the item must deliver goes in its numbered list, because the review traces those lines and nothing else: a rule stated only in the design doc is on no checklist.
 
-## A few items ahead
+## Planning ahead
 
 Write three to five items, ship them, and read what landed (the diffs, the saved reports, the audit notes) before writing the next batch. Update the design doc with what changed, then write the next items against the updated version.
 
@@ -97,7 +97,7 @@ Queue a batch in one drive, dependencies first. drover merges each item as it pa
 
 A decision that applies to every item belongs where every session reads it, not only in the design doc:
 
-- **`[agents] principles`:** one line stating the bar a reviewer holds the code to. The drafting prompt carries it as well. See [Agent instructions](agents.md#the-one-thing-it-cannot-infer).
+- **`[agents] principles`:** one line stating the bar a reviewer holds the code to. The drafting prompt carries it as well. See [Agent instructions](agents.md#what-it-cannot-infer).
 - **`[agents] addendum`:** a file appended to the generated agent instructions, for conventions longer than one line.
 - **`drover invariant`:** a property one item's later passes must keep, appended to its body.
 

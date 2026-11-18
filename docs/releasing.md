@@ -1,8 +1,8 @@
 # Releasing
 
-A release exists so a bug report can name the binary it came from. Everything below serves that: the tag names the source, the pipeline stamps it into each artifact, and `drover version` reads it back.
+A release exists so a bug report can name the binary it came from. Everything on this page serves that: the tag names the source, the pipeline stamps it into each artifact, and `drover version` reads it back.
 
-## The tag
+## Tag
 
 `vMAJOR.MINOR.PATCH`, annotated, on a commit already merged to `main`. The `v` prefix is not decoration: `on: push: tags: ["v*"]` in [`.github/workflows/release.yml`](../.github/workflows/release.yml) matches on it, and Go's module proxy serves no version without it.
 

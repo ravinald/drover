@@ -55,7 +55,7 @@ Each command, as typed after `drover`.
 | `split`                 | Scaffolds a new item for work the contract never named and adds it to this item's deps.                              |
 | `status`                | Prints every item, its state and its audit level.                                                                    |
 | `supervise`             | Launches a supervising session that handles what `[supervise]` allows.                                               |
-| `t3`                    | The bridge to a T3 Code server, through the subcommands below.                                                       |
+| `t3`                    | The bridge to a T3 Code server, through the subcommands in the following rows.                                       |
 | `t3 discover`           | Prints the T3 Code server's name, version and tool catalog.                                                          |
 | `t3 login`              | Signs drover in to the T3 Code server and writes `[t3] token_file`; `--check` only reports whether it can.           |
 | `t3 run`                | The runner bridge: launches one T3 Code thread with the prompt, follows it to the end and prints a log drover reads. |

@@ -2,9 +2,9 @@
 
 By participating here you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## The gate
+## Gate
 
-```
+```bash
 make build && make check
 ```
 
@@ -22,13 +22,13 @@ The floor for new code in `internal/cmd`: a new command, or a new path through a
 
 The suite reads nothing from the environment that started it. `internal/cmd`'s `TestMain` clears `DROVER_ACTOR` and `COLUMNS` for the whole package: the first is exported into every session `drover run` launches and seals the operator commands, the second sizes the status table, and a suite whose result depends on either is testing the shell. A test that wants a value sets it with `t.Setenv`, which layers over the clear and restores it.
 
-There is no coverage threshold and none is planned. A percentage buys tests written for the percentage, and the paths above are not the ones a number sends you to. Keep `go test ./...` under 30 seconds: a suite that shells to git for every case gets skipped, which costs more than it covers.
+There is no coverage threshold and none is planned. A percentage buys tests written for the percentage, and the paths this section names are not the ones a number sends you to. Keep `go test ./...` under 30 seconds: a suite that shells to git for every case gets skipped, which costs more than it covers.
 
 ## Commits
 
 Terse. A subject line, then at most one short paragraph saying why, for someone reading `git log` two years from now with no access to the pull request:
 
-```
+```text
 fix: race in refreshIndex
 ```
 
@@ -44,7 +44,7 @@ Fill in the template: the item id this closes, and confirmation that the gate pa
 
 drover drives its own backlog, so the tracking is the tool. A work item is a markdown file, not a ticket field.
 
-```
+```bash
 drover status              # the backlog, and what is READY versus blocked
 drover show <id>           # one item's body and its dependencies
 drover run <id> --dry-run  # what a run would carry, without starting one
@@ -54,7 +54,7 @@ Ids are bare in every command (`1`, `2b`, `B1`) and zero-padded in filenames onl
 
 `drover intake <issue-number>` turns a filed issue into a scaffolded item: it allocates the next free id, fills the frontmatter and quotes the issue as raw material. It deliberately stops there. The scaffold carries a stop marker and drover refuses to launch it, or even preview it, until a human deletes that marker and writes the requirements by hand.
 
-### The numbered list is the contract
+**The numbered list is the contract.**
 
 `drover report <id> --save` turns every top-level line in a body that opens with a number, a period and a space into an audit checkbox. Nothing else in the body becomes one. A requirement written as prose is on no checklist and nobody will ever confirm it, which is the failure this rule exists to prevent.
 

@@ -64,7 +64,7 @@ Separately, **a launched session cannot launch another.** `run`, `draft --runner
 
 `init`, `init --user`, `shelve` and `unshelve` are open too. They write, but they certify nothing, and running `init --verify "go test ./..."` with a verify command the operator supplied is doing what you were told.
 
-### What the check is not
+**What the check is not.**
 
 A boundary. The seal has two signals, the variable and the marker, and one opt-out: `DROVER_ACTOR=operator`, which a person exports to steer from inside a sealed tree and which reads as nobody launched, whatever the marker says. `env -u DROVER_ACTOR` defeats the variable and deleting the marker defeats the file, and drover does not pretend otherwise. It exists to stop a command being run because it appeared in a code block, not to stop one being run on purpose. If you find yourself reaching for the bypass, that is the signal to stop and report instead: the operator is cheaper to ask than a false ledger row is to unwind.
 
@@ -140,7 +140,7 @@ Each of these is deliberate. The message names the next step; do not work around
 
 A degraded read says so rather than reporting a zero. `drover unaudited` with `gh` down prints `follow-ups unavailable, ranked on blast radius alone`; treat that as unknown, never as none.
 
-## The loop, end to end
+## Loop, end to end
 
 Where an agent sits in each step. The operator runs the steps marked _operator_; everything else is yours.
 
@@ -164,9 +164,9 @@ Where an agent sits in each step. The operator runs the steps marked _operator_;
 
 You can carry an item from a tracker issue to an audited review without the operator touching anything but `intake`, `accept`, the two launches, the merge and `finish`. Those six are the boundary: each either certifies work somebody else has to trust, or reaches a tracker other people read.
 
-Between `review` and `merge` there is a loop, not a straight line. A requirement the review finds unmet goes back to the branch rather than to the tracker; see step 4 below.
+Between `review` and `merge` there is a loop, not a straight line. A requirement the review finds unmet goes back to the branch rather than to the tracker; see step 4 of [Reviewing a finished item](#reviewing-a-finished-item).
 
-### A runner out of budget
+**A runner out of budget.**
 
 A session refused for a spent account parks its item `runner_fault` and ends the drive, unless the runner named the instant it serves again and that instant falls inside the drive's `--for` or `--until`, in which case drive sleeps until then and relaunches. Claude Code states its reset twice: as an epoch on the last `rate_limit_event` before its result, which drive reads first, and as a sentence such as `resets Oct 25 at 8pm (America/Los_Angeles)`, read in the zone it names when the event carries none. A weekly limit resets days out, and `--until` takes a time of day, so it never reaches past the next 24 hours: only `--for` (`--for 48h`) can cover such a reset. The park quotes the instant either way, so the operator can relaunch at it.
 

@@ -12,7 +12,7 @@ drover run <id> --dry-run
 
 ## Data
 
-Three commands render a template and they share one data type, so the tables below split by which command fills a field rather than by where it is declared. A field a command does not fill is present and empty, never absent: a review template that reaches `.Posture` renders a blank, it does not fail.
+Three commands render a template and they share one data type, so the tables on this page split by which command fills a field rather than by where it is declared. A field a command does not fill is present and empty, never absent: a review template that reaches `.Posture` renders a blank, it does not fail.
 
 ### Every template
 
@@ -86,7 +86,7 @@ Functions: `lower` `upper` `join` `trim`.
 
 A template naming a field that does not exist fails rather than rendering a hole, and a template that renders nothing at all is an error. Both would otherwise reach an agent that acts on them.
 
-### The review prompt adds
+### Review prompt additions
 
 `[prompts] review` renders for `drover review`, whose job is to check what the run reported against the contract rather than re-derive either. These carry both halves of that comparison.
 
@@ -124,7 +124,7 @@ Modified files only. A feature creates files no body could have named, and a bod
 
 A `Resolution` is `.Number .Title .Body .State .Disposition .By .Note .Applied .Unavailable`, plus `.Undisposed`, which reports one nobody has judged yet. `.State` is the issue's own, so a reviewer sees one somebody closed by hand; `.Applied` names what `finish` already wrote to the tracker, so a reviewer does not re-litigate a public comment; `.Unavailable` says why an issue could not be read, which renders as a question drover could not ask rather than as an empty report. `.UndisposedCloses` filters `.Closes` to the reviewer's actual worklist, and it is the list to render: `finish` refuses to act on anything else.
 
-### The drafting prompt adds
+### Drafting prompt additions
 
 `[prompts] draft` renders for `drover draft`, which writes an item's numbered requirements rather than executing them.
 
@@ -142,7 +142,7 @@ A `Resolution` is `.Number .Title .Body .State .Disposition .By .Note .Applied .
 
 `.Siblings` exists so a drafting agent can send a requirement that belongs elsewhere to its owner. Without the list, the only item it can see is the one it was pointed at, and everything it finds becomes that item's problem.
 
-### The branch template sees less
+### Branch template data
 
 `[run] branch` renders from the same data **minus `.FollowUps` and `.RegisterUnreadable`**, and `.Branch` itself is naturally empty there. `.Kind` is available, and is the one field a branch template is likely to want that the frontmatter alone cannot always supply. Those are the only fields read from the tracker, and a branch name that changed the moment `gh` was unreachable would leave `run` creating one name and `finish` hunting for another. A branch template referencing any of them renders it as empty rather than failing.
 
