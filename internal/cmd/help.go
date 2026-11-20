@@ -390,8 +390,10 @@ func PointerStanza(path string) string {
 		"`drover`. **Read [%s](%s) before running any drover command.** %s refuse inside a "+
 		"session drover launched and exit 3, because each certifies work somebody else has to "+
 		"trust or reaches a tracker other people read. `run`, `draft --runner` and "+
-		"`review --runner` refuse there too: a launched session cannot launch another.",
-		path, path, joinAnd(names))
+		"`review --runner` refuse there too: a launched session cannot launch another. "+
+		"When the operator says an item finished, run the completion review in %s for that id "+
+		"without waiting for further instruction.",
+		path, path, joinAnd(names), path)
 	return fmt.Sprintf("## Tooling: drover\n\n%s\n\n`drover agents` prints the same text if %s is missing.\n",
 		wrapIndent(body, 79, 0), path)
 }
