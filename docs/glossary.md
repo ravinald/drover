@@ -285,59 +285,60 @@ What merging the trunk into a branch came to: the verify command's word in `upda
 
 The `kind` each `drover check` finding carries, in its table and in `check --json`.
 
-| Term                  | Meaning                                                                               |
-| --------------------- | ------------------------------------------------------------------------------------- |
-| `NO BACKLOG`          | `[paths] backlog` names a directory that does not exist.                              |
-| `NO SHELF`            | `[paths] shelf` is set and names a directory that does not exist.                     |
-| `SHELF IS BACKLOG`    | The shelf and the backlog are the same directory.                                     |
-| `NO VERIFY`           | `[verify] default` is empty.                                                          |
-| `UNDECLARED KEY`      | A config key names a frontmatter key `[frontmatter]` does not declare.                |
-| `NO REQUIREMENTS`     | An accepted item has no numbered requirements.                                        |
-| `PLACEHOLDER`         | An accepted item's body still carries a `<placeholder>`.                              |
-| `HOLD MARKER`         | An accepted item's body still carries an `[intake] hold_markers` line.                |
-| `LIVE REQUIREMENT`    | An accepted requirement names a live host or deploy without `[operator]`.             |
-| `BROAD CITATION`      | A scaffold cites a top-level directory, which serializes it under `--jobs`.           |
-| `HAND EDITED`         | An accepted item's body changed outside drover since its last digest.                 |
-| `BRANCH OVERLAP`      | An unmerged item cites a file another unmerged branch changes, with no deps edge.     |
-| `UNREADABLE`          | A backlog file did not parse.                                                         |
-| `BAD VALUE`           | An item's value fails what `[frontmatter]` declares the key may hold.                 |
-| `BAD RUNNER`          | A `[runners]` entry's argv is one its binary cannot use.                              |
-| `BRIDGE SIGNED OUT`   | The `t3` bridge has no grant the T3 Code server accepts.                              |
-| `BRIDGE UNREACHABLE`  | The T3 Code server did not answer `initialize`.                                       |
-| `BRIDGE VERSION`      | The T3 Code server is not the version the bridge was tested on.                       |
-| `BAD LEDGER`          | A ledger line is not valid JSON.                                                      |
-| `ORPHAN ROW`          | The ledger names an id whose body is missing or unreadable.                           |
-| `SHELF CLASH`         | One id has a body in both the backlog and the shelf.                                  |
-| `MISSING DEP`         | A dep names an id whose body is missing, unreadable or shelved.                       |
-| `BAD DEPS`            | A `deps:` line is written as a YAML list.                                             |
-| `BRANCH CYCLE`        | A dep cites code only the dependent's unmerged branch has.                            |
-| `MISSING REPORT`      | A ledger row names a saved report that does not exist.                                |
-| `PROTECTED UNMATCHED` | A `[drive] protected_paths` glob matches no tracked file.                             |
-| `SEQUENCE CLASH`      | Two tracked files share a number in a `[numbered_files]` glob.                        |
-| `SESSION MARKER`      | A `.drover/session` is tracked, or names a drover pid that is not running.            |
-| `BAD REGISTER`        | The follow-up list file exists and will not read.                                     |
-| `NO LABEL`            | `[github] follow_up_label` names a label the repository does not define.              |
-| `NO REGISTER`         | `[paths] register` names no file drover can ever have read.                           |
-| `DUPLICATE ISSUE`     | An open follow-up is also the issue an open item was taken in from.                   |
-| `ORPHANED FOLLOW-UP`  | Open follow-ups whose every owner has merged.                                         |
-| `NO CLOSES KEY`       | Issues are owned by items and `[frontmatter]` declares no `closes` key.               |
-| `UNLINKED`            | An open issue owned by an item that has run is missing from that item's `closes` key. |
-| `UNMIRRORED`          | An accepted item names no issue while `[backlog] mirror = "github"`.                  |
-| `MIRROR DRIFT`        | A mirrored issue's requirements differ from the item's numbered list.                 |
-| `MIRROR STALE`        | A mirrored issue's label, open state or blocked links lag the backlog.                |
-| `MIRROR SHELVED`      | A shelved body's issue is still open or lacks `drover:deferred`.                      |
-| `NO DISPOSITION`      | A merged item's `closes` issue has no disposition.                                    |
-| `UNREVIEWED MERGE`    | A merged item's completion row lists commits no review read.                          |
-| `STALE CONFIG`        | `.drover.toml` lacks a key `drover init` would write today.                           |
-| `SUPERVISOR UNSET`    | A project that has driven leaves `supervisor` defaults with no `[supervise]` table.   |
-| `BAD TEMPLATE`        | A `[prompts]` template will not read or render.                                       |
-| `WHOLE TEMPLATE`      | A `[prompts]` file replaces a built-in template whole instead of overriding blocks.   |
-| `STALE OVERRIDE`      | A `[prompts]` block override was written against a default that has since changed.    |
-| `STALE BLOCK`         | A generated agent-instruction block differs from what this binary and config produce. |
-| `STALE POLICY`        | A generated block records a `[supervise]` policy the config does not hold.            |
-| `BAD ADDENDUM`        | The `[agents] addendum` file is missing or would end the generated block early.       |
-| `NO POINTER`          | The block lives outside `AGENTS.md` and `AGENTS.md` never names its file.             |
-| `BAD MARKERS`         | A file's `BEGIN drover` and `END drover` markers are unclosed or inverted.            |
+| Term                  | Meaning                                                                                               |
+| --------------------- | ----------------------------------------------------------------------------------------------------- |
+| `NO BACKLOG`          | `[paths] backlog` names a directory that does not exist.                                              |
+| `NO SHELF`            | `[paths] shelf` is set and names a directory that does not exist.                                     |
+| `SHELF IS BACKLOG`    | The shelf and the backlog are the same directory.                                                     |
+| `NO VERIFY`           | `[verify] default` is empty.                                                                          |
+| `UNDECLARED KEY`      | A config key names a frontmatter key `[frontmatter]` does not declare.                                |
+| `NO REQUIREMENTS`     | An accepted item has no numbered requirements.                                                        |
+| `PLACEHOLDER`         | An accepted item's body still carries a `<placeholder>`.                                              |
+| `HOLD MARKER`         | An accepted item's body still carries an `[intake] hold_markers` line.                                |
+| `LIVE REQUIREMENT`    | An accepted requirement names a live host or deploy without `[operator]`.                             |
+| `BROAD CITATION`      | A scaffold cites a top-level directory, which serializes it under `--jobs`.                           |
+| `HAND EDITED`         | An accepted item's body changed outside drover since its last digest.                                 |
+| `BRANCH OVERLAP`      | An unmerged item cites a file another unmerged branch changes, with no deps edge.                     |
+| `UNREADABLE`          | A backlog file did not parse.                                                                         |
+| `BAD VALUE`           | An item's value fails what `[frontmatter]` declares the key may hold.                                 |
+| `BAD RUNNER`          | A `[runners]` entry's argv is one its binary cannot use.                                              |
+| `BRIDGE SIGNED OUT`   | The `t3` bridge has no grant the T3 Code server accepts.                                              |
+| `BRIDGE UNREACHABLE`  | The T3 Code server did not answer `initialize`.                                                       |
+| `BRIDGE VERSION`      | The T3 Code server is not the version the bridge was tested on.                                       |
+| `BAD LEDGER`          | A ledger line is not valid JSON.                                                                      |
+| `ORPHAN ROW`          | The ledger names an id whose body is missing or unreadable.                                           |
+| `SHELF CLASH`         | One id has a body in both the backlog and the shelf.                                                  |
+| `MISSING DEP`         | A dep names an id whose body is missing, unreadable or shelved.                                       |
+| `BAD DEPS`            | A `deps:` line is written as a YAML list.                                                             |
+| `BRANCH CYCLE`        | A dep cites code only the dependent's unmerged branch has.                                            |
+| `MISSING REPORT`      | A ledger row names a saved report that does not exist.                                                |
+| `PROTECTED UNMATCHED` | A `[drive] protected_paths` glob matches no tracked file.                                             |
+| `SEQUENCE CLASH`      | Two tracked files share a number in a `[numbered_files]` glob.                                        |
+| `SESSION MARKER`      | A `.drover/session` is tracked, or names a drover pid that is not running.                            |
+| `BAD REGISTER`        | The follow-up list file exists and will not read.                                                     |
+| `NO LABEL`            | `[github] follow_up_label` names a label the repository does not define.                              |
+| `NO REGISTER`         | `[paths] register` names no file drover can ever have read.                                           |
+| `DUPLICATE ISSUE`     | An open follow-up is also the issue an open item was taken in from.                                   |
+| `ORPHANED FOLLOW-UP`  | Open follow-ups whose every owner has merged.                                                         |
+| `NO CLOSES KEY`       | Issues are owned by items and `[frontmatter]` declares no `closes` key.                               |
+| `UNLINKED`            | An open issue owned by an item that has run is missing from that item's `closes` key.                 |
+| `UNMIRRORED`          | An accepted item names no issue while `[backlog] mirror = "github"`.                                  |
+| `MIRROR DRIFT`        | A mirrored issue's requirements differ from the item's numbered list.                                 |
+| `MIRROR STALE`        | A mirrored issue's label, open state or blocked links lag the backlog.                                |
+| `MIRROR SHELVED`      | A shelved body's issue is still open or lacks `drover:deferred`.                                      |
+| `NO DISPOSITION`      | A merged item's `closes` issue has no disposition.                                                    |
+| `UNREVIEWED MERGE`    | A merged item's completion row lists commits no review read.                                          |
+| `STALE CONFIG`        | `.drover.toml` lacks a key `drover init` would write today.                                           |
+| `SUPERVISOR UNSET`    | A project that has driven leaves `supervisor` defaults with no `[supervise]` table.                   |
+| `BAD TEMPLATE`        | A `[prompts]` template will not read or render.                                                       |
+| `WHOLE TEMPLATE`      | A `[prompts]` file replaces a built-in template whole instead of overriding blocks.                   |
+| `STALE OVERRIDE`      | A `[prompts]` block override was written against a default that has since changed.                    |
+| `STALE BLOCK`         | A generated agent-instruction block differs from what this binary and config produce.                 |
+| `STALE POLICY`        | A generated block records a `[supervise]` policy the config does not hold.                            |
+| `BAD ADDENDUM`        | The `[agents] addendum` file is missing or would end the generated block early.                       |
+| `NO POINTER`          | The block lives outside `AGENTS.md` and `AGENTS.md` never names its file.                             |
+| `NOT IN WORKTREE`     | The block lives outside `AGENTS.md` in an untracked file that `[drive] worktree_links` does not list. |
+| `BAD MARKERS`         | A file's `BEGIN drover` and `END drover` markers are unclosed or inverted.                            |
 
 ## Issue dispositions
 

@@ -266,6 +266,9 @@ wording, so never match on it.
   NO POINTER          the block lives outside AGENTS.md and AGENTS.md never names the
                       file holding it, so an agent loading only AGENTS.md never
                       reaches the instructions
+  NOT IN WORKTREE     the block lives outside AGENTS.md in a file git does not track
+                      and [drive] worktree_links does not list, so every drive
+                      session follows the pointer to a file its worktree lacks
   BAD MARKERS         a file's drover markers are unclosed or out of order, so the
                       block cannot be regenerated in place
   PROTECTED UNMATCHED a [drive] protected_paths entry matches no tracked file, so it
@@ -1467,7 +1470,31 @@ func (s *session) addInstructions(add func(Finding)) {
 				Path:    pointerConvention,
 			})
 		}
+		if f, ok := s.unlinkedBlock(host.Name); ok {
+			add(f)
+		}
 	}
+}
+
+// unlinkedBlock reports a block file a drive worktree will not hold. A worktree
+// carries what git tracks plus [drive] worktree_links, so an untracked file
+// missing from that list leaves every drive session following the pointer to
+// nothing. Outside a git work tree there is no drive to miss it, and the
+// question goes unasked rather than answered with a guess.
+func (s *session) unlinkedBlock(name string) (Finding, bool) {
+	if slices.Contains(s.cfg.Loop.TreeLinks, name) {
+		return Finding{}, false
+	}
+	tracked, err := gitNames(s.cfg.Root, "ls-files", "-z", "--", name)
+	if err != nil || len(tracked) > 0 {
+		return Finding{}, false
+	}
+	return Finding{
+		Kind:    "NOT IN WORKTREE",
+		Message: fmt.Sprintf("%s holds the instructions, but git does not track it and [drive] worktree_links does not list it, so no drive worktree has it", name),
+		Detail:  fmt.Sprintf("add %q to [drive] worktree_links in %s", name, config.FileName),
+		Path:    config.FileName,
+	}, true
 }
 
 // addRegister is the register half of the report: one read, and everything the

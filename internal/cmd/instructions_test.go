@@ -23,7 +23,8 @@ func TestPointerStanzaNamesEveryOperatorCommand(t *testing.T) {
 			t.Errorf("stanza omits %s, which refuses inside a launched session", row.Class)
 		}
 	}
-	for _, want := range []string{"DROVER.md", "exit 3", "cannot launch another", "drover agents"} {
+	for _, want := range []string{"DROVER.md", "exit 3", "cannot launch another", "drover agents",
+		"says an item finished, run the completion review in DROVER.md"} {
 		if !strings.Contains(flat, want) {
 			t.Errorf("stanza does not mention %q", want)
 		}
@@ -340,4 +341,57 @@ func hostsInclude(t *testing.T, s *session, name string) bool {
 		}
 	}
 	return false
+}
+
+// A drive worktree holds what git tracks plus [drive] worktree_links, so a
+// pointer to an untracked block file nobody links sends every drive session to
+// a file its tree does not have.
+func TestCheckReportsABlockNoWorktreeHolds(t *testing.T) {
+	install()
+	for _, c := range []struct {
+		name  string
+		extra string
+		git   bool
+		track bool
+		want  bool
+	}{
+		{"untracked and unlisted", "", true, false, true},
+		{"listed in worktree_links", "\n[drive]\nworktree_links = [\"DROVER.md\"]\n", true, false, false},
+		{"tracked by git", "", true, true, false},
+		{"outside a git work tree", "", false, false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := fixture(t, c.extra)
+			if c.git {
+				git(t, s.cfg.Root, "init", "-q", "-b", "main")
+			}
+			writeBlock(t, s, "DROVER.md")
+			if err := os.WriteFile(filepath.Join(s.cfg.Root, "AGENTS.md"),
+				[]byte(PointerStanza("DROVER.md")), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if c.track {
+				git(t, s.cfg.Root, "add", "DROVER.md")
+			}
+			kinds := instructionKinds(t, s)
+			if kinds["NOT IN WORKTREE"] != c.want {
+				t.Errorf("NOT IN WORKTREE reported: %v, want %v (all: %v)", kinds["NOT IN WORKTREE"], c.want, kinds)
+			}
+			if kinds["NO POINTER"] {
+				t.Errorf("got NO POINTER beside the generated stanza: %v", kinds)
+			}
+		})
+	}
+}
+
+// A block kept in AGENTS.md is the file the harness loads on its own, so it
+// needs no link to reach a worktree's agents any more than it needs a pointer.
+func TestCheckDoesNotAskToLinkAGENTSmd(t *testing.T) {
+	install()
+	s := fixture(t, "")
+	git(t, s.cfg.Root, "init", "-q", "-b", "main")
+	writeBlock(t, s, "AGENTS.md")
+	if kinds := instructionKinds(t, s); kinds["NOT IN WORKTREE"] {
+		t.Errorf("got %v for a block in AGENTS.md", kinds)
+	}
 }

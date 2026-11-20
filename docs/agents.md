@@ -91,11 +91,14 @@ drover agents --pointer DROVER.md >> AGENTS.md
 
 This project's work items, completion ledger and audit trail are driven by
 `drover`. **Read [DROVER.md](DROVER.md) before running any drover command.**
-`accept`, `amend`, `drive`, `finish`, `intake`, `mark-merged`, `open-pr`,
-`signoff`, `supervise`, `touch`, `unaccept` and `unmark-merged` refuse inside a session drover
-launched and exit 3, because each certifies work somebody else has to trust or
-reaches a tracker other people read. `run`, `draft --runner` and `review
---runner` refuse there too: a launched session cannot launch another.
+`accept`, `amend`, `drive`, `finish`, `fold`, `intake`, `live`, `mark-merged`,
+`open-pr`, `signoff`, `supervise`, `touch`, `unaccept` and `unmark-merged`
+refuse inside a session drover launched and exit 3, because each certifies work
+somebody else has to trust or reaches a tracker other people read. `run`,
+`draft --runner` and `review --runner` refuse there too: a launched session
+cannot launch another. When the operator says an item finished, run the
+completion review in DROVER.md for that id without waiting for further
+instruction.
 
 `drover agents` prints the same text if DROVER.md is missing.
 ```
@@ -104,18 +107,31 @@ The command names come off the same actor table each command's `Actor:` line rea
 Regenerate it the way you regenerate the block.
 A hand-written pointer naming five refusing commands after a sixth gained an `Actor:` line is the drift this whole command exists to stop.
 
+The stanza also carries the trigger for the completion review, because that loop lives only in the block: an agent holding just the pointer would hear "F12 finished" and have nothing telling it to run `drover review`.
+
+A pointer only helps where the file it names exists.
+A drive worktree holds what git tracks plus `[drive] worktree_links`, so a block file kept out of git, as a working-notes overlay keeps it, goes in that list beside `AGENTS.md`:
+
+```toml
+[drive]
+worktree_links = ["AGENTS.md", "DROVER.md"]
+```
+
+`check` reports `NOT IN WORKTREE` when it is missing.
+
 ## What `check` reports
 
 Five findings.
 `BAD ADDENDUM` fires whenever a configured addendum cannot be read; the other four stay silent for a project that generated no block at all, since `init` suggests writing one rather than requiring it.
 
-| Finding        | Means                                                                                                                                                                                                                                                                                                 |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `STALE BLOCK`  | The block differs from what this binary, this config and the addendum would produce. The comparison is on the rendered text, so a config change or an addendum edit goes stale exactly the way a binary upgrade does.                                                                                 |
-| `STALE POLICY` | The block's policy line records a `[supervise]` policy the config does not hold. It names each action and whether it widened or narrowed, and stands in for `STALE BLOCK` on that file, since the fix is the same command plus `--yes` when an action widened. See [The merge policy](#merge-policy). |
-| `BAD ADDENDUM` | The file `[agents] addendum` names is missing, unreadable or a directory, or holds a marker line or an unclosed code fence that would end the block early. No block is compared until it renders.                                                                                                     |
-| `NO POINTER`   | The block lives outside `AGENTS.md`, and `AGENTS.md` never names the file holding it. A project with no `AGENTS.md` at all is not this: it told its agents some other way.                                                                                                                            |
-| `BAD MARKERS`  | The markers are unclosed or inverted, so `--write` refuses to regenerate in place rather than guess which half to keep.                                                                                                                                                                               |
+| Finding           | Means                                                                                                                                                                                                                                                                                                 |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STALE BLOCK`     | The block differs from what this binary, this config and the addendum would produce. The comparison is on the rendered text, so a config change or an addendum edit goes stale exactly the way a binary upgrade does.                                                                                 |
+| `STALE POLICY`    | The block's policy line records a `[supervise]` policy the config does not hold. It names each action and whether it widened or narrowed, and stands in for `STALE BLOCK` on that file, since the fix is the same command plus `--yes` when an action widened. See [The merge policy](#merge-policy). |
+| `BAD ADDENDUM`    | The file `[agents] addendum` names is missing, unreadable or a directory, or holds a marker line or an unclosed code fence that would end the block early. No block is compared until it renders.                                                                                                     |
+| `NO POINTER`      | The block lives outside `AGENTS.md`, and `AGENTS.md` never names the file holding it. A project with no `AGENTS.md` at all is not this: it told its agents some other way.                                                                                                                            |
+| `NOT IN WORKTREE` | The block lives outside `AGENTS.md` in a file git does not track, and `[drive] worktree_links` does not list it, so no drive worktree has the file the pointer names.                                                                                                                                 |
+| `BAD MARKERS`     | The markers are unclosed or inverted, so `--write` refuses to regenerate in place rather than guess which half to keep.                                                                                                                                                                               |
 
 `check` finds the block by its markers rather than by filename, since `--write` takes any path and a check keyed on `AGENTS.md` would report nothing about the projects that took the suggestion.
 It scans markdown at the project root only, and a marker counts only as a whole line outside any fence: the same rule the stop marker is matched by, and for the same reason.

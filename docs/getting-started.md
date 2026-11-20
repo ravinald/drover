@@ -201,7 +201,7 @@ The first generates this project's instructions from its own config: its paths, 
 The second appends the short stanza that sends an agent from `AGENTS.md`, which most agent CLIs load on their own, to the file holding them.
 
 Write the block straight into `AGENTS.md` instead if you prefer; it runs to several hundred lines, which is the whole reason for the split.
-`drover check` reports `NO POINTER` when the block sits outside `AGENTS.md` and nothing there names it, and `STALE BLOCK` when either file falls behind the config.
+`drover check` reports `NO POINTER` when the block sits outside `AGENTS.md` and nothing there names it, `NOT IN WORKTREE` when that file is untracked and missing from `[drive] worktree_links`, and `STALE BLOCK` when either file falls behind the config.
 
 ## 10. What you did not have to configure
 
