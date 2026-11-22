@@ -356,6 +356,16 @@
           "enum": ["merge", "squash", "rebase"],
           "default": "squash",
           "description": "How `drover drive` asks the forge to merge: the flag it passes to `gh pr merge`. A fact about the repository, so only the project's .drover.toml may set it; a value in the per-user config is refused at load."
+        },
+        "signoff": {
+          "type": "string",
+          "enum": ["operator"],
+          "description": "Who certifies the Developer Certificate of Origin for what merges. \"operator\": every merge waits on a `drover certify` row for the head it merges, and the squash commit carries that operator's Signed-off-by. Needs merge_method = \"squash\". Unset: nobody, and merges carry no sign-off. Per-project only."
+        },
+        "trailers": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[^\\s:]+:.*$" },
+          "description": "Git trailer lines appended to the squash commit's message above the Signed-off-by, under signoff alone. {runner} and {model} resolve from the item's ledger rows; a line naming one the ledger cannot answer is left out. Signed-off-by is refused here. Per-project only."
         }
       }
     },

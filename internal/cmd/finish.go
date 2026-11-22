@@ -170,10 +170,25 @@ zero, and nothing finish learns about it can stop it recording the merge.`,
 				if ctx == nil {
 					ctx = context.Background()
 				}
-				if err := s.mergeBranchAt(ctx, branch, open); err != nil {
+				if err := s.mergeBranchAt(ctx, id, branch, open); err != nil {
 					return fmt.Errorf("merge the pull request for %s at %s: %w", branch, shortSHA(open), err)
 				}
 				fmt.Printf("  ✓ merged the pull request for %s at %s\n", branch, shortSHA(open))
+			}
+		} else if s.cfg.Git.SignsOff() && !s.offline && !finishInDrive {
+			// A merge by hand would write the forge's squash message, without
+			// the sign-off, so under [git] signoff the operator's finish is
+			// the merge, and mergeBranchAt refuses a head no certification
+			// covers.
+			if _, open, ok, err := gh.OpenPRHead(s.labels(), branch); err == nil && ok && open != "" {
+				ctx := cmd.Context()
+				if ctx == nil {
+					ctx = context.Background()
+				}
+				if err := s.mergeBranchAt(ctx, id, branch, open); err != nil {
+					return Refusal{fmt.Errorf("merge the pull request for %s at %s: %w", branch, shortSHA(open), err)}
+				}
+				fmt.Printf("  ✓ merged the pull request for %s at %s, signed off\n", branch, shortSHA(open))
 			}
 		}
 		trunk := s.trunk()
@@ -853,6 +868,12 @@ func (s *session) bodyAccepts(it backlog.Item) bool {
 // A commit missing from this clone, a squash-merged branch's head being the
 // usual one, is fetched from origin by hash first.
 func unreviewedCommits(root, trunk, from, head string) ([]string, error) {
+	return commitsAfter(root, trunk, from, head, true)
+}
+
+// commitsAfter is the commits in from..head that are neither a trunk merge
+// nor, under skipReview, a review: commit.
+func commitsAfter(root, trunk, from, head string, skipReview bool) ([]string, error) {
 	for _, c := range []string{from, head} {
 		if gitcmd.Command(root, "cat-file", "-e", c+"^{commit}").Run() != nil {
 			_ = gitcmd.Command(root, "fetch", "--quiet", "origin", c).Run()
@@ -874,7 +895,7 @@ func unreviewedCommits(root, trunk, from, head string) ([]string, error) {
 	var commits []string
 	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
 		f := strings.SplitN(line, "\x00", 3)
-		if len(f) != 3 || strings.HasPrefix(f[2], "review:") {
+		if len(f) != 3 || skipReview && strings.HasPrefix(f[2], "review:") {
 			continue
 		}
 		if parents := strings.Fields(f[1]); len(parents) > 1 && allOn(onTrunk, parents[1:]) {

@@ -268,6 +268,13 @@ type Row struct {
 	// the reason. It sits beside the body row amend writes rather than on it,
 	// so every reader of body rows keeps reading a digest and nothing else.
 	Amend *Amendment `json:"amend,omitempty"`
+	// Certify is the nineteenth shape: one row per `drover certify`, the
+	// operator certifying the Developer Certificate of Origin for one head of
+	// an item's branch. It is what [git] signoff holds the merge on, and what
+	// the Signed-off-by on the squash commit is written from. A later row
+	// replaces an earlier one; none withdraws a certification, because a head
+	// certified stays certified and a push past it needs one of its own.
+	Certify *Certification `json:"certify,omitempty"`
 	// Drive is the drive that appended the row, D1, D2 and so on, empty on a
 	// row written outside one. Every row a drive appends carries it, which is
 	// what groups an item's history by the drive that ran it without reading
@@ -473,6 +480,21 @@ type Amendment struct {
 	To    int    `json:"to"`
 	Moved string `json:"moved,omitempty"`
 	Kept  string `json:"kept,omitempty"`
+}
+
+// Certification is who certified which head, under which DCO. Name and Email
+// are the operator's git identity at the project root when certify ran, the
+// identity the Signed-off-by carries.
+type Certification struct {
+	Head  string `json:"head"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+	DCO   string `json:"dco"`
+}
+
+// Trailer is the Signed-off-by line the certification puts on a commit.
+func (c Certification) Trailer() string {
+	return "Signed-off-by: " + c.Name + " <" + c.Email + ">"
 }
 
 // Outcome is what one item a drive ran came to, as the drive reported it.
@@ -800,6 +822,20 @@ func settled(rows []Row) bool {
 		}
 	}
 	return agree >= 2
+}
+
+// Certified is one item's latest certification, false when it has none.
+func (l *Ledger) Certified(id string) (Certification, bool) {
+	var out *Certification
+	for _, r := range l.Rows {
+		if r.ID == id && r.Certify != nil {
+			out = r.Certify
+		}
+	}
+	if out == nil {
+		return Certification{}, false
+	}
+	return *out, true
 }
 
 // SignedOff is the numbers of one item's [operator] requirements the operator

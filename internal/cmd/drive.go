@@ -541,8 +541,8 @@ type DriveItem struct {
 	// unchecked is a gate that passed on a head no workflow had run on, so
 	// the merge settles the checks again once the pull request is open.
 	unchecked bool
-	// signoff is the same for an [operator] requirement park: which ones, and
-	// the command that records them.
+	// signoff is the same for a park only the operator's attestation lifts, an
+	// [operator] requirement or [git] signoff: the command that records it.
 	signoff string
 	// decision is the same for a needs_decision park: the requirements the
 	// review handed over and the commands that change or meet them.
@@ -2499,6 +2499,16 @@ func (s *session) implementRound(ctx context.Context, it backlog.Item, d *DriveI
 				": there is no diff to review, and a branch that never moved reads as merged"), true
 		}
 	}
+	// Before the push, so a sign-off made in the operator's name never reaches
+	// the forge, where a per-commit DCO check would accept it as theirs.
+	forged, err := s.forgedSignoffs(d.Branch)
+	if err != nil {
+		return park("branch_failed", err.Error()), true
+	}
+	if len(forged) > 0 {
+		return park(parkForgedSignoff, "under [git] signoff the operator certifies with drover certify, and the branch carries a Signed-off-by a session wrote:\n"+
+			commitList(forged, "  ")+"\nrewrite those commits without it, then drover drive "+d.ID), true
+	}
 	// Before the push, not after: the push can fail and the branch still holds
 	// the commits, and it is the branch holding them that a later finish has to
 	// be able to tell from one that never moved.
@@ -3387,6 +3397,11 @@ func driveFollowUp(d DriveItem, item string, drafted bool, maxReviewRounds int, 
 			pr + " is open and " + d.Reason,
 			"meet each one, drover signoff " + id + " <n> \"<what was checked>\", then merge " + pr + " by hand and drover finish " + id,
 		}
+	case parkAwaitingCertify:
+		return followUp{
+			pr + " is open and " + d.Reason,
+			"read its diff, drover certify " + id + " --head <sha>, then drover finish " + id + ", which merges it signed off",
+		}
 	case "blocked_on_deps":
 		return followUp{
 			pr + " is open and waits on work the review split out" + because,
@@ -3703,21 +3718,35 @@ func (s *session) pushBranch(branch string) error {
 // between the gate and the merge: without it `gh` merges whatever the head is
 // now, which may be a commit nothing tested. Branch protection still applies:
 // the forge refuses a synchronous merge its rules do not allow.
-func (s *session) mergeBranch(ctx context.Context, branch string) error {
+func (s *session) mergeBranch(ctx context.Context, id, branch string) error {
 	head, err := revParse(s.cfg.Root, branch)
 	if err != nil {
 		return err
 	}
-	return s.mergeBranchAt(ctx, branch, head)
+	return s.mergeBranchAt(ctx, id, branch, head)
 }
 
 // mergeBranchAt is mergeBranch bound to a head the caller already read.
-func (s *session) mergeBranchAt(ctx context.Context, branch, head string) error {
+//
+// Under [git] signoff it reads the certification again here, after every hold
+// a caller checked, because this is the last point before the forge acts and
+// the head bound by --match-head-commit is the one it must cover. It passes
+// --body so the squash commit's message is drover's, carrying the sign-off,
+// rather than whatever the repository's squash setting would compose.
+func (s *session) mergeBranchAt(ctx context.Context, id, branch, head string) error {
 	method := s.cfg.Git.MergeMethod
 	if method == "" {
 		method = config.MergeMethods()[0]
 	}
-	args := []string{"pr", "merge", "--" + method, "--match-head-commit", head, branch}
+	args := []string{"pr", "merge", "--" + method, "--match-head-commit", head}
+	if s.cfg.Git.SignsOff() {
+		c, err := s.certification(id, head)
+		if err != nil {
+			return fmt.Errorf("[git] signoff refuses the merge: %w; drover certify %s --head %s", err, id, shortSHA(head))
+		}
+		args = append(args, "--body", s.squashMessage(id, head, c))
+	}
+	args = append(args, branch)
 	cmd := exec.CommandContext(ctx, "gh", args...) // #nosec G204 -- branch and head come from git, method from validated config
 	cmd.Dir = s.cfg.Root
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -4399,6 +4428,10 @@ func (s *session) finishAtHead(ctx context.Context, it backlog.Item, d *DriveIte
 		d.signoff = run
 		return park(p, why)
 	}
+	if p, why, run := s.certifyHold(it, d.gated); p != "" {
+		d.signoff = run
+		return park(p, why)
+	}
 
 	// A dep that went unmet during this drive is a SPLIT-OUT the review filed:
 	// `drover split` rewrote the deps line, and the branch is sound and waiting on
@@ -4468,7 +4501,7 @@ func (s *session) driveMerge(ctx context.Context, it backlog.Item, d *DriveItem,
 		return s.mergeByGate(ctx, it, d, park, trunk, deadline)
 	}
 	events.stage(d.ID, stageMerge)
-	if err := s.mergeBranch(ctx, d.Branch); err != nil {
+	if err := s.mergeBranch(ctx, d.ID, d.Branch); err != nil {
 		d.setDetail(mergeDetail(err))
 		return park("merge_failed", err.Error())
 	}
@@ -4569,7 +4602,7 @@ func (s *session) mergeByGate(ctx context.Context, it backlog.Item, d *DriveItem
 			shortSHA(head), code, lastLines(out, verifyTail))))
 	}
 	events.stage(d.ID, stageMerge)
-	if err := s.mergeBranch(ctx, d.Branch); err != nil {
+	if err := s.mergeBranch(ctx, d.ID, d.Branch); err != nil {
 		d.setDetail(mergeDetail(err))
 		return park("merge_failed", err.Error())
 	}

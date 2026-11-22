@@ -1049,11 +1049,13 @@ See [What accept checks](lifecycle.md#what-accept-checks).
 
 ## `[git]`
 
-| Key            | Default    | Meaning                                                                                             |
-| -------------- | ---------- | --------------------------------------------------------------------------------------------------- |
-| `enabled`      | `true`     | Whether drover may drive a work tree here. `false` turns branch automation and the merge check off. |
-| `merge_check`  | unset      | Command answering whether a branch merged, for a forge that is not GitHub. Unset, `gh` answers.     |
-| `merge_method` | `"squash"` | How `drover drive` merges: `merge`, `squash` or `rebase`. Project file only.                        |
+| Key            | Default    | Meaning                                                                                                                               |
+| -------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`      | `true`     | Whether drover may drive a work tree here. `false` turns branch automation and the merge check off.                                   |
+| `merge_check`  | unset      | Command answering whether a branch merged, for a forge that is not GitHub. Unset, `gh` answers.                                       |
+| `merge_method` | `"squash"` | How `drover drive` merges: `merge`, `squash` or `rebase`. Project file only.                                                          |
+| `signoff`      | unset      | `"operator"`: every merge waits on `drover certify`, and the squash commit carries the operator's `Signed-off-by`. Project file only. |
+| `trailers`     | unset      | Git trailer lines added to that squash commit above the `Signed-off-by`. Project file only.                                           |
 
 Branch automation and the merge check are the only parts of drover that need a repository.
 The backlog, the ledger, the audit levels, the verify commands and every `--json` surface are files on disk, and a directory that was never a repository drives them unchanged.
@@ -1115,6 +1117,66 @@ A value in the per-user config is refused at load, naming the project file it be
 
 `finish` does not read it.
 Whether a branch merged is answered by the forge or by [`merge_check`](#git-merge_check), whichever way the merge was made.
+
+### `[git] signoff`
+
+```toml
+[git]
+signoff = "operator"
+```
+
+Makes every merge carry a [Developer Certificate of Origin](https://developercertificate.org) sign-off from the operator, and holds every merge until the operator gives one.
+The only value is `"operator"`; unset, merges carry no sign-off and nothing waits.
+
+A sign-off is a person certifying the DCO for a diff they read.
+No session drover launches can make that statement for you, and you cannot make it ahead of time for code that does not exist yet, so the sign-off happens once per head, after the review and before the merge:
+
+1. drive runs the item as usual.
+   The implementing session's prompt tells it never to add a `Signed-off-by` or commit with `-s`, and under `signoff` drive checks: a branch commit (merges aside) whose message carries a `Signed-off-by` trailer, as `git log`'s trailer parser reads it, parks the item `forged_signoff` before the push, naming each commit.
+2. Once the review passes and the merge gate is green, the pull request opens and the merge holds.
+   drive parks the item `awaiting_certify` and emits `needs_operator` with the `certify` action (at `operator` and no higher), whose `run` is `drover certify <id> --head <sha>`.
+3. You read the diff and run that command.
+   `certify` refuses a `--head` that is not the head of the item's open pull request, and a head holding commits after the one the item's last passing review read.
+   It prints the DCO 1.1 text, the diffstat and the identity it signs as, then appends one `certify` row to the ledger.
+4. `drover finish <id>` merges the pull request itself, with `gh pr merge --squash --match-head-commit <sha> --body <message>`, and records the finish.
+   The next drive that reaches the item merges it the same way.
+
+The identity is the one `git commit -s` would sign as at the project root: git's committer identity, so `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL` override `user.name` and `user.email`.
+`certify` reads it with `user.useConfigOnly` set and refuses when none is configured, so a name and address git guessed from the host never reach a sign-off.
+`drover check` reports `NO SIGNER` for the same gap.
+
+The squash commit's body is drover's rather than the repository's squash setting: the subject of each non-merge commit on the branch as a `* ` list, then each [`trailers`](#git-trailers) line, then `Signed-off-by: <name> <email>` from the `certify` row.
+
+A certification covers the head it names and the trunk merges drive makes to bring that head level with the trunk.
+Any other commit after it, a `review:` commit included, leaves the head uncertified, and the merge refuses until you certify the new head.
+The merge reads the certification again at the head it binds with `--match-head-commit`, so nothing pushed between `certify` and the merge goes through unsigned.
+
+Squash only.
+Under `merge` or `rebase` the branch's own commits land on the trunk as sessions wrote them, unsigned, and a per-commit DCO check fails on every one, so `signoff` beside either is refused at load.
+
+Do not merge a held pull request by hand: the forge writes its own squash message, with no sign-off.
+`drover finish` is the merge.
+
+A per-commit DCO check on pull requests, the [DCO GitHub App](https://github.com/apps/dco) being the common one, fails every drover pull request, because the branch commits carry no sign-off and the squash commit does not exist until the merge.
+[`examples/dco-check.yml`](../examples/dco-check.yml) is a workflow that checks what lands instead: every commit a push adds to the trunk must carry a `Signed-off-by`, and a pull request passes when each of its commits is signed off or when it is a drover pull request, whose sign-off arrives with the merge.
+
+`signoff` and `trailers` describe the repository, so only the project's `.drover.toml` may set them; a value in the per-user config is refused at load.
+
+### `[git] trailers`
+
+```toml
+[git]
+signoff = "operator"
+trailers = ["Assisted-by: {runner}:{model}"]
+```
+
+Git trailer lines drover adds to the squash commit above the `Signed-off-by`, under [`signoff`](#git-signoff) alone.
+Each is one line: a token with no spaces, a colon, then the value.
+
+`{runner}` is the runner of the item's latest implement launch, and `{model}` the model its latest usage row names, which may be the review's: usage rows do not record which stage ran.
+A line naming a placeholder the ledger cannot fill is left out rather than written with a hole in it.
+
+`trailers` without `signoff` is refused at load, and so is a `Signed-off-by` line: only `certify` writes one.
 
 ## `[github]`
 
@@ -1463,6 +1525,7 @@ Each command listed beside an action is that action when a supervisor runs it, a
 | `retry_moved_trunk`           | merge        | `auto`       | `auto`       |                                | Retry, once, a merge gate that refused only because the trunk moved under the head.                                            |
 | `resolve_conflict`            | merge        | `supervisor` | `auto`       |                                | Resolve a branch update merge conflict in the item's worktree.                                                                 |
 | `merge_drive_pr`              | merge        | `operator`   | `supervisor` | `finish`                       | Merge a pull request drive opened for an item, then finish it.                                                                 |
+| `certify`                     | merge        | `operator`   | `operator`   |                                | Certify the Developer Certificate of Origin for the head a pull request would merge.                                           |
 | `merge_protected_paths`       | merge        | `operator`   | `supervisor` |                                | Merge a pull request that changes a [drive] protected_paths file.                                                              |
 | `rerun_infra_failure`         | checks       | `auto`       | `auto`       |                                | Rerun a check that failed on the forge's infrastructure rather than on the code.                                               |
 | `fix_gate_refusal`            | checks       | `auto`       | `auto`       |                                | Send a branch the merge gate or its verify command refused over its own diff back to its implementing session, once per drive. |
@@ -1516,6 +1579,7 @@ At any other policy, `finish` under a supervisor also refuses with exit `3` when
 
 Both keys work in the per-user config like every other `[supervise]` key: one `merge_drive_pr = "supervisor"` line there reaches every project that sets none, and a project restricts it again with its own `merge_drive_pr = "operator"`.
 
+`certify` is what drive's merge hold under [`[git] signoff`](#git-signoff) reports, and no policy raises it above `operator`.
 `signoff` is what drive's merge hold on an `[operator]` requirement with no signoff reports, and `post_finish_check` decides whether [`[finish] post_check`](#finish) runs at all: `off` skips it, and any other policy runs it after every finish.
 
 `update_open_prs`, `retry_moved_trunk` and `resolve_conflict` change what drive does: see [Updating the other open pull requests](lifecycle.md#updating-the-other-open-pull-requests).

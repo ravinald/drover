@@ -479,10 +479,32 @@ type Git struct {
 	// there would squash every project on the machine, including the one whose
 	// history depends on merge commits.
 	MergeMethod string `toml:"merge_method"`
+	// Signoff is who certifies the Developer Certificate of Origin for what
+	// merges: SignoffOperator, or empty for nobody. Under SignoffOperator every
+	// merge waits on a `drover certify` row for the head it merges, and the
+	// squash commit carries that operator's Signed-off-by. A launched session
+	// never signs off, because a sign-off is a person's statement about one
+	// diff and no session can make it.
+	//
+	// Squash only. Under merge or rebase the branch's own commits land on the
+	// trunk as the sessions wrote them, without a sign-off, so a DCO check
+	// fails on them however the merge commit reads.
+	Signoff string `toml:"signoff"`
+	// Trailers are lines drover appends to the squash commit's message above
+	// the Signed-off-by, under Signoff alone. {runner} and {model} resolve
+	// from the item's ledger rows; a line naming one the ledger cannot answer
+	// is left out rather than written with a hole in it.
+	Trailers []string `toml:"trailers"`
 }
 
 // MergeMethods are the values [git] merge_method accepts, default first.
 func MergeMethods() []string { return []string{"squash", "merge", "rebase"} }
+
+// SignoffOperator is the one [git] signoff value: the operator certifies.
+const SignoffOperator = "operator"
+
+// SignsOff reports whether merges here wait on the operator's certification.
+func (g Git) SignsOff() bool { return g.Signoff == SignoffOperator }
 
 // On reports whether drover may drive a work tree here. Unset means yes: a
 // project that says nothing about git is the overwhelming majority, and the
@@ -1509,6 +1531,24 @@ func (c *Config) validate(path string) error {
 	if !slices.Contains(MergeMethods(), c.Git.MergeMethod) {
 		return fmt.Errorf("%s: git.merge_method is %q (known: %s)",
 			path, c.Git.MergeMethod, strings.Join(MergeMethods(), ", "))
+	}
+	switch {
+	case c.Git.Signoff != "" && c.Git.Signoff != SignoffOperator:
+		return fmt.Errorf("%s: git.signoff is %q (known: %q, or unset)", path, c.Git.Signoff, SignoffOperator)
+	case c.Git.Signoff == "" && len(c.Git.Trailers) > 0:
+		return fmt.Errorf("%s: git.trailers is set and git.signoff is not: trailers ride the signed-off squash commit, so set git.signoff = %q or drop them",
+			path, SignoffOperator)
+	case c.Git.SignsOff() && c.Git.MergeMethod != "squash":
+		return fmt.Errorf("%s: git.signoff = %q needs git.merge_method = \"squash\", not %q: under %s the branch's commits land on the trunk as sessions wrote them, unsigned, and a DCO check fails on every one",
+			path, SignoffOperator, c.Git.MergeMethod, c.Git.MergeMethod)
+	}
+	for _, t := range c.Git.Trailers {
+		if k, _, ok := strings.Cut(t, ":"); !ok || strings.TrimSpace(k) == "" || strings.ContainsAny(k, " \t\n") || strings.Contains(t, "\n") {
+			return fmt.Errorf("%s: git.trailers entry %q is not a git trailer: one line, a token with no spaces, a colon, then the value", path, t)
+		}
+		if k, _, _ := strings.Cut(t, ":"); strings.EqualFold(strings.TrimSpace(k), "Signed-off-by") {
+			return fmt.Errorf("%s: git.trailers names Signed-off-by, which only drover certify writes: drop that entry", path)
+		}
 	}
 	if !slices.Contains(IntakeCloses(), c.Intake.Closes) {
 		return fmt.Errorf("%s: intake.closes is %q (known: %q, or unset)",

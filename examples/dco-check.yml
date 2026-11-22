@@ -1,0 +1,79 @@
+# DCO check for a repository driven by drover under [git] signoff = "operator".
+# Copy it to .github/workflows/dco.yml and make the "pull request" job required.
+#
+# A per-commit check, the DCO GitHub App being the common one, fails every
+# drover pull request: the sessions' commits carry no sign-off, and the
+# operator's arrives on the squash commit `drover finish` writes at merge.
+# This checks two things instead:
+#
+#   pull request: every non-merge commit carries a Signed-off-by, unless the
+#     author has write access. Those pull requests are merged by `drover
+#     finish`, which refuses one the operator has not certified.
+#   push: every commit the push adds to the trunk's first-parent history
+#     carries a Signed-off-by. Nothing can block a push after the fact, so
+#     this is what reports a merge made by hand, which skips the sign-off.
+#
+# Both read trailers with git's own parser rather than a pattern, so a subject
+# that mentions "Signed-off-by:" does not count.
+name: dco
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pull-request:
+    name: pull request
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: every commit is signed off
+        env:
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          case "$ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR)
+              echo "author has write access: drover finish signs this off at merge"
+              exit 0 ;;
+          esac
+          missing=$(git log --no-merges --format='%h%x1f%(trailers:key=Signed-off-by,valueonly,separator=%x2C )%x1f%s' "$BASE..$HEAD" |
+            awk -F '\037' '$2 == "" { print $1 " " $3 }')
+          if [ -n "$missing" ]; then
+            echo "these commits carry no Signed-off-by; amend them with git commit -s:"
+            echo "$missing"
+            exit 1
+          fi
+
+  trunk:
+    name: trunk
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: every commit that landed is signed off
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          range="$BEFORE..$AFTER"
+          if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            range="$AFTER^!"
+          fi
+          missing=$(git log --first-parent --format='%h%x1f%(trailers:key=Signed-off-by,valueonly,separator=%x2C )%x1f%s' "$range" |
+            awk -F '\037' '$2 == "" { print $1 " " $3 }')
+          if [ -n "$missing" ]; then
+            echo "these commits reached the trunk without a Signed-off-by:"
+            echo "$missing"
+            exit 1
+          fi

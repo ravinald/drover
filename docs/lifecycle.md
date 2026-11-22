@@ -51,6 +51,7 @@ Filing an unmet requirement instead of returning it merges the item incomplete a
 | Record how hard anyone looked                      | `drover audit <id> <level> --code-by <who>`             | **yes**, at the level your authorship allows                                                   |
 | Open the pull request                              | `drover open-pr <id>`                                   | no: an open one says the branch may merge, and no session says that about its own work         |
 | Meet an `[operator]` requirement                   | `drover signoff <id> <n> "<what was checked>"`          | no: it certifies a requirement the session was told not to attempt                             |
+| Certify the DCO for a head, under `[git] signoff`  | `drover certify <id> --head <sha>`                      | no: a sign-off is a person's statement about a diff they read                                  |
 | Merge                                              | your forge                                              | not applicable                                                                                 |
 | Record the merge, write the tracker                | `drover finish <id>`                                    | no: the operator merges, so the operator records it                                            |
 | Confirm nothing was left unjudged                  | `drover check`                                          | yes: it is read-only                                                                           |
@@ -250,7 +251,7 @@ drover check
 Exit 0 clean, exit 2 on findings, exit 1 if it could not run the validation at all.
 Put it in CI; run it after any rename.
 
-Findings are `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BRIDGE SIGNED OUT`, `BRIDGE UNREACHABLE`, `BRIDGE VERSION`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `SUPERVISOR UNSET`, `BAD TEMPLATE`, `WHOLE TEMPLATE`, `STALE OVERRIDE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `NOT IN WORKTREE`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `SESSION MARKER`, `PLACEHOLDER`, `HOLD MARKER`, `LIVE REQUIREMENT`, `BROAD CITATION`, `HAND EDITED`, `UNREVIEWED MERGE` and `BRANCH OVERLAP`.
+Findings are `NO BACKLOG`, `NO SHELF`, `SHELF IS BACKLOG`, `NO VERIFY`, `UNDECLARED KEY`, `NO REQUIREMENTS`, `UNREADABLE`, `BAD VALUE`, `BAD RUNNER`, `BRIDGE SIGNED OUT`, `BRIDGE UNREACHABLE`, `BRIDGE VERSION`, `BAD LEDGER`, `ORPHAN ROW`, `SHELF CLASH`, `MISSING DEP`, `BAD DEPS`, `BRANCH CYCLE`, `MISSING REPORT`, `BAD REGISTER`, `NO LABEL`, `NO REGISTER`, `DUPLICATE ISSUE`, `ORPHANED FOLLOW-UP`, `NO CLOSES KEY`, `UNLINKED`, `NO DISPOSITION`, `UNMIRRORED`, `MIRROR DRIFT`, `MIRROR STALE`, `MIRROR SHELVED`, `STALE CONFIG`, `SUPERVISOR UNSET`, `BAD TEMPLATE`, `WHOLE TEMPLATE`, `STALE OVERRIDE`, `STALE BLOCK`, `STALE POLICY`, `BAD ADDENDUM`, `NO POINTER`, `NOT IN WORKTREE`, `BAD MARKERS`, `PROTECTED UNMATCHED`, `SEQUENCE CLASH`, `NO SIGNER`, `SESSION MARKER`, `PLACEHOLDER`, `HOLD MARKER`, `LIVE REQUIREMENT`, `BROAD CITATION`, `HAND EDITED`, `UNREVIEWED MERGE` and `BRANCH OVERLAP`.
 [Concepts](concepts.md#validation) says what each means.
 
 Then see where the item sits:
@@ -655,6 +656,20 @@ drover signoff F5 6 "ssh dev-guest-1 'systemctl is-active webapp' printed active
 
 `signoff` appends one row to the ledger and is sealed: it refuses inside any session drover launched, supervisor included, for the reason `accept` does.
 Once every `[operator]` requirement carries a row, merge the pull request and `drover finish` it, or let the next drive reach the merge and go through.
+
+### Certify
+
+Under [`[git] signoff`](configuration.md#git-signoff) the merge holds once more, after every hold above: drive parks the item `awaiting_certify` with the pull request open and emits `needs_operator` with the `certify` action.
+Read the diff, then certify the head you read and let `finish` merge it:
+
+```bash
+drover certify F5 --head 3f2a9c1
+drover finish F5
+```
+
+`certify` is sealed like `signoff`, and binds to the head of the open pull request, which the item's last passing review must have read.
+`finish` merges with the operator's `Signed-off-by` in the squash commit, and refuses a head the certification does not cover.
+Merging by hand skips the sign-off.
 
 ### Checks after finish
 

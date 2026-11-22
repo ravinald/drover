@@ -116,6 +116,12 @@ func (c *Config) layerGlobal(path string) error {
 		return fmt.Errorf("%s: git.merge_method is how one repository merges, so it is per-project: "+
 			"set it in that project's %s, not here", path, FileName)
 	}
+	for _, key := range []string{"signoff", "trailers"} {
+		if md.IsDefined("git", key) {
+			return fmt.Errorf("%s: git.%s says how one repository certifies what merges, so it is per-project: "+
+				"set it in that project's %s, not here", path, key, FileName)
+		}
+	}
 	if md.IsDefined("backlog", "mirror") {
 		return fmt.Errorf("%s: backlog.mirror publishes one project's item text, so it is per-project: "+
 			"set it in that project's %s, not here", path, FileName)
