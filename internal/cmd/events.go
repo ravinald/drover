@@ -482,7 +482,7 @@ func (es *eventSink) itemEvents(d DriveItem) {
 			switch {
 			case ev.Action == "auth_expired" && d.login != "":
 				run = d.login + ", then drover drive " + d.ID
-			case ev.Action == "signoff":
+			case ev.Action == "signoff", ev.Action == "certify":
 				run = d.signoff
 			case ev.Action == "decide_requirement":
 				run = d.decision

@@ -1097,6 +1097,7 @@ func mergeProject(t *testing.T) string {
 		"case \"$1 $2\" in\n"+
 		"  'pr list')   case \"$*\" in *'--state merged'*) "+
 		"if [ -e \"$DROVER_TEST_GH_LOG.merged\" ]; then echo '[{\"number\":7,\"mergedAt\":\"2026-10-07T00:00:00Z\"}]'; else echo '[]'; fi ;; "+
+		"*'--state open'*) echo \"${DROVER_TEST_GH_OPEN:-[]}\" ;; "+
 		"*) echo '[]' ;; esac ;;\n"+
 		"  'pr create') echo 'https://example.invalid/o/r/pull/7' ;;\n"+
 		"  'pr merge')  [ -n \"${DROVER_TEST_GH_QUEUES:-}\" ] || : > \"$DROVER_TEST_GH_LOG.merged\" ;;\n"+
@@ -1150,7 +1151,7 @@ func mergeProject(t *testing.T) string {
 			"echo work > implemented.txt\n"+
 			"git add implemented.txt\n"+
 			"git -c user.name=r -c user.email=r@example.invalid -c commit.gpgsign=false "+
-			"commit -q -m 'the run did something'\n"+
+			"commit -q ${DROVER_TEST_IMPL_SIGNOFF:+-s} -m 'the run did something'\n"+
 			"echo '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false}'\n")
 	// The item's verify command, which drive runs itself only on a tree a
 	// catch-up merged. It logs which verify command ran, where and on what, and fails when
@@ -5744,7 +5745,7 @@ func TestMergeMethodPicksTheFlag(t *testing.T) {
 
 			s := &session{cfg: &config.Config{Root: dir}}
 			s.cfg.Git.MergeMethod = method
-			if err := s.mergeBranch(t.Context(), "b1"); err != nil {
+			if err := s.mergeBranch(t.Context(), "1", "b1"); err != nil {
 				t.Fatal(err)
 			}
 			calls := ghCalls(t, log)

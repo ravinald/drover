@@ -194,6 +194,9 @@ var classified = map[string]classification{
 	"signoff": {group: groupRun, class: localWrite, who: operator,
 		because: "it certifies a requirement the session was told not to attempt, and no session certifies its own work",
 		effect:  "Appends one signoff row to {ledger}, for one [operator] requirement of the item. Writes nothing else and reaches no tracker."},
+	"certify": {group: groupRun, class: localWrite, who: operator,
+		because: "a Signed-off-by is a person certifying the Developer Certificate of Origin for one diff, and no session can certify for them",
+		effect:  "Reads the head of the item's open pull request with gh pr list and the item's last passing review from {ledger}, prints the certificate, the diffstat and the git identity it signs as, and appends one certify row to {ledger} naming that head and identity. Refuses unless [git] signoff = \"operator\". Merges nothing and writes to no tracker."},
 	"resolve": {group: groupRun, class: localWrite, who: either,
 		effect: "Appends one disposition row to {ledger}, for one issue the item's closes key names. --link widens that key first, reading the tracker the way link does and recording the body digest link records. Writes to no tracker: finish applies what this records." + linkRead},
 

@@ -275,6 +275,8 @@ wording, so never match on it.
                       holds no merge
   SEQUENCE CLASH      two tracked files share a number in a [numbered_files] glob, which
                       git merges without a conflict and drive refuses on a branch
+  NO SIGNER           [git] signoff is set and git has no identity to sign off as,
+                      so every drover certify refuses and every merge waits on one
   SESSION MARKER      a .drover/session is tracked by git, or one in the checkout or a
                       drive worktree names a drover process that is no longer
                       running, so it seals that tree for a session that has ended.
@@ -663,6 +665,7 @@ func (s *session) checkReport() CheckReport {
 	}
 
 	s.addConfig(add)
+	s.addSigner(add)
 	s.addSupervisor(add)
 	s.addTemplates(add)
 
@@ -1307,6 +1310,23 @@ func (s *session) addConfig(add func(Finding)) {
 		Detail: "run `drover config --diff`, which names each one at the value drover resolves it to",
 		Path:   config.FileName,
 	})
+}
+
+// addSigner reports a project under [git] signoff with no git identity to
+// sign as, found now rather than when a drive has parked every item on a
+// certify that cannot run.
+func (s *session) addSigner(add func(Finding)) {
+	if !s.cfg.Git.SignsOff() {
+		return
+	}
+	if _, err := s.committer(); err != nil {
+		add(Finding{
+			Kind:    "NO SIGNER",
+			Message: "[git] signoff = \"operator\" and no git identity is set to sign off as",
+			Detail:  "set user.name and user.email at the project root, or every merge waits on a drover certify that refuses",
+			Path:    config.FileName,
+		})
+	}
 }
 
 // addSupervisor reports a project that drives with actions waiting on a

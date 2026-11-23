@@ -52,6 +52,7 @@ Each command, as typed after `drover`.
 | `shelve`                | Moves a body to the shelf without recording it merged.                                                               |
 | `show`                  | Prints everything drover knows about one item.                                                                       |
 | `signoff`               | Records that the operator met one `[operator]` requirement.                                                          |
+| `certify`               | Records the operator's DCO sign-off for the head of an item's pull request, under `[git] signoff`.                   |
 | `skills`                | Reports which guides the backlog references and which are vendored.                                                  |
 | `split`                 | Scaffolds a new item for work the contract never named and adds it to this item's deps.                              |
 | `status`                | Prints every item, its state and its audit level.                                                                    |
@@ -159,6 +160,8 @@ A review result can also be the park.
 | `interrupted`             | A signal stopped the session.                                                                    |
 | `stale_citations`         | Lines the item cites are missing from the trunk.                                                 |
 | `awaiting_signoff`        | The pull request waits on an `[operator]` requirement.                                           |
+| `awaiting_certify`        | The pull request waits on the operator's `drover certify`, under `[git] signoff`.                |
+| `forged_signoff`          | A branch commit carries a `Signed-off-by` under `[git] signoff`, which only `certify` may write. |
 | `blocked_on_deps`         | The pull request waits on work a review split out.                                               |
 | `runner_fault`            | The runner failed on its service or account, not on the work, or a T3 Code run did not complete. |
 | `push_failed`             | The branch would not push.                                                                       |
@@ -314,6 +317,7 @@ The `kind` each `drover check` finding carries, in its table and in `check --jso
 | `MISSING REPORT`      | A ledger row names a saved report that does not exist.                                                |
 | `PROTECTED UNMATCHED` | A `[drive] protected_paths` glob matches no tracked file.                                             |
 | `SEQUENCE CLASH`      | Two tracked files share a number in a `[numbered_files]` glob.                                        |
+| `NO SIGNER`           | `[git] signoff` is set and git has no identity to sign off as.                                        |
 | `SESSION MARKER`      | A `.drover/session` is tracked, or names a drover pid that is not running.                            |
 | `BAD REGISTER`        | The follow-up list file exists and will not read.                                                     |
 | `NO LABEL`            | `[github] follow_up_label` names a label the repository does not define.                              |
@@ -430,6 +434,7 @@ The `[supervise]` keys, each an action drive or a supervisor may take, and the p
 | `decide_requirement`          | Decide a requirement a review found no run can meet as written.                           |
 | `move_requirement`            | Move a numbered requirement from one item to another.                                     |
 | `signoff`                     | Meet a requirement only a person can meet.                                                |
+| `certify`                     | Certify the DCO for the head a pull request would merge.                                  |
 | `enqueue`                     | Queue the next drive.                                                                     |
 | `pause_for_config_change`     | Pause a running drive to take a config change.                                            |
 | `cleanup_interrupted_drive`   | Remove the worktrees and branches an interrupted drive left.                              |
@@ -467,7 +472,7 @@ The `.drover.toml` sections, with the keys whose names carry drover vocabulary.
 | `[review] max_review_rounds` | How many times a review may send work back.                                                                                                                                                             |
 | `[intake]`                   | The `stop_marker` line that keeps a scaffold unrunnable.                                                                                                                                                |
 | `[agents]`                   | The generated instructions: `principles` and `addendum`.                                                                                                                                                |
-| `[git]`                      | Whether drover drives git, `merge_check` and `merge_method`.                                                                                                                                            |
+| `[git]`                      | Whether drover drives git, `merge_check`, `merge_method`, `signoff` and `trailers`.                                                                                                                     |
 | `[drive]`                    | Drive settings: `merge_gate`, `protected_paths`, `worktree_links`, `worktree_setup` and `max_load`.                                                                                                     |
 | `[drive] merge_gate`         | The merge gate: the command that decides whether a branch may merge.                                                                                                                                    |
 | `[drive] protected_paths`    | Globs a merge will not carry unattended.                                                                                                                                                                |

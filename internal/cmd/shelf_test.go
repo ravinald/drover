@@ -313,14 +313,24 @@ func captureErr(t *testing.T, fn func()) string {
 	return captureStream(t, &os.Stderr, fn)
 }
 
-// captureStream reads after the write end closes, which is safe only because
-// the output is far below the pipe buffer; anything larger would deadlock.
+// captureStream drains the pipe while fn runs. A command printing more than
+// the pipe buffer (64 KiB on macOS and Linux) blocks on its write until
+// something reads, and `drover agents` alone prints more than that.
 func captureStream(t *testing.T, stream **os.File, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
+	type read struct {
+		data []byte
+		err  error
+	}
+	done := make(chan read, 1)
+	go func() {
+		data, err := io.ReadAll(r)
+		done <- read{data, err}
+	}()
 	orig := *stream
 	*stream = w
 	fn()
@@ -328,11 +338,11 @@ func captureStream(t *testing.T, stream **os.File, fn func()) string {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	data, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
+	got := <-done
+	if got.err != nil {
+		t.Fatal(got.err)
 	}
-	return string(data)
+	return string(got.data)
 }
 
 // A shelf drover cannot open reads as no shelf at all, and every behavior the

@@ -1118,3 +1118,57 @@ func TestUsageLevelOffOverridesTheOtherLayer(t *testing.T) {
 		}
 	}
 }
+
+// [git] signoff makes every merge wait on the operator's certification. It is
+// refused beside a merge method that lands the sessions' own commits on the
+// trunk, and trailers are refused without it or when they name Signed-off-by,
+// which only certify writes.
+func TestSignoff(t *testing.T) {
+	for _, c := range []struct {
+		name, lines, refused string
+		signs                bool
+	}{
+		{name: "unset"},
+		{name: "operator", lines: `signoff = "operator"`, signs: true},
+		{name: "operator with trailers", lines: "signoff = \"operator\"\ntrailers = [\"Assisted-by: {runner}:{model}\"]", signs: true},
+		{name: "unknown", lines: `signoff = "bot"`, refused: `git.signoff is "bot"`},
+		{name: "merge method", lines: "signoff = \"operator\"\nmerge_method = \"merge\"", refused: `needs git.merge_method = "squash"`},
+		{name: "rebase method", lines: "signoff = \"operator\"\nmerge_method = \"rebase\"", refused: `needs git.merge_method = "squash"`},
+		{name: "trailers alone", lines: `trailers = ["Assisted-by: x"]`, refused: "git.trailers is set and git.signoff is not"},
+		{name: "not a trailer", lines: "signoff = \"operator\"\ntrailers = [\"Assisted by: x\"]", refused: "is not a git trailer"},
+		{name: "two lines", lines: "signoff = \"operator\"\ntrailers = [\"A: x\\nB: y\"]", refused: "is not a git trailer"},
+		{name: "forged", lines: "signoff = \"operator\"\ntrailers = [\"signed-off-by: Bot <b@x>\"]", refused: "only drover certify writes"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			body := minimal
+			if c.lines != "" {
+				body += "\n[git]\n" + c.lines + "\n"
+			}
+			root := write(t, map[string]string{FileName: body, "go.mod": "module x\n"})
+			cfg, err := Load(root)
+			if c.refused != "" {
+				if err == nil || !strings.Contains(err.Error(), c.refused) {
+					t.Fatalf("load = %v, want a refusal naming %q", err, c.refused)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Git.SignsOff() != c.signs {
+				t.Errorf("SignsOff = %v, want %v", cfg.Git.SignsOff(), c.signs)
+			}
+		})
+	}
+}
+
+// Who certifies a repository's merges is a fact about that repository.
+func TestSignoffIsRefusedInThePerUserFile(t *testing.T) {
+	for _, line := range []string{`signoff = "operator"`, `trailers = ["A: b"]`} {
+		withGlobal(t, "[git]\n"+line+"\n")
+		root := write(t, map[string]string{FileName: minimal, "go.mod": "module x\n"})
+		if _, err := Load(root); err == nil || !strings.Contains(err.Error(), "per-project") {
+			t.Errorf("a per-user %s loaded or was refused for another reason: %v", line, err)
+		}
+	}
+}

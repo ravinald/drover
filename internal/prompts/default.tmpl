@@ -273,6 +273,10 @@ Definition of done:
   exited 0 and a review has come back clean: one that exists says this branch may
   merge, so one opened by the session that wrote it would say that about work
   nobody has read.
+- Never add a Signed-off-by trailer, and never commit with -s. A sign-off is a
+  person certifying the Developer Certificate of Origin for a diff they read,
+  which no session can do for them; where the project wants one, the operator
+  adds it at merge with drover certify.
 - If {{ .Branch }} already carries commits, this is a correction pass: a review
   found a requirement unmet and the work came back rather than becoming
   somebody's issue. Commit onto that same branch.
